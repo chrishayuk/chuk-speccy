@@ -5,6 +5,9 @@
 pub enum BinOp {
     Add,
     Sub,
+    Mul,
+    Div,
+    Rem,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -25,6 +28,8 @@ pub enum Expr {
     Var(usize),
     /// A binary arithmetic op.
     Bin(BinOp, Box<Expr>, Box<Expr>),
+    /// A call to another function by name (args by the calling convention).
+    Call(String, Vec<Expr>),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -45,9 +50,11 @@ pub enum Stmt {
     While(Cond, Vec<Stmt>),
 }
 
-/// A lowered function: its locals, body, and optional tail-expression result.
+/// A lowered function. Parameters occupy local slots `0..params` (loaded from
+/// the calling-convention registers in the prologue).
 #[derive(Debug, Clone)]
 pub struct Func {
+    pub params: usize,
     pub n_locals: usize,
     pub body: Vec<Stmt>,
     pub ret: Option<Expr>,

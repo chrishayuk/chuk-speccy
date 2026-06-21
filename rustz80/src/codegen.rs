@@ -1,24 +1,76 @@
-//! Naive Z80 codegen (Stage 0). `HL` is the working accumulator, `DE` secondary;
-//! locals live in a fixed RAM scratch region (the "virtual register file") and
-//! expressions evaluate via the stack. Correct first — peephole/strength-reduce
-//! come in Stage 2.
+//! Naive Z80 codegen (Stage 1). `HL` is the working accumulator, `DE` secondary;
+//! locals (incl. parameters) live in a fixed RAM scratch region (the "virtual
+//! register file") and expressions evaluate via the stack. Functions follow the
+//! spec-07 calling convention; `*`/`/`/`%` call an appended micro-runtime.
+//! Correct first — peephole/strength-reduce come in Stage 2.
 
 use crate::ir::*;
+use std::collections::HashMap;
 
-/// Locals: slot `i` lives at `SCRATCH + i*2` (`u16` each).
+/// Locals: slot `i` lives at `SCRATCH + i*2` (`u16` each). Each function reuses
+/// the same region (Stage 1 has no recursion / overlapping live ranges yet).
 const SCRATCH: u16 = 0x9000;
 
-/// A tiny assembler with forward-reference label patching.
+/// `__mul16`: HL = HL * DE (low 16). Shift-add; clobbers AF/BC/DE.
+const MUL16: &[u8] = &[
+    0x44, 0x4D, // ld b,h ; ld c,l   (BC = multiplicand)
+    0x21, 0x00, 0x00, // ld hl,0     (product)
+    0x3E, 0x10, // ld a,16
+    0xCB, 0x3A, 0xCB, 0x1B, // srl d ; rr e   (DE >>= 1, bit -> CF)
+    0x30, 0x01, // jr nc,+1
+    0x09, // add hl,bc
+    0xCB, 0x21, 0xCB, 0x10, // sla c ; rl b    (BC <<= 1)
+    0x3D, 0x20, 0xF2, // dec a ; jr nz
+    0xC9, // ret
+];
+
+/// `__divmod16`: HL/DE -> HL=quotient, DE=remainder (divisor < 0x8000).
+/// Restoring division; clobbers AF/BC.
+const DIVMOD16: &[u8] = &[
+    0x44, 0x4D, // ld b,h ; ld c,l   (BC = dividend)
+    0x21, 0x00, 0x00, // ld hl,0     (remainder)
+    0x3E, 0x10, // ld a,16
+    0xCB, 0x21, 0xCB, 0x10, // sla c ; rl b   (BC <<= 1, MSB -> CF)
+    0xED, 0x6A, // adc hl,hl   (rem = rem*2 + bit)
+    0xED, 0x52, // sbc hl,de   (rem -= divisor)
+    0x30, 0x03, // jr nc,+3 -> set
+    0x19, // add hl,de   (restore)
+    0x18, 0x01, // jr +1 -> cont
+    0x0C, // set: inc c   (quotient bit)
+    0x3D, 0x20, 0xEF, // cont: dec a ; jr nz
+    0xEB, // ex de,hl    (DE = remainder)
+    0x60, 0x69, // ld h,b ; ld l,c   (HL = quotient)
+    0xC9, // ret
+];
+
 struct Asm {
     org: u16,
     code: Vec<u8>,
     labels: Vec<Option<u16>>,
-    fixups: Vec<(usize, usize)>, // (operand position in `code`, label id)
+    label_fixups: Vec<(usize, usize)>,
+    symbols: HashMap<String, u16>,
+    call_fixups: Vec<(usize, String)>,
+    needs_mul: bool,
+    needs_div: bool,
+    /// Slot offset for the function currently being emitted, so each function's
+    /// locals occupy a disjoint scratch region (correct for non-recursive calls;
+    /// real stack frames are a later stage).
+    base: u16,
 }
 
 impl Asm {
     fn new(org: u16) -> Self {
-        Asm { org, code: Vec::new(), labels: Vec::new(), fixups: Vec::new() }
+        Asm {
+            org,
+            code: Vec::new(),
+            labels: Vec::new(),
+            label_fixups: Vec::new(),
+            symbols: HashMap::new(),
+            call_fixups: Vec::new(),
+            needs_mul: false,
+            needs_div: false,
+            base: 0,
+        }
     }
     fn here(&self) -> u16 {
         self.org.wrapping_add(self.code.len() as u16)
@@ -38,71 +90,158 @@ impl Asm {
         let here = self.here();
         self.labels[l] = Some(here);
     }
-    /// Emit `opcode <addr:label>` (e.g. `JP`, `JP cc`).
     fn jump(&mut self, opcode: u8, l: usize) {
         self.byte(opcode);
-        self.fixups.push((self.code.len(), l));
-        self.word(0); // placeholder
+        self.label_fixups.push((self.code.len(), l));
+        self.word(0);
     }
-    fn finish(mut self) -> Vec<u8> {
-        for (pos, l) in &self.fixups {
-            let addr = self.labels[*l].expect("unplaced label");
-            self.code[*pos] = addr as u8;
-            self.code[*pos + 1] = (addr >> 8) as u8;
+    /// Emit `CALL name` (resolved to the symbol address at finish).
+    fn call(&mut self, name: &str) {
+        self.byte(0xCD);
+        self.call_fixups.push((self.code.len(), name.to_string()));
+        self.word(0);
+    }
+    fn define(&mut self, name: &str) {
+        let here = self.here();
+        self.symbols.insert(name.to_string(), here);
+    }
+    fn finish(mut self) -> (Vec<u8>, HashMap<String, u16>) {
+        // Append the micro-runtime routines that were used.
+        if self.needs_mul {
+            self.define("__mul16");
+            self.code.extend_from_slice(MUL16);
         }
-        self.code
+        if self.needs_div {
+            self.define("__divmod16");
+            self.code.extend_from_slice(DIVMOD16);
+        }
+        for (pos, l) in &self.label_fixups {
+            let a = self.labels[*l].expect("unplaced label");
+            self.code[*pos] = a as u8;
+            self.code[*pos + 1] = (a >> 8) as u8;
+        }
+        for (pos, name) in &self.call_fixups {
+            let a = *self.symbols.get(name).unwrap_or_else(|| panic!("unknown call target {name}"));
+            self.code[*pos] = a as u8;
+            self.code[*pos + 1] = (a >> 8) as u8;
+        }
+        (self.code, self.symbols)
     }
 }
 
-pub fn codegen(f: &Func, org: u16) -> Vec<u8> {
+fn slot_addr(base: u16, slot: usize) -> u16 {
+    SCRATCH + (base + slot as u16) * 2
+}
+
+/// Compile a whole program (functions laid out in order, micro-runtime appended).
+pub fn codegen_program(funcs: &[(String, Func)], org: u16) -> (Vec<u8>, HashMap<String, u16>) {
     let mut a = Asm::new(org);
-    for s in &f.body {
-        gen_stmt(&mut a, s);
+    let mut base = 0u16;
+    for (name, func) in funcs {
+        a.define(name);
+        a.base = base;
+        emit_func(&mut a, func);
+        base += func.n_locals as u16;
     }
-    if let Some(e) = &f.ret {
-        gen_expr(&mut a, e); // result in HL
-    }
-    a.byte(0xC9); // RET
     a.finish()
 }
 
-fn slot_addr(slot: usize) -> u16 {
-    SCRATCH + (slot as u16) * 2
+fn emit_func(a: &mut Asm, f: &Func) {
+    // Prologue: copy parameters from the convention registers into their slots.
+    for i in 0..f.params {
+        let addr = slot_addr(a.base, i);
+        match i {
+            0 => {
+                a.byte(0x22); // LD (addr), HL
+                a.word(addr);
+            }
+            1 => {
+                a.byte(0xED); // LD (addr), DE
+                a.byte(0x53);
+                a.word(addr);
+            }
+            2 => {
+                a.byte(0xED); // LD (addr), BC
+                a.byte(0x43);
+                a.word(addr);
+            }
+            _ => unreachable!(),
+        }
+    }
+    for s in &f.body {
+        gen_stmt(a, s);
+    }
+    if let Some(e) = &f.ret {
+        gen_expr(a, e);
+    }
+    a.byte(0xC9); // RET
 }
 
 /// Evaluate `e`, leaving the result in `HL`.
 fn gen_expr(a: &mut Asm, e: &Expr) {
     match e {
         Expr::Lit(n) => {
-            a.byte(0x21); // LD HL, nn
+            a.byte(0x21);
             a.word(*n);
         }
         Expr::Var(slot) => {
-            a.byte(0x2A); // LD HL, (addr)
-            a.word(slot_addr(*slot));
+            a.byte(0x2A);
+            let addr = slot_addr(a.base, *slot);
+            a.word(addr);
         }
         Expr::Bin(BinOp::Add, l, r) => {
             gen_expr(a, l);
             a.byte(0xE5); // PUSH HL
             gen_expr(a, r);
-            a.byte(0xD1); // POP DE   (DE = l)
-            a.byte(0x19); // ADD HL, DE  (HL = r + l)
+            a.byte(0xD1); // POP DE  (DE = l)
+            a.byte(0x19); // ADD HL, DE
         }
-        Expr::Bin(BinOp::Sub, l, r) => {
-            gen_sub(a, l, r); // HL = l - r
+        Expr::Bin(BinOp::Sub, l, r) => gen_sub(a, l, r),
+        Expr::Bin(BinOp::Mul, l, r) => {
+            gen_pair(a, l, r); // HL = r, DE = l
+            a.call("__mul16"); // HL = l * r
+            a.needs_mul = true;
+        }
+        Expr::Bin(BinOp::Div, l, r) => {
+            gen_pair(a, r, l); // HL = l, DE = r
+            a.call("__divmod16"); // HL = l / r
+            a.needs_div = true;
+        }
+        Expr::Bin(BinOp::Rem, l, r) => {
+            gen_pair(a, r, l); // HL = l, DE = r
+            a.call("__divmod16"); // DE = l % r
+            a.byte(0xEB); // EX DE, HL  -> HL = remainder
+            a.needs_div = true;
+        }
+        Expr::Call(name, args) => {
+            for arg in args {
+                gen_expr(a, arg);
+                a.byte(0xE5); // PUSH HL
+            }
+            const POP: [u8; 3] = [0xE1, 0xD1, 0xC1]; // HL, DE, BC
+            for i in (0..args.len()).rev() {
+                a.byte(POP[i]);
+            }
+            a.call(name);
         }
     }
 }
 
-/// `HL = left - right`, with flags from the subtraction (carry = borrow).
+/// Evaluate so that `HL = second`, `DE = first` (the operand layout the runtime
+/// and `SBC` want).
+fn gen_pair(a: &mut Asm, first: &Expr, second: &Expr) {
+    gen_expr(a, first);
+    a.byte(0xE5); // PUSH HL
+    gen_expr(a, second);
+    a.byte(0xD1); // POP DE  (DE = first)
+}
+
+/// `HL = left - right`, flags from the subtraction (carry = borrow).
 fn gen_sub(a: &mut Asm, left: &Expr, right: &Expr) {
-    gen_expr(a, right);
-    a.byte(0xE5); // PUSH HL  (right)
-    gen_expr(a, left);
-    a.byte(0xD1); // POP DE   (DE = right)
-    a.byte(0xB7); // OR A     (clear carry)
+    gen_pair(a, right, left); // HL = left, DE = right
+    a.byte(0xB7); // OR A   (clear carry)
     a.byte(0xED);
-    a.byte(0x52); // SBC HL, DE  (HL = left - right)
+    a.byte(0x52); // SBC HL, DE
 }
 
 fn gen_stmt(a: &mut Asm, s: &Stmt) {
@@ -110,16 +249,17 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
         Stmt::Assign(slot, e) => {
             gen_expr(a, e);
             a.byte(0x22); // LD (addr), HL
-            a.word(slot_addr(*slot));
+            let addr = slot_addr(a.base, *slot);
+            a.word(addr);
         }
         Stmt::If(cond, then, els) => {
             let else_l = a.label();
             let end_l = a.label();
-            gen_cond_skip(a, cond, else_l); // jump to else when cond is false
+            gen_cond_skip(a, cond, else_l);
             for s in then {
                 gen_stmt(a, s);
             }
-            a.jump(0xC3, end_l); // JP end
+            a.jump(0xC3, end_l);
             a.place(else_l);
             for s in els {
                 gen_stmt(a, s);
@@ -130,27 +270,26 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             let top = a.label();
             let end = a.label();
             a.place(top);
-            gen_cond_skip(a, cond, end); // exit loop when cond is false
+            gen_cond_skip(a, cond, end);
             for s in body {
                 gen_stmt(a, s);
             }
-            a.jump(0xC3, top); // JP top
+            a.jump(0xC3, top);
             a.place(end);
         }
     }
 }
 
-/// Emit a comparison and a conditional jump to `target` taken when the condition
+/// Emit a comparison and a conditional jump to `target`, taken when the condition
 /// is **false** (used to skip an `if`/`while` body).
 fn gen_cond_skip(a: &mut Asm, cond: &Cond, target: usize) {
-    // Pick the subtraction operands and the "false" jump opcode per comparison.
-    // After `SBC HL,DE`: carry = (left < right), zero = (left == right).
     const JP_NC: u8 = 0xD2;
     const JP_C: u8 = 0xDA;
     const JP_NZ: u8 = 0xC2;
     const JP_Z: u8 = 0xCA;
+    // After `SBC HL,DE`: carry = (left < right), zero = (left == right).
     let (left, right, jp_false) = match cond.cmp {
-        Cmp::Lt => (&cond.lhs, &cond.rhs, JP_NC), // a<b true on carry → skip if NC
+        Cmp::Lt => (&cond.lhs, &cond.rhs, JP_NC),
         Cmp::Ge => (&cond.lhs, &cond.rhs, JP_C),
         Cmp::Eq => (&cond.lhs, &cond.rhs, JP_NZ),
         Cmp::Ne => (&cond.lhs, &cond.rhs, JP_Z),

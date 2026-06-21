@@ -129,6 +129,83 @@ fn while_loops() {
 }
 
 #[test]
+fn mul_div_rem() {
+    // `*`/`/`/`%` go through the appended micro-runtime — checked against rustc.
+    check!({ 7u16 * 6u16 });
+    check!({
+        let a = 123u16;
+        let b = 45u16;
+        a * b
+    });
+    check!({ 1000u16 / 7u16 });
+    check!({ 1000u16 % 7u16 });
+    check!({
+        let a = 9u16;
+        let b = 4u16;
+        a / b * b + a % b
+    }); // == a
+    check!({
+        let mut s = 0u16;
+        let mut i = 1u16;
+        while i <= 5u16 {
+            s = s + i * i;
+            i = i + 1u16;
+        }
+        s
+    }); // 1+4+9+16+25 = 55
+}
+
+/// Run a multi-function program from its `entry` symbol.
+fn run_program(prog: &rustz80::Program, entry: &str) -> u16 {
+    let mut bus = Ram { mem: vec![0u8; 0x1_0000] };
+    let target = prog.symbols[entry];
+    bus.mem[0x7000] = 0xCD;
+    bus.mem[0x7001] = target as u8;
+    bus.mem[0x7002] = (target >> 8) as u8;
+    bus.mem[0x7003] = 0x76;
+    let org = rustz80::ORG as usize;
+    bus.mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
+    let mut cpu = z80::Cpu::new();
+    cpu.reset();
+    cpu.regs.pc = 0x7000;
+    cpu.regs.sp = 0xFFF0;
+    for _ in 0..1_000_000 {
+        if cpu.halted {
+            break;
+        }
+        cpu.step(&mut bus);
+    }
+    assert!(cpu.halted, "program did not return");
+    cpu.regs.hl()
+}
+
+#[test]
+fn function_calls() {
+    // 1 + 2 args + the calling convention (HL/DE/BC), checked against rustc.
+    fn add(a: u16, b: u16) -> u16 {
+        a + b
+    }
+    fn sq(x: u16) -> u16 {
+        x * x
+    }
+    fn f(a: u16, b: u16, c: u16) -> u16 {
+        a + b * c
+    }
+    fn main_host() -> u16 {
+        add(40, 2) + sq(5) - f(1, 2, 3)
+    }
+
+    let src = "
+        fn add(a: u16, b: u16) -> u16 { a + b }
+        fn sq(x: u16) -> u16 { x * x }
+        fn f(a: u16, b: u16, c: u16) -> u16 { a + b * c }
+        fn run() -> u16 { add(40u16, 2u16) + sq(5u16) - f(1u16, 2u16, 3u16) }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), main_host()); // 42 + 25 - 7 = 60
+}
+
+#[test]
 fn unsupported_is_an_error() {
     // f32 is outside the dialect → a clear compile error (the host-only signal).
     assert!(rustz80::compile_fn("fn f() -> u16 { let x = 1.5f32; 0u16 }").is_err());

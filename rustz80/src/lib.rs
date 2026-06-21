@@ -16,13 +16,33 @@ mod lower;
 
 pub use ir::Func;
 
+use std::collections::HashMap;
+
 /// Where compiled code is laid out (absolute jump targets are resolved against it).
 pub const ORG: u16 = 0x8000;
 
-/// Compile a single Rust `fn` (source string) to Z80 machine code laid out at
-/// [`ORG`], returning the function's `u16` result in `HL` and `RET`ting.
+/// A compiled program: the machine code (loaded at [`ORG`]) and the absolute
+/// address of each function by name.
+pub struct Program {
+    pub code: Vec<u8>,
+    pub symbols: HashMap<String, u16>,
+}
+
+/// Compile a multi-`fn` program. Functions are laid out in source order from
+/// [`ORG`]; calls resolve by name; the mul/div micro-runtime is appended if used.
+pub fn compile_program(src: &str) -> Result<Program, String> {
+    let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+    let funcs = lower::lower_program(&file)?;
+    let (code, symbols) = codegen::codegen_program(&funcs, ORG);
+    Ok(Program { code, symbols })
+}
+
+/// Compile a single Rust `fn` to Z80 machine code with its entry at [`ORG`]
+/// (result in `HL`, then `RET`). Convenience over [`compile_program`].
 pub fn compile_fn(src: &str) -> Result<Vec<u8>, String> {
     let item: syn::ItemFn = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+    let name = item.sig.ident.to_string();
     let func = lower::lower(&item)?;
-    Ok(codegen::codegen(&func, ORG))
+    let (code, _) = codegen::codegen_program(&[(name, func)], ORG);
+    Ok(code)
 }

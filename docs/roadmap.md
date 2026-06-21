@@ -7,8 +7,8 @@ across seven specs ([README index](./README.md)); this tracks delivery against t
 ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
-(Snake), and the `rustz80` compiler at **Stage 0** (Rust→Z80, differential-tested).
-Remaining: `rustz80` Stages 1+, extra frontends, the RL env, and the accuracy tail.
+(Snake), and the `rustz80` compiler at **Stage 1** (calling convention + mul/div, differential-tested).
+Remaining: `rustz80` Stage 1b+, extra frontends, the RL env, and the accuracy tail.
 
 ---
 
@@ -150,8 +150,13 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
 - [x] **Emulator is the oracle** — differential testing is the spine: each test block
   runs under rustc (host `fn`) *and* through `rustz80` onto our Z80, asserting they
   agree (one source, both compilers; `7*6` via repeated addition already matches).
-- [ ] **Stage 1**: `match`, `struct`/`enum`, the calling convention, the mul/div
-  micro-runtime → **compile Snake** and run it on real hardware.
+- [x] **Stage 1a** — the **calling convention** (params in `HL`/`DE`/`BC`, multi-`fn`
+  programs via `compile_program`, calls, per-function scratch regions) and a
+  **mul/div/rem micro-runtime** (`__mul16` shift-add, `__divmod16` restoring),
+  each differential-tested (`add`/`sq`/3-arg compose, sum-of-squares, `1000%7`).
+- [ ] **Stage 1b** — `match`, `struct`/`enum`, fixed arrays + real `u8`, then
+  **compile Snake** and run it on real hardware. (Recursion needs stack frames —
+  Stage 4.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -204,7 +209,7 @@ core M0–M8 ✓ ──▶ A. MCP server ✓ ──▶ E. RL env (free re-skin)
                       │
                       └──▶ B. SDK ✓ (trap ABI + host-composite SDK) ──▶ C. chatbot ✓
                                   │
-                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 0 ✓; the big, escapable bet
+                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 1a ✓; the big, escapable bet
    D. frontends (WASM / shaders / streamed)        ── parallel, any time
    Later. accuracy tail (real-time .tzx ✓ done)    ── parallel, as desired
 ```
