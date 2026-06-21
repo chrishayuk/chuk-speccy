@@ -35,7 +35,7 @@ pub struct Program {
 pub fn compile_program(src: &str) -> Result<Program, String> {
     let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
     let funcs = lower::lower_program(&file)?;
-    let (code, symbols) = codegen::codegen_program(&funcs, ORG);
+    let (code, symbols) = codegen::codegen_program(&funcs, ORG, None);
     Ok(Program { code, symbols })
 }
 
@@ -43,9 +43,14 @@ pub fn compile_program(src: &str) -> Result<Program, String> {
 /// (a function name, default `"main"`). The autoloader `CLEAR`s below [`ORG`],
 /// `LOAD`s the code there, and `RANDOMIZE USR`s the entry.
 pub fn compile_to_tap(src: &str, entry: &str, name: &str) -> Result<Vec<u8>, String> {
-    let prog = compile_program(src)?;
-    let addr = *prog.symbols.get(entry).ok_or_else(|| format!("no `{entry}` function"))?;
-    Ok(to_tap(&prog.code, ORG, addr, name))
+    let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+    let funcs = lower::lower_program(&file)?;
+    if !funcs.iter().any(|(n, _)| n == entry) {
+        return Err(format!("no `{entry}` function"));
+    }
+    // Emit a DI/EI trampoline at ORG and boot into it (`USR ORG`).
+    let (code, _) = codegen::codegen_program(&funcs, ORG, Some(entry));
+    Ok(to_tap(&code, ORG, ORG, name))
 }
 
 /// Compile a single Rust `fn` to Z80 machine code with its entry at [`ORG`]
@@ -54,6 +59,6 @@ pub fn compile_fn(src: &str) -> Result<Vec<u8>, String> {
     let item: syn::ItemFn = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
     let name = item.sig.ident.to_string();
     let func = lower::lower(&item)?;
-    let (code, _) = codegen::codegen_program(&[(name, func)], ORG);
+    let (code, _) = codegen::codegen_program(&[(name, func)], ORG, None);
     Ok(code)
 }
