@@ -8,7 +8,7 @@ ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonom
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
 (Snake), and the `rustz80` compiler at **Stage 1** (calling convention, mul/div, arrays — differential-tested).
-Remaining: `rustz80` Stage 1b+, extra frontends, the RL env, and the accuracy tail.
+Remaining: `rustz80` Stage 1c+ (struct/enum/match → Snake), extra frontends, the RL env, and the accuracy tail.
 
 ---
 
