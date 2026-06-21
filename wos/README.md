@@ -6,7 +6,8 @@ A small, standalone host utility (no dependency on the emulator crates) shared b
 the `speccy-gui` CLI and — via `zxspec_py` — the MCP server, so there's one
 fetcher. Metadata comes from the **ZXInfo API** (`api.zxinfo.dk`, the programmatic
 World of Spectrum / Spectrum Computing backend); files come from the
-`worldofspectrum.net` mirror, unzipped on the way out.
+`spectrumcomputing.co.uk` mirror (with `worldofspectrum.net` as a fallback),
+unzipped on the way out.
 
 ```rust
 let game = wos::fetch("Jet Set Willy")?;   // best loadable build for the title
@@ -19,9 +20,9 @@ let game = wos::fetch("Jet Set Willy")?;   // best loadable build for the title
 
 Notes:
 
-- The core loads `.tap` (ROM trap fast-load), `.z80`, and `.sna` — **not `.tzx`**
-  (custom/turbo loaders need real-time tape loading). `fetch` prefers authentic
-  tape, then snapshots, and reports `.tzx`-only titles as unsupported.
+- The core loads `.tap`/`.z80`/`.sna` instantly and `.tzx` in real time (the
+  signal-level loader, for turbo/custom loaders). `fetch` prefers the instant
+  formats, then `.tzx`.
 - **48K builds are preferred** over 128K/+2/+3 (the core is a 48K).
 - A title-similarity guard keeps `"Treasure Island Dizzy"` from falling back to
   `"Treasure Island"`.

@@ -50,7 +50,13 @@ fn main() {
             Ok(game) => {
                 let mut spec = Spectrum::new_48k(&rom);
                 load(&mut spec, &game.format, &game.data);
-                // Let the loader/title settle.
+                // Real-time tapes (.tzx) load over many frames; run until the
+                // signal is exhausted, then let the title settle.
+                let mut f = 0;
+                while spec.tape_playing() && f < 80_000 {
+                    spec.run_frame();
+                    f += 1;
+                }
                 for _ in 0..700 {
                     spec.run_frame();
                 }
@@ -77,17 +83,28 @@ fn main() {
     println!("\n{ok}/{} produced a non-blank screen", titles.len());
 }
 
-/// Load a game by format (`.tap` boots + trap-loads; snapshots load directly).
+/// Load a game by format (`.tap` boots + trap-loads; `.tzx` loads real-time via
+/// the tape signal; snapshots load directly).
 fn load(spec: &mut Spectrum, fmt: &str, data: &[u8]) {
-    if fmt == "tap" {
-        for _ in 0..250 {
-            spec.run_frame();
+    match fmt {
+        "tap" => {
+            for _ in 0..250 {
+                spec.run_frame();
+            }
+            if spec.load_tap(data).is_ok() {
+                spec.autoload_tape();
+            }
         }
-        if spec.load_tap(data).is_ok() {
+        "tzx" => {
+            for _ in 0..250 {
+                spec.run_frame();
+            }
             spec.autoload_tape();
+            let _ = spec.play_tape("tzx", data);
         }
-    } else {
-        let _ = spec.load_snapshot(fmt, data);
+        _ => {
+            let _ = spec.load_snapshot(fmt, data);
+        }
     }
 }
 

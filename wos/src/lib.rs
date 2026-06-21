@@ -14,10 +14,13 @@ use std::time::Duration;
 
 /// ZXInfo metadata API.
 const API: &str = "https://api.zxinfo.dk/v3";
-/// File mirror serving the archive's `/pub/sinclair/...` paths.
-const MIRROR: &str = "https://worldofspectrum.net";
-/// Formats the core can load, best first (authentic tape, then snapshots).
-const FORMATS: [&str; 3] = ["tap", "z80", "sna"];
+/// File mirrors, tried in order. Spectrum Computing serves both the legacy
+/// `/pub/sinclair/...` paths and the newer `/zxdb/sinclair/entries/...` ones;
+/// World of Spectrum is a fallback for the legacy layout.
+const MIRRORS: [&str; 2] = ["https://spectrumcomputing.co.uk", "https://worldofspectrum.net"];
+/// Formats the core can load, best first: instant trap/snapshot loads, then
+/// `.tzx` (real-time, signal-level — needed for turbo/custom loaders, slower).
+const FORMATS: [&str; 4] = ["tap", "z80", "sna", "tzx"];
 
 /// A search hit (metadata only).
 #[derive(Debug, Clone)]
@@ -113,12 +116,9 @@ pub fn fetch(query: &str) -> Result<Game, Error> {
     let agent = agent();
     let entries = search_with(&agent, query, 10)?;
     let want = normalize(query);
-    let mut saw_tzx = false;
 
     for e in entries.iter().filter(|e| title_matches(&e.title, &want)) {
-        let (cands, tzx) = candidates(&agent, &e.id)?;
-        saw_tzx |= tzx;
-        for (_, ext, path) in cands {
+        for (_, ext, path) in candidates(&agent, &e.id)? {
             if let Ok(data) = download_and_extract(&agent, &path, &ext) {
                 return Ok(Game {
                     title: e.title.clone(),
@@ -131,27 +131,21 @@ pub fn fetch(query: &str) -> Result<Game, Error> {
         }
     }
 
-    let hint = if saw_tzx {
-        " (matches exist only as .tzx, which needs real-time tape loading — not yet supported)"
-    } else {
-        ""
-    };
     Err(Error::NotFound(format!(
-        "no .tap/.z80/.sna found on World of Spectrum for {query:?}{hint}"
+        "no loadable file (.tap/.z80/.sna/.tzx) found on World of Spectrum for {query:?}"
     )))
 }
 
 /// A loadable file candidate: `(format_rank, ext, archive_path)`, lower rank first.
 type Candidate = (usize, String, String);
 
-/// List a game's loadable files, best first. The bool flags whether any `.tzx`
-/// was present (for a better not-found message).
-fn candidates(agent: &ureq::Agent, id: &str) -> Result<(Vec<Candidate>, bool), Error> {
+/// List a game's loadable files, best first (by format preference, 48K builds
+/// ahead of 128K/+2/+3).
+fn candidates(agent: &ureq::Agent, id: &str) -> Result<Vec<Candidate>, Error> {
     let url = format!("{API}/games/{id}");
     let v = get_json(agent, &url)?;
 
     let mut out = Vec::new();
-    let mut saw_tzx = false;
     if let Some(rels) = v["_source"]["releases"].as_array() {
         for rel in rels {
             if let Some(files) = rel["files"].as_array() {
@@ -161,7 +155,6 @@ fn candidates(agent: &ureq::Agent, id: &str) -> Result<(Vec<Candidate>, bool), E
                         None => continue,
                     };
                     let lower = path.to_ascii_lowercase();
-                    saw_tzx |= lower.ends_with(".tzx.zip") || lower.ends_with(".tzx");
                     for (rank, ext) in FORMATS.iter().enumerate() {
                         if lower.ends_with(&format!(".{ext}.zip")) || lower.ends_with(&format!(".{ext}")) {
                             // Bias toward 48K builds: the core is a 48K, so a
@@ -175,27 +168,39 @@ fn candidates(agent: &ureq::Agent, id: &str) -> Result<(Vec<Candidate>, bool), E
         }
     }
     out.sort_by_key(|(key, _, _)| *key);
-    Ok((out.into_iter().map(|((rank, _), ext, path)| (rank, ext, path)).collect(), saw_tzx))
+    Ok(out.into_iter().map(|((rank, _), ext, path)| (rank, ext, path)).collect())
 }
 
-/// Download `path` from the mirror and extract the inner `.{ext}` file. The
+/// Download `path` (trying each mirror) and extract the inner `.{ext}` file. The
 /// archive serves files zipped; a few are stored uncompressed.
 fn download_and_extract(agent: &ureq::Agent, path: &str, ext: &str) -> Result<Vec<u8>, Error> {
-    let url = format!("{MIRROR}{}", pct(path, true));
+    let encoded = pct(path, true);
+    let mut last = Error::NotFound(format!("no mirror served {path}"));
+    for base in MIRRORS {
+        match download(agent, &format!("{base}{encoded}")) {
+            Ok(bytes) => {
+                return if path.to_ascii_lowercase().ends_with(".zip") {
+                    extract_from_zip(&bytes, ext)
+                } else {
+                    Ok(bytes)
+                };
+            }
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, Error> {
     let mut bytes = Vec::new();
     agent
-        .get(&url)
+        .get(url)
         .call()
         .map_err(|e| Error::Http(e.to_string()))?
         .into_reader()
         .read_to_end(&mut bytes)
         .map_err(|e| Error::Http(e.to_string()))?;
-
-    if url.to_ascii_lowercase().ends_with(".zip") {
-        extract_from_zip(&bytes, ext)
-    } else {
-        Ok(bytes)
-    }
+    Ok(bytes)
 }
 
 fn extract_from_zip(bytes: &[u8], ext: &str) -> Result<Vec<u8>, Error> {

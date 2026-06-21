@@ -118,12 +118,22 @@ class Supervisor:
 
     @staticmethod
     def _load_media_bytes(m: "zxspec_py.Machine", fmt: str, data: bytes) -> None:
-        """Load a game by format. `.tap` boots to the prompt, inserts the tape and
-        LOAD ""s it (the ROM trap fast-loads); snapshots load directly."""
+        """Load a game by format. `.tap` trap-loads instantly; `.tzx` plays the
+        tape *signal* in real time (turbo/custom loaders), run until it finishes;
+        snapshots load directly."""
         if fmt == "tap":
             m.run_frames(250)
             m.autoload_tape(data)
             m.run_frames(300)
+        elif fmt == "tzx":
+            m.run_frames(250)
+            m.type_load()  # LOAD "" — the loader reads the signal
+            m.play_tape("tzx", data)
+            frames = 0
+            while m.tape_playing() and frames < 80_000:
+                m.run_frames(200)
+                frames += 200
+            m.run_frames(200)
         else:
             m.load_snapshot(fmt, data)
 

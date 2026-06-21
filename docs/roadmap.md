@@ -71,8 +71,8 @@ restructured into the agent/admin two-endpoint model — see **A2**.
   unzip a loadable `.tap`/`.z80`/`.sna`. Shared Rust **`wos`** crate, so it works
   on the **CLI** (`speccy-gui <rom> "Jet Set Willy"`) *and* the MCP (admin
   `search_games`/`load_game`). 48K-build preference; `.tzx`/custom-loader games
-  are reported as needing real-time tape loading (see the accuracy tail). The
-  `speccy-library` bin headlessly verifies a set of classics in one command.
+  load in **real time** (see the accuracy tail), so the Dizzy series etc. work.
+  The `speccy-library` bin headlessly verifies a set of classics in one command.
 - [ ] `set_display(preset)` — expose the `display` crate themes so an agent can re-theme + screenshot.
 - [x] **Disassembler** — `z80::disassemble` (a pure read-only mirror of the
   decoder: prefixes, `(IX+d)`, DDCB, ED block ops + undocumented slots; absolute
@@ -121,7 +121,11 @@ Deliberately deferred; affects timing-precise demos, not games.
 - [ ] I/O-port contention (the 4-case ULA/high-byte timing model).
 - [ ] Floating-bus reads.
 - [ ] Per-T-state / per-scanline video (mid-frame writes → multicolour demos).
-- [ ] Real-time tape edge loading + `.tzx` (currently trap-load `.tap` only).
+- [x] **Real-time tape edge loading + `.tzx`** — `TapeSignal` plays the tape as a
+  pulse stream into the EAR line so turbo/custom loaders work (the trap fast-load
+  stays for standard `.tap`). TZX common blocks (standard/turbo/tone/pulse/data/
+  pause/loops). Proven end-to-end; the Dizzy games load. *(Direct-recording /
+  CSW / generalised TZX blocks not yet handled.)*
 - [ ] 128K model: memory paging + AY-3-8912 sound (memory layer is written bank-ready).
 
 ---

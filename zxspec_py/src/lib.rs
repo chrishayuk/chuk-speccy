@@ -72,6 +72,25 @@ impl Machine {
         Ok(())
     }
 
+    /// Type `LOAD ""` (without inserting a `.tap`) — for real-time tape loading
+    /// where the signal, not the ROM trap, feeds the loader.
+    fn type_load(&mut self) {
+        self.spec.autoload_tape();
+    }
+
+    /// Start **real-time** tape playback from `.tap`/`.tzx` bytes (`fmt`). Drives
+    /// the EAR line so turbo/custom loaders work; run frames to load it.
+    fn play_tape(&mut self, fmt: &str, data: &[u8]) -> PyResult<()> {
+        self.spec
+            .play_tape(fmt, data)
+            .map_err(|e| PyValueError::new_err(format!("{e:?}")))
+    }
+
+    /// True while a real-time tape is still playing.
+    fn tape_playing(&self) -> bool {
+        self.spec.tape_playing()
+    }
+
     // --- execution -----------------------------------------------------------
 
     /// Execute `count` instructions.

@@ -419,21 +419,37 @@ fn push_audio(ring: &Audio, samples: Vec<f32>) {
     }
 }
 
-/// Load a game by format. `.tap` boots to the BASIC prompt, inserts the tape and
-/// `LOAD ""`s it (the ROM trap fast-loads the blocks while the window runs);
-/// snapshots (`.sna`/`.z80`) load directly into a running machine.
+/// Load a game by format. `.tap` boots to the prompt and `LOAD ""`s it via the
+/// ROM trap (instant); `.tzx` `LOAD ""`s it and plays the tape *signal* in real
+/// time (turbo/custom loaders — watch it load); snapshots load directly.
 fn load_media(spec: &mut Spectrum, fmt: &str, data: &[u8]) {
-    if fmt == "tap" {
-        for _ in 0..250 {
-            spec.run_frame();
+    match fmt {
+        "tap" => {
+            for _ in 0..250 {
+                spec.run_frame();
+            }
+            if let Err(e) = spec.load_tap(data) {
+                eprintln!("tape load failed: {e:?}");
+            } else {
+                spec.autoload_tape();
+            }
         }
-        if let Err(e) = spec.load_tap(data) {
-            eprintln!("tape load failed: {e:?}");
-        } else {
-            spec.autoload_tape();
+        "tzx" => {
+            for _ in 0..250 {
+                spec.run_frame();
+            }
+            spec.autoload_tape(); // type LOAD "" — the loader reads the signal
+            if let Err(e) = spec.play_tape("tzx", data) {
+                eprintln!("tape load failed: {e:?}");
+            } else {
+                eprintln!("loading from tape in real time…");
+            }
         }
-    } else if let Err(e) = spec.load_snapshot(fmt, data) {
-        eprintln!("snapshot load failed: {e:?}");
+        _ => {
+            if let Err(e) = spec.load_snapshot(fmt, data) {
+                eprintln!("snapshot load failed: {e:?}");
+            }
+        }
     }
 }
 

@@ -1,7 +1,8 @@
-//! `.tap` tape support via ROM-trap fast loading. Rather than emulating the
-//! tape's edge timing, we trap the 48K ROM's `LD-BYTES` routine at `0x0556` and
-//! splat the next block straight into memory (`docs/01-core-emulator-spec.md`
-//! §7). Real-time edge loading is a later refinement.
+//! Tape support, two ways. **Fast load** (`Tape`): trap the 48K ROM's `LD-BYTES`
+//! routine at `0x0556` and splat the next block straight into memory — instant,
+//! standard-loader `.tap` only (`docs/01-core-emulator-spec.md` §7). **Real-time
+//! load** (`TapeSignal`, below): play the tape as an edge signal into the EAR
+//! line so a game's own turbo/custom loader works (`.tap`/`.tzx`).
 
 use crate::snapshot::SnapshotError;
 
