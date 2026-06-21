@@ -14,6 +14,7 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 | [03 — SDK / Developer Kit Spec](./03-sdk-spec.md) | The fidelity dial (pure vs hybrid), z88dk front-end, L0–L3 layers, and the `ED 70` **trap ABI** that lets Z80 apps escape to the host. |
 | [04 — Spectrum-Native Chat / Agent](./04-spectrum-native-chat-spec.md) | L3 showpiece: a 32-column chatbot/agent where the Z80 is a dumb terminal and `chuk-llm` + `chuk-tool-processor` + MCP servers do the thinking. Two decoupled clocks + a typed-event poll. |
 | [05 — Frontends & Display Pipeline](./05-frontends-display-spec.md) | Multi-head (desktop/web/TUI/MCP) over one core, and the shared theme + filter pipeline (palette remap / duotone ramp / effect chain). One `DisplayConfig`, every head. |
+| [06 — Roles, Sessions & Autonomy](./06-roles-autonomy-spec.md) | Admin vs agent capability tiers, implicit per-session machines, and the autonomy plane (always-on recording, snapshot timeline, reaping) — agents as pure consumers. |
 | [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8) and what's next (MCP, SDK, chatbot, frontends, accuracy tail). |
 
 ## Implementation status
@@ -21,12 +22,19 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 The **emulator core is feature-complete (M0–M8)** — a cycle-accurate, **ZEXALL-clean
 (67/67)** 48K Spectrum: Z80, ULA video + contention, keyboard, beeper, `.sna`/`.z80`
 snapshots, and `.tap` tape — with two heads (terminal + native pixel window) over
-one themeable `display` pipeline. Try it:
+one themeable `display` pipeline, plus a **World of Spectrum** game fetcher and an
+MCP server. Try it:
 
 ```
+# A local file…
 cargo run --release --bin speccy-gui -- testroms/48.rom testroms/manic.z80   # pixel-perfect + sound
+# …or fetch a game by name from World of Spectrum:
+cargo run --release --bin speccy-gui -- testroms/48.rom "Skool Daze"          # add `fullscreen` to project it
 cargo run --release --bin speccy     -- testroms/48.rom testroms/manic.z80 terminal   # themed TUI
 ```
+
+The MCP server (search/load games, drive + record sessions) lives in
+[`../chuk-mcp-spectrum`](../chuk-mcp-spectrum/README.md).
 
 The milestone-by-milestone breakdown, test inventory, and remaining tracks (MCP
 server, SDK, chatbot showpiece, web/WASM head, RL env, accuracy long tail) live in

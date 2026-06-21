@@ -149,6 +149,8 @@ Thin `@tool` wrappers over the registry + `Machine`. Grouped:
 | | `read_screen_text(machine_id)` | text | menu/BASIC scrape |
 | Interact | `press_keys(machine_id, keys, frames=2)` | ok | matrix-level |
 | | `type_text(machine_id, text)` | ok | sequences keypresses |
+| Library | `search_games(query)` | hits | World of Spectrum (ZXInfo API) |
+| | `load_game(machine_id, query)` | ok | fetch + load a game by title |
 | Debug | `set_breakpoint(machine_id, addr)` | ok | |
 | | `write_memory(machine_id, addr, data_b64)` | ok | poke / cheats |
 | | `set_register(machine_id, reg, value)` | ok | |

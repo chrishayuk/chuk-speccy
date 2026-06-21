@@ -79,6 +79,8 @@ pub struct Ula {
 
     /// Precomputed per-frame contention stalls, indexed by frame T-state.
     contention: Vec<u8>,
+    /// When false, contention is bypassed (for A/B timing comparisons).
+    pub contention_enabled: bool,
 }
 
 impl Ula {
@@ -95,6 +97,7 @@ impl Ula {
             audio_edges: Vec::new(),
             audio_out: Vec::new(),
             contention: build_contention_table(),
+            contention_enabled: true,
         }
     }
 
@@ -109,7 +112,7 @@ impl Ula {
     /// display-fetch windows; everything else is 0.
     #[inline]
     pub fn contention(&self, addr: u16) -> u32 {
-        if (0x4000..0x8000).contains(&addr) {
+        if self.contention_enabled && (0x4000..0x8000).contains(&addr) {
             let idx = (self.tstate % TSTATES_PER_FRAME) as usize;
             self.contention[idx] as u32
         } else {

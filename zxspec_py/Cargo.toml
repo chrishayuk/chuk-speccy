@@ -1,0 +1,21 @@
+# PyO3 bindings exposing the `spectrum` core to Python as a `Machine` class.
+# Standalone (not a member of the emulator workspace) so the cdylib + pyo3 link
+# flags don't affect `cargo test --workspace`. Built with maturin.
+[package]
+name = "zxspec_py"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace]
+# Own workspace root, independent of the emulator workspace above.
+
+[lib]
+name = "zxspec_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+spectrum = { path = "../spectrum" }
+# World of Spectrum search + download (shared with the frontend CLI).
+wos = { path = "../wos" }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py311"] }

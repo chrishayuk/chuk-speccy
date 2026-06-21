@@ -38,29 +38,55 @@ theme is a thin consumer of those; adding one is zero core change.
 | **M4** | ULA video + keyboard | indexed framebuffer (raw obs), standalone **`display`** crate (themes: palette remap / duotone ramp + scanline effect), 8×5 matrix + host-key table | typing `PRINT 6*7` → `42` |
 | **M5** | Snapshot loading | `.sna` load **+ save** (checkpoint primitive), `.z80` v1/v2/v3 RLE; `read_/write_memory` | runs **Manic Miner** (real `.z80`) |
 | **M6** | Beeper audio | ULA records port-0xFE bit-4 edges, box-filters to host samples (`enable_/drain_audio`); `cpal` ring-buffer in the window head | Manic Miner **title tune** oscillates |
-| **M7** | Contention | precomputed `[u8;69888]` stall table on bottom-16K accesses + M1 fetch; ZEXALL still clean | contended vs clean T-state delta |
+| **M7** | Contention | precomputed `[u8;69888]` stall table on bottom-16K accesses + M1 fetch; ZEXALL still clean; runtime `contention_enabled` toggle for A/B timing | contended vs clean T-state delta |
 | **M8** | `.tap` tape | block parser + ROM `LD-BYTES` trap (`0x0556`) fast-load; both heads accept `.tap` | auto-running `BORDER` tape via real ROM |
 
 ### Heads (spec 05) shipped alongside
 - **Terminal (TUI):** live 50 Hz loop, truecolor **quadrant** block glyphs (2×2 px/char, exact per-cell colour), aspect-correct fractional sampling (queries `CSI 16 t`), opt-in sextant, ASCII fallback for pipes. Themes: `authentic`/`dark`/`light`/`terminal`/`amber`/`gameboy`.
-- **Native window (`speccy-gui`, minifb):** pixel-perfect 256×192, integer-scaled, real key up/down, cpal sound.
+- **Native window (`speccy-gui`, winit + softbuffer):** pixel-perfect 256×192, aspect-correct + letterboxed, real key up/down, cpal sound with **audio-driven frame pacing** (emulation refills the ring to ~3 frames, so it tracks the real-time audio clock instead of the jittery video refresh — no underrun, stable beeper pitch). A real app shell with **native menus** (muda): a *View* menu / F11 / the macOS green button toggle **full screen** at runtime (any display), and an *Audio* menu switches the **output device live** (e.g. an AirPlay/TV speaker when projecting). Accepts a **game title** (fetched from World of Spectrum) as well as a file.
 
 ### Test inventory
 - `z80-tests`: 32 unit + ZEX harness (`run_zex`, CP/M BDOS trap).
 - `spectrum`: 6 unit (incl. contention, beeper, `.sna` round-trip, `.tap` trap) + 4 ROM-backed (`boots_to_copyright`, `types_basic_and_evaluates`, `title_music_makes_sound`, `tap_loads_and_autoruns_basic`).
 - `display`: 4 unit (theme/effect/border).
 - All warning-clean. ROM-backed tests gated behind `SPECTRUM_ROM` / `SPECTRUM_GAME` env (ROMs gitignored under `testroms/`).
+- Diagnostics: `spectrum --example audiodiag` reports the beeper's dominant pitch per window (contention on vs off). Finding: contention has negligible effect on beeper pitch; the toggle stays as an A/B aid, not a fix.
 
 ---
 
 ## Next — layers on top
 
-### A. MCP server (spec 02) — *recommended next*
-The core now loads, runs, observes, and is driven, so every tool is a thin wrapper.
-- [ ] `zxspec_py` PyO3 `#[pyclass] Machine` over the `spectrum` crate (maturin wheel).
-- [ ] `chuk-mcp-spectrum`: session registry + `@tool`s — `create_machine`, `run_frames`, `step`, `get_registers`, `read_memory`, `write_memory`, `screenshot` (PNG content), `read_screen_text`, `press_keys`, `type_text`, `save_/load_snapshot`, `disassemble`, breakpoints, `trace`.
-- [ ] `set_display(preset)` — reuse the `display` crate so an agent can re-theme + screenshot.
+### A. MCP server (spec 02) — **built**
+The core loads, runs, observes, is driven, and records — every tool is a thin
+wrapper. Lives in `../zxspec_py` (PyO3) + `../chuk-mcp-spectrum` (server, on
+`chuk-mcp-server`). The tool catalog and recording were first built flat, then
+restructured into the agent/admin two-endpoint model — see **A2**.
+- [x] `zxspec_py` PyO3 `Machine` over the `spectrum` crate (maturin wheel, abi3-py311):
+  registers/memory, screen (rgba/indexed/text), step/run/run_until, snapshots
+  (`.sna`/`.z80`), tape, keyboard (`press`/`type_text`), audio, and **session
+  recording** (frames captured at the `run_frame` chokepoint in the core).
+- [x] **Recording → MP4** (H.264 + AAC) with beeper sound, encoded host-side
+  (imageio/ffmpeg), downloadable.
+- [x] **Game library** — search **World of Spectrum** (ZXInfo API) and download +
+  unzip a loadable `.tap`/`.z80`/`.sna`. Shared Rust **`wos`** crate, so it works
+  on the **CLI** (`speccy-gui <rom> "Jet Set Willy"`) *and* the MCP (admin
+  `search_games`/`load_game`). 48K-build preference; `.tzx`/custom-loader games
+  are reported as needing real-time tape loading (see the accuracy tail). The
+  `speccy-library` bin headlessly verifies a set of classics in one command.
+- [ ] `set_display(preset)` — expose the `display` crate themes so an agent can re-theme + screenshot.
+- [ ] `disassemble` / `trace` / breakpoints (need a disassembler in the core first).
 - [ ] Decision to lock: native `serialize_full()`/`deserialize_full()` for exact RL/debugger reset fidelity (vs lossy `.sna`/`.z80`). See [MCP spec §10](./02-mcp-server-layer-spec.md#10-open-decision-pyo3-boundary).
+
+### A2. Roles & autonomy (spec 06) — **built** (on `chuk-mcp-server`)
+Rebuilt the MCP layer on `chuk-mcp-server` (pydantic-native): **two endpoints**
+over one shared `Supervisor`.
+- [x] **Two endpoints** — `agent` (8 tools, observe + drive, implicit session) and `admin` (20 tools, everything). Small agent surface = little context.
+- [x] **Implicit session** via `get_session_id()`; agent tools take no `machine_id`, admin tools take explicit `session_id` across all sessions.
+- [x] **Autonomy plane** (`Supervisor`): provision-per-session, **record-by-default** → MP4 (H.264 + AAC) with snapshot-cadence checkpoints (`restore_snapshot` to rewind), idle reaping. All env-configurable.
+- [x] **Artifacts → VFS** when an artifact store is configured (downloadable), local-file + base64 fallback. `read_only_hint`/`destructive_hint` on every tool.
+- [ ] **Event-based snapshots** (watch a score/lives address) in addition to time-based.
+- [ ] **Wall-clock cadence** for the real-time path.
+- [ ] **Cross-process live control** (proxy) — today separate processes share metadata/artifacts via the framework's multi-server store; co-host (`serve.py`) for shared live machines.
 
 ### B. SDK / developer kit (spec 03)
 - [ ] **L0** toolchain: one-command source → `.tap` → run-in-emulator; PNG→Spectrum asset pipeline.

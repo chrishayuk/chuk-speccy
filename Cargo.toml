@@ -1,8 +1,9 @@
 # chuk-speccy workspace — see docs/01-core-emulator-spec.md §2 for the layout.
 # Dependency arrow is strictly: frontend -> spectrum -> z80.
+# `wos` is a standalone host utility (no emulator deps) used by the frontend CLI.
 [workspace]
 resolver = "2"
-members = ["z80", "spectrum", "display", "frontend", "z80-tests"]
+members = ["z80", "spectrum", "display", "frontend", "z80-tests", "wos"]
 
 [workspace.package]
 edition = "2021"

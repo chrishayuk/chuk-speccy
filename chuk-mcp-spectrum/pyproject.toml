@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chuk-mcp-spectrum"
+version = "0.1.0"
+description = "MCP server exposing a headless ZX Spectrum emulator as LLM-drivable tools (agent + admin endpoints)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "chuk-mcp-server>=0.25",
+    "pydantic>=2.11",
+    "pillow>=10.0.0",
+    "numpy>=1.24",
+    "imageio[ffmpeg]>=2.31",
+    "zxspec-py",
+]
+
+[project.scripts]
+chuk-mcp-spectrum-agent = "chuk_mcp_spectrum.agent:main"
+chuk-mcp-spectrum-admin = "chuk_mcp_spectrum.admin:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3.5", "pytest-asyncio>=0.23"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["chuk_mcp_spectrum*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+asyncio_mode = "auto"

@@ -106,7 +106,7 @@ Themes apply to games, the BASIC prompt, and the chatbot alike.
 
 | Head | Cadence | Theme stage | Effects | How it renders |
 |---|---|---|---|---|
-| **Desktop** (wgpu) | live 50 Hz | yes | all (shaders) | textured quad + fragment shaders; `cpal` audio |
+| **Desktop** (winit + softbuffer) ✓ | live 50 Hz | yes | theme stage (raster) | CPU framebuffer, aspect-correct letterboxed blit; `cpal` audio. *(GPU/shader effects are the future wgpu upgrade.)* |
 | **Web / WASM** | live 50 Hz | yes | all (WebGL/WebGPU) | core compiled to `wasm32`, `<canvas>`, Web Audio |
 | **Web / streamed** | live | server-side | server or client | core stays host-side, framebuffer over WebSocket to a dumb canvas |
 | **Terminal (TUI)** | live or stepped | yes | limited (fake scanline only) | truecolor block renderer **or** text scrape |
@@ -114,6 +114,11 @@ Themes apply to games, the BASIC prompt, and the chatbot alike.
 
 Notes that matter:
 
+- **Desktop is a real app shell** (`speccy-gui`): native menus (muda) — full
+  screen at runtime via the macOS green button / View ▸ Enter Full Screen / F11
+  (any display), and an *Audio* menu to switch the output device live (e.g. an
+  AirPlay/TV speaker when projecting). It also takes a **game title** as well as a
+  file and fetches it from World of Spectrum (see the [roadmap](./roadmap.md)).
 - **Web/WASM is nearly free** — and there's a nice irony: Rust *cannot* target the
   Z80, but it targets `wasm32` beautifully, so the entire core + display pipeline
   drops into the browser client-side with no rewrite. This is the best solo-play

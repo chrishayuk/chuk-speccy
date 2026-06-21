@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "zxspec-py"
+version = "0.1.0"
+description = "PyO3 bindings for the chuk-speccy ZX Spectrum core"
+requires-python = ">=3.11"
+classifiers = ["Programming Language :: Rust"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "zxspec_py"
