@@ -30,6 +30,8 @@ pub enum Expr {
     Bin(BinOp, Box<Expr>, Box<Expr>),
     /// A call to another function by name (args by the calling convention).
     Call(String, Vec<Expr>),
+    /// Read array element `base[index]` (`base` is the array's first slot).
+    Index(usize, Box<Expr>),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -44,6 +46,8 @@ pub struct Cond {
 pub enum Stmt {
     /// Store an expression into a local slot (covers `let` and reassignment).
     Assign(usize, Expr),
+    /// Store into array element `base[index] = value`.
+    StoreIndex(usize, Expr, Expr),
     /// `if cond { then } else { els }`.
     If(Cond, Vec<Stmt>, Vec<Stmt>),
     /// `while cond { body }`.

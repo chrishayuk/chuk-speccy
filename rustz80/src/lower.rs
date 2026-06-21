@@ -1,19 +1,31 @@
 //! Lower a `syn` `ItemFn` (accepted subset) to the IR. Unsupported nodes become
-//! errors — which is the "not supported on Z80 / host-only" signal.
+//! errors — the "not supported on Z80 / host-only" signal.
 
 use crate::ir::*;
 use std::collections::HashMap;
 
-/// Name → slot map for locals (flat scoping in Stage 0).
+/// Name → (base slot, size in slots). Scalars are size 1; arrays reserve `N`
+/// contiguous slots. Flat scoping in Stage 1.
 #[derive(Default)]
 struct Vars {
-    map: HashMap<String, usize>,
+    map: HashMap<String, (usize, usize)>,
+    next: usize,
 }
 
 impl Vars {
-    fn slot(&mut self, name: &str) -> usize {
-        let n = self.map.len();
-        *self.map.entry(name.to_string()).or_insert(n)
+    fn declare(&mut self, name: &str, size: usize) -> usize {
+        let base = self.next;
+        self.map.insert(name.to_string(), (base, size));
+        self.next += size;
+        base
+    }
+    /// Base slot of an existing variable (declares a scalar if unseen — rustc
+    /// would already have rejected a genuinely-undefined name).
+    fn base(&mut self, name: &str) -> usize {
+        match self.map.get(name) {
+            Some((b, _)) => *b,
+            None => self.declare(name, 1),
+        }
     }
 }
 
@@ -37,13 +49,12 @@ pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
     let mut body = Vec::new();
     let mut ret = None;
 
-    // Parameters take the first local slots (0..params), in declaration order.
     let mut params = 0;
     for arg in &item.sig.inputs {
         let syn::FnArg::Typed(pt) = arg else {
             return Err("`self` parameters are not supported".into());
         };
-        vars.slot(&pat_ident(&pt.pat)?);
+        vars.declare(&pat_ident(&pt.pat)?, 1);
         params += 1;
     }
     if params > 3 {
@@ -54,13 +65,7 @@ pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
     for (i, st) in stmts.iter().enumerate() {
         let last = i + 1 == stmts.len();
         match st {
-            syn::Stmt::Local(local) => {
-                let init = local.init.as_ref().ok_or("`let` needs an initializer")?;
-                let e = lower_expr(&init.expr, &mut vars)?; // lower init before binding
-                let name = pat_ident(&local.pat)?;
-                let slot = vars.slot(&name);
-                body.push(Stmt::Assign(slot, e));
-            }
+            syn::Stmt::Local(local) => lower_local(local, &mut vars, &mut body)?,
             syn::Stmt::Expr(expr, semi) => {
                 if last && semi.is_none() && is_value_expr(expr) {
                     ret = Some(lower_expr(expr, &mut vars)?);
@@ -72,24 +77,68 @@ pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
         }
     }
 
-    Ok(Func { params, n_locals: vars.map.len(), body, ret })
+    Ok(Func { params, n_locals: vars.next, body, ret })
 }
 
-/// A value expression (vs a block-like statement `if`/`while`).
 fn is_value_expr(e: &syn::Expr) -> bool {
     matches!(
         e,
-        syn::Expr::Lit(_) | syn::Expr::Path(_) | syn::Expr::Binary(_) | syn::Expr::Paren(_) | syn::Expr::Call(_)
+        syn::Expr::Lit(_)
+            | syn::Expr::Path(_)
+            | syn::Expr::Binary(_)
+            | syn::Expr::Paren(_)
+            | syn::Expr::Call(_)
+            | syn::Expr::Index(_)
+            | syn::Expr::Cast(_)
     )
+}
+
+/// Lower a `let` — scalar, `[v; N]`, or `[e0, e1, …]`.
+fn lower_local(local: &syn::Local, vars: &mut Vars, body: &mut Vec<Stmt>) -> Result<(), String> {
+    let init = local.init.as_ref().ok_or("`let` needs an initializer")?;
+    let name = pat_ident(&local.pat)?;
+    match &*init.expr {
+        syn::Expr::Repeat(r) => {
+            let n = lit_len(&r.len)?;
+            let base = vars.declare(&name, n);
+            for i in 0..n {
+                let v = lower_expr(&r.expr, vars)?;
+                body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v));
+            }
+        }
+        syn::Expr::Array(arr) => {
+            let base = vars.declare(&name, arr.elems.len());
+            for (i, e) in arr.elems.iter().enumerate() {
+                let v = lower_expr(e, vars)?;
+                body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v));
+            }
+        }
+        other => {
+            let e = lower_expr(other, vars)?;
+            let base = vars.declare(&name, 1);
+            body.push(Stmt::Assign(base, e));
+        }
+    }
+    Ok(())
 }
 
 fn lower_stmt_expr(expr: &syn::Expr, vars: &mut Vars, body: &mut Vec<Stmt>) -> Result<(), String> {
     match expr {
-        syn::Expr::Assign(a) => {
-            let slot = vars.slot(&path_ident(&a.left)?);
-            let e = lower_expr(&a.right, vars)?;
-            body.push(Stmt::Assign(slot, e));
-        }
+        syn::Expr::Assign(a) => match &*a.left {
+            // `arr[i] = v`
+            syn::Expr::Index(ix) => {
+                let base = vars.base(&path_ident(&ix.expr)?);
+                let idx = lower_expr(&ix.index, vars)?;
+                let val = lower_expr(&a.right, vars)?;
+                body.push(Stmt::StoreIndex(base, idx, val));
+            }
+            // `x = v`
+            _ => {
+                let slot = vars.base(&path_ident(&a.left)?);
+                let e = lower_expr(&a.right, vars)?;
+                body.push(Stmt::Assign(slot, e));
+            }
+        },
         syn::Expr::If(ifx) => {
             let cond = lower_cond(&ifx.cond, vars)?;
             let then = lower_block(&ifx.then_branch, vars)?;
@@ -114,7 +163,7 @@ fn lower_else(e: &syn::Expr, vars: &mut Vars) -> Result<Vec<Stmt>, String> {
         syn::Expr::Block(b) => lower_block(&b.block, vars),
         syn::Expr::If(_) => {
             let mut v = Vec::new();
-            lower_stmt_expr(e, vars, &mut v)?; // else-if
+            lower_stmt_expr(e, vars, &mut v)?;
             Ok(v)
         }
         other => Err(format!("unsupported else branch: {other:?}")),
@@ -125,12 +174,7 @@ fn lower_block(b: &syn::Block, vars: &mut Vars) -> Result<Vec<Stmt>, String> {
     let mut body = Vec::new();
     for st in &b.stmts {
         match st {
-            syn::Stmt::Local(local) => {
-                let init = local.init.as_ref().ok_or("`let` needs an initializer")?;
-                let e = lower_expr(&init.expr, vars)?;
-                let slot = vars.slot(&pat_ident(&local.pat)?);
-                body.push(Stmt::Assign(slot, e));
-            }
+            syn::Stmt::Local(local) => lower_local(local, vars, &mut body)?,
             syn::Stmt::Expr(expr, _) => lower_stmt_expr(expr, vars, &mut body)?,
             other => return Err(format!("unsupported statement: {other:?}")),
         }
@@ -162,8 +206,14 @@ fn lower_expr(expr: &syn::Expr, vars: &mut Vars) -> Result<Expr, String> {
             };
             Ok(Expr::Lit(i.base10_parse::<u16>().map_err(|e| e.to_string())?))
         }
-        syn::Expr::Path(_) => Ok(Expr::Var(vars.slot(&path_ident(expr)?))),
+        syn::Expr::Path(_) => Ok(Expr::Var(vars.base(&path_ident(expr)?))),
         syn::Expr::Paren(p) => lower_expr(&p.expr, vars),
+        // `x as usize` / `as u8` — all values are 16-bit in Stage 1, so a no-op.
+        syn::Expr::Cast(c) => lower_expr(&c.expr, vars),
+        syn::Expr::Index(ix) => {
+            let base = vars.base(&path_ident(&ix.expr)?);
+            Ok(Expr::Index(base, Box::new(lower_expr(&ix.index, vars)?)))
+        }
         syn::Expr::Binary(b) => {
             let op = match b.op {
                 syn::BinOp::Add(_) => BinOp::Add,
@@ -187,10 +237,18 @@ fn lower_expr(expr: &syn::Expr, vars: &mut Vars) -> Result<Expr, String> {
     }
 }
 
+fn lit_len(e: &syn::Expr) -> Result<usize, String> {
+    if let syn::Expr::Lit(l) = e {
+        if let syn::Lit::Int(i) = &l.lit {
+            return i.base10_parse::<usize>().map_err(|e| e.to_string());
+        }
+    }
+    Err("array length must be an integer literal".into())
+}
+
 fn pat_ident(pat: &syn::Pat) -> Result<String, String> {
     match pat {
         syn::Pat::Ident(p) => Ok(p.ident.to_string()),
-        // `let x: u16 = ..` carries the type around the ident.
         syn::Pat::Type(t) => pat_ident(&t.pat),
         other => Err(format!("unsupported let pattern: {other:?}")),
     }

@@ -213,6 +213,13 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.byte(0xEB); // EX DE, HL  -> HL = remainder
             a.needs_div = true;
         }
+        Expr::Index(base, index) => {
+            gen_elem_addr(a, *base, index); // HL = &base[index]
+            a.byte(0x5E); // LD E,(HL)
+            a.byte(0x23); // INC HL
+            a.byte(0x56); // LD D,(HL)
+            a.byte(0xEB); // EX DE,HL   -> HL = value
+        }
         Expr::Call(name, args) => {
             for arg in args {
                 gen_expr(a, arg);
@@ -236,6 +243,16 @@ fn gen_pair(a: &mut Asm, first: &Expr, second: &Expr) {
     a.byte(0xD1); // POP DE  (DE = first)
 }
 
+/// Leave `HL = &base[index]` (each element is `u16`, so address = slot base + index*2).
+fn gen_elem_addr(a: &mut Asm, base: usize, index: &Expr) {
+    gen_expr(a, index); // HL = index
+    a.byte(0x29); // ADD HL,HL  (index * 2)
+    let base_addr = slot_addr(a.base, base);
+    a.byte(0x11); // LD DE, base_addr
+    a.word(base_addr);
+    a.byte(0x19); // ADD HL, DE  -> element address
+}
+
 /// `HL = left - right`, flags from the subtraction (carry = borrow).
 fn gen_sub(a: &mut Asm, left: &Expr, right: &Expr) {
     gen_pair(a, right, left); // HL = left, DE = right
@@ -251,6 +268,15 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             a.byte(0x22); // LD (addr), HL
             let addr = slot_addr(a.base, *slot);
             a.word(addr);
+        }
+        Stmt::StoreIndex(base, index, value) => {
+            gen_expr(a, value);
+            a.byte(0xE5); // PUSH HL  (value)
+            gen_elem_addr(a, *base, index); // HL = &base[index]
+            a.byte(0xD1); // POP DE   (DE = value)
+            a.byte(0x73); // LD (HL),E
+            a.byte(0x23); // INC HL
+            a.byte(0x72); // LD (HL),D
         }
         Stmt::If(cond, then, els) => {
             let else_l = a.label();

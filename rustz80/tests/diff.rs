@@ -206,6 +206,52 @@ fn function_calls() {
 }
 
 #[test]
+fn arrays() {
+    // literal-indexed read/write
+    check!({
+        let mut a = [0u16; 4];
+        a[0] = 10u16;
+        a[1] = 20u16;
+        a[2] = 30u16;
+        a[3] = 40u16;
+        a[1] + a[3]
+    }); // 60
+    // array literal + variable index (needs `as usize` — valid host Rust)
+    check!({
+        let a = [3u16, 1u16, 4u16, 1u16, 5u16];
+        let mut sum = 0u16;
+        let mut i = 0u16;
+        while i < 5u16 {
+            sum = sum + a[i as usize];
+            i = i + 1u16;
+        }
+        sum
+    }); // 14
+    // fill via loop, read back
+    check!({
+        let mut sq = [0u16; 8];
+        let mut i = 0u16;
+        while i < 8u16 {
+            sq[i as usize] = i * i;
+            i = i + 1u16;
+        }
+        sq[7]
+    }); // 49
+    // in-place reverse, then read both ends
+    check!({
+        let mut a = [1u16, 2u16, 3u16, 4u16, 5u16];
+        let mut i = 0u16;
+        while i < 2u16 {
+            let t = a[i as usize];
+            a[i as usize] = a[(4u16 - i) as usize];
+            a[(4u16 - i) as usize] = t;
+            i = i + 1u16;
+        }
+        a[0] * 100u16 + a[4]
+    }); // 5*100 + 1 = 501
+}
+
+#[test]
 fn unsupported_is_an_error() {
     // f32 is outside the dialect → a clear compile error (the host-only signal).
     assert!(rustz80::compile_fn("fn f() -> u16 { let x = 1.5f32; 0u16 }").is_err());
