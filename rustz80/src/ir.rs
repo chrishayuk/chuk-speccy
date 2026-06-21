@@ -47,6 +47,11 @@ pub enum Expr {
     Trunc(Box<Expr>),
     /// Read a byte from a raw address: `peek(addr)` (intrinsic).
     Peek(Box<Expr>),
+    /// Absolute address of a local slot (`&local`) — for passing `&self`.
+    AddrOf(usize),
+    /// Read a `u16` at `*(ptr + byte_offset)` — field access through a pointer
+    /// (`self.field`).
+    Deref(Box<Expr>, usize),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -65,6 +70,9 @@ pub enum Stmt {
     StoreIndex(usize, Expr, Expr, Width),
     /// Write a byte to a raw address: `poke(addr, val)` (intrinsic).
     Poke(Expr, Expr),
+    /// Write a `u16` to `*(ptr + byte_offset)` — field store through a pointer
+    /// (`self.field = v`).
+    Store(Expr, usize, Expr),
     /// Evaluate an expression for its side effect, discarding the result
     /// (e.g. a `void` function call as a statement).
     Eval(Expr),

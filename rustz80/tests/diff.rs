@@ -478,6 +478,89 @@ fn match_literals_with_wildcard_and_enum_param() {
 }
 
 #[test]
+fn methods_and_self() {
+    // `&mut self` mutation through a pointer, plus a `&self` reader.
+    struct Counter {
+        n: u16,
+    }
+    impl Counter {
+        fn bump(&mut self, by: u16) {
+            self.n = self.n + by;
+        }
+        fn doubled(&self) -> u16 {
+            self.n + self.n
+        }
+    }
+    fn host() -> u16 {
+        let mut c = Counter { n: 10 };
+        c.bump(5);
+        c.bump(7);
+        c.doubled() // (10+5+7)*2 = 44
+    }
+    let src = "
+        struct Counter { n: u16 }
+        impl Counter {
+            fn bump(&mut self, by: u16) { self.n = self.n + by; }
+            fn doubled(&self) -> u16 { self.n + self.n }
+        }
+        fn run() -> u16 {
+            let mut c = Counter { n: 10u16 };
+            c.bump(5u16);
+            c.bump(7u16);
+            c.doubled()
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
+fn methods_call_self_and_two_structs() {
+    // A method calling another method on `self`, and two structs sharing a name.
+    struct Vec2 {
+        x: u16,
+        y: u16,
+    }
+    impl Vec2 {
+        fn sum(&self) -> u16 {
+            self.x + self.y
+        }
+        fn scaled_sum(&self, k: u16) -> u16 {
+            self.sum() * k
+        }
+    }
+    struct Sq {
+        w: u16,
+    }
+    impl Sq {
+        fn area(&self) -> u16 {
+            self.w * self.w
+        }
+    }
+    fn host() -> u16 {
+        let v = Vec2 { x: 3, y: 4 };
+        let b = Sq { w: 5 };
+        v.scaled_sum(10) + b.area() // 7*10 + 25 = 95
+    }
+    let src = "
+        struct Vec2 { x: u16, y: u16 }
+        impl Vec2 {
+            fn sum(&self) -> u16 { self.x + self.y }
+            fn scaled_sum(&self, k: u16) -> u16 { self.sum() * k }
+        }
+        struct Sq { w: u16 }
+        impl Sq { fn area(&self) -> u16 { self.w * self.w } }
+        fn run() -> u16 {
+            let v = Vec2 { x: 3u16, y: 4u16 };
+            let b = Sq { w: 5u16 };
+            v.scaled_sum(10u16) + b.area()
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
 fn bitwise() {
     check!({ 12u16 | 10u16 }); // 14
     check!({ 12u16 & 10u16 }); // 8

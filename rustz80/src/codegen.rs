@@ -279,6 +279,28 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.byte(0x26); // LD H, 0     -> HL = zero-extended byte
             a.byte(0x00);
         }
+        Expr::AddrOf(slot) => {
+            a.byte(0x21); // LD HL, &local
+            let addr = slot_addr(a.base, *slot);
+            a.word(addr);
+        }
+        Expr::Deref(ptr, off) => {
+            gen_expr(a, ptr); // HL = base pointer
+            gen_add_offset(a, *off);
+            a.byte(0x5E); // LD E,(HL)
+            a.byte(0x23); // INC HL
+            a.byte(0x56); // LD D,(HL)
+            a.byte(0xEB); // EX DE,HL   -> HL = u16 at *(ptr + off)
+        }
+    }
+}
+
+/// `HL += off` (a small constant byte offset), if non-zero.
+fn gen_add_offset(a: &mut Asm, off: usize) {
+    if off != 0 {
+        a.byte(0x11); // LD DE, off
+        a.word(off as u16);
+        a.byte(0x19); // ADD HL, DE
     }
 }
 
@@ -349,6 +371,16 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             gen_expr(a, addr); // HL = addr
             a.byte(0xD1); // POP DE   (DE = value)
             a.byte(0x73); // LD (HL),E   (store low byte)
+        }
+        Stmt::Store(ptr, off, value) => {
+            gen_expr(a, value);
+            a.byte(0xE5); // PUSH HL  (value)
+            gen_expr(a, ptr); // HL = base pointer
+            gen_add_offset(a, *off); // HL = &field
+            a.byte(0xD1); // POP DE   (DE = value)
+            a.byte(0x73); // LD (HL),E
+            a.byte(0x23); // INC HL
+            a.byte(0x72); // LD (HL),D
         }
         Stmt::Eval(e) => {
             gen_expr(a, e); // result left in HL, discarded
