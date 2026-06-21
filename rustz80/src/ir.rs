@@ -34,12 +34,14 @@ pub enum Expr {
     Lit(u16),
     /// A local variable, by slot index.
     Var(usize),
-    /// A binary arithmetic op.
-    Bin(BinOp, Box<Expr>, Box<Expr>),
+    /// A binary arithmetic op; `Width::Byte` masks the result to 8 bits (u8 wrap).
+    Bin(BinOp, Box<Expr>, Box<Expr>, Width),
     /// A call to another function by name (args by the calling convention).
     Call(String, Vec<Expr>),
     /// Read array element `base[index]` (`base` is the array's first slot).
     Index(usize, Box<Expr>, Width),
+    /// Truncate to 8 bits (`expr as u8`).
+    Trunc(Box<Expr>),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).

@@ -206,6 +206,47 @@ fn function_calls() {
 }
 
 #[test]
+fn scalar_u8() {
+    // Non-overflowing u8 arithmetic widened to u16.
+    check!({
+        let a = 100u8;
+        let b = 50u8;
+        (a + b) as u16
+    }); // 150
+    // u8 wrapping must match rustc's wrapping_* exactly.
+    check!({
+        let a = 200u8;
+        let b = 100u8;
+        a.wrapping_add(b) as u16
+    }); // 300 wraps to 44
+    check!({
+        let a = 10u8;
+        let b = 20u8;
+        a.wrapping_sub(b) as u16
+    }); // wraps to 246
+    check!({
+        let a = 20u8;
+        let b = 20u8;
+        a.wrapping_mul(b) as u16
+    }); // 400 wraps to 144
+    // u16 -> u8 cast truncates to the low byte.
+    check!({
+        let x = 300u16;
+        (x as u8) as u16
+    }); // 44
+    // u8 loop counter with widening reads.
+    check!({
+        let mut sum = 0u16;
+        let mut i = 0u8;
+        while (i as u16) < 5u16 {
+            sum = sum + i as u16;
+            i = i.wrapping_add(1u8);
+        }
+        sum
+    }); // 0+1+2+3+4 = 10
+}
+
+#[test]
 fn arrays() {
     // literal-indexed read/write
     check!({

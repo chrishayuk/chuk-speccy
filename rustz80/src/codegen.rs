@@ -189,29 +189,37 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             let addr = slot_addr(a.base, *slot);
             a.word(addr);
         }
-        Expr::Bin(BinOp::Add, l, r) => {
-            gen_expr(a, l);
-            a.byte(0xE5); // PUSH HL
-            gen_expr(a, r);
-            a.byte(0xD1); // POP DE  (DE = l)
-            a.byte(0x19); // ADD HL, DE
-        }
-        Expr::Bin(BinOp::Sub, l, r) => gen_sub(a, l, r),
-        Expr::Bin(BinOp::Mul, l, r) => {
-            gen_pair(a, l, r); // HL = r, DE = l
-            a.call("__mul16"); // HL = l * r
-            a.needs_mul = true;
-        }
-        Expr::Bin(BinOp::Div, l, r) => {
-            gen_pair(a, r, l); // HL = l, DE = r
-            a.call("__divmod16"); // HL = l / r
-            a.needs_div = true;
-        }
-        Expr::Bin(BinOp::Rem, l, r) => {
-            gen_pair(a, r, l); // HL = l, DE = r
-            a.call("__divmod16"); // DE = l % r
-            a.byte(0xEB); // EX DE, HL  -> HL = remainder
-            a.needs_div = true;
+        Expr::Bin(op, l, r, w) => {
+            match op {
+                BinOp::Add => {
+                    gen_expr(a, l);
+                    a.byte(0xE5); // PUSH HL
+                    gen_expr(a, r);
+                    a.byte(0xD1); // POP DE  (DE = l)
+                    a.byte(0x19); // ADD HL, DE
+                }
+                BinOp::Sub => gen_sub(a, l, r),
+                BinOp::Mul => {
+                    gen_pair(a, l, r); // HL = r, DE = l
+                    a.call("__mul16"); // HL = l * r
+                    a.needs_mul = true;
+                }
+                BinOp::Div => {
+                    gen_pair(a, r, l); // HL = l, DE = r
+                    a.call("__divmod16"); // HL = l / r
+                    a.needs_div = true;
+                }
+                BinOp::Rem => {
+                    gen_pair(a, r, l); // HL = l, DE = r
+                    a.call("__divmod16"); // DE = l % r
+                    a.byte(0xEB); // EX DE, HL  -> HL = remainder
+                    a.needs_div = true;
+                }
+            }
+            if *w == Width::Byte {
+                a.byte(0x26); // LD H, 0   (wrap to u8)
+                a.byte(0x00);
+            }
         }
         Expr::Index(base, index, w) => {
             gen_elem_addr(a, *base, index); // HL = &base[index]
@@ -239,6 +247,11 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                 a.byte(POP[i]);
             }
             a.call(name);
+        }
+        Expr::Trunc(e) => {
+            gen_expr(a, e);
+            a.byte(0x26); // LD H, 0   (mask to u8)
+            a.byte(0x00);
         }
     }
 }
