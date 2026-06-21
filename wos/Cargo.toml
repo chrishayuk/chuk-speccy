@@ -1,0 +1,15 @@
+# World of Spectrum fetcher: search the ZXInfo API and download + unzip a game
+# in a core-loadable format (.tap/.z80/.sna). Pure host utility — no dependency
+# on the emulator crates; it returns bytes for the caller to load. Used by the
+# `frontend` CLI and (via `zxspec_py`) the MCP server, so there's one fetcher.
+[package]
+name = "wos"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ureq = "2"
+serde_json = "1"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }

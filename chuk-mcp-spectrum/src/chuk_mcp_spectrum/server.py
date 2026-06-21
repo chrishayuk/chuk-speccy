@@ -81,6 +81,27 @@ def _run_until(sid: str, pc: int | None, max_steps: int) -> dict:
     return res
 
 
+def _search_games(query: str, limit: int) -> dict:
+    import zxspec_py
+
+    return {"results": [dict(r) for r in zxspec_py.search_games(query, limit)]}
+
+
+def _load_game(sid: str, query: str) -> dict:
+    """Find a game on World of Spectrum, download it, and load it into a session."""
+    import zxspec_py
+
+    g = zxspec_py.fetch_game(query)
+    SUPERVISOR.load_game(sid, g["format"], bytes(g["data"]))
+    return {
+        "ok": True,
+        "title": g["title"],
+        "year": g["year"],
+        "format": g["format"],
+        "source": g["source"],
+    }
+
+
 def _store_recording(session_id: str, info: dict) -> dict:
     """Put the encoded MP4 into the artifact VFS if available (downloadable),
     always returning at least the local path; inline base64 for small files."""
@@ -189,6 +210,15 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
     def reset_session(session_id: str) -> dict:
         SUPERVISOR.machine(session_id).reset()
         return {"ok": True}
+
+    # Game library: search + download from World of Spectrum.
+    @mcp.tool(read_only_hint=True, description="Search World of Spectrum for games by title.")
+    def search_games(query: str, limit: int = 10) -> dict:
+        return _search_games(query, limit)
+
+    @mcp.tool(destructive_hint=True, description="Find a game on World of Spectrum, download it, and load it into a session.")
+    def load_game(session_id: str, query: str) -> dict:
+        return _load_game(session_id, query)
 
     # Provisioning / state.
     @mcp.tool(destructive_hint=True, description="Load a .sna/.z80 snapshot (base64 or path) into a session.")

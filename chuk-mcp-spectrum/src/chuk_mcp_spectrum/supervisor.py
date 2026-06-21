@@ -113,13 +113,38 @@ class Supervisor:
     def _load_media(m: "zxspec_py.Machine", path: str) -> None:
         with open(path, "rb") as fh:
             data = fh.read()
-        if path.endswith(".tap"):
+        fmt = "tap" if path.endswith(".tap") else ("sna" if path.endswith(".sna") else "z80")
+        Supervisor._load_media_bytes(m, fmt, data)
+
+    @staticmethod
+    def _load_media_bytes(m: "zxspec_py.Machine", fmt: str, data: bytes) -> None:
+        """Load a game by format. `.tap` boots to the prompt, inserts the tape and
+        LOAD ""s it (the ROM trap fast-loads); snapshots load directly."""
+        if fmt == "tap":
             m.run_frames(250)
             m.autoload_tape(data)
             m.run_frames(300)
         else:
-            fmt = "sna" if path.endswith(".sna") else "z80"
             m.load_snapshot(fmt, data)
+
+    def load_game(self, session_id: str, fmt: str, data: bytes) -> Session:
+        """Swap in a freshly-downloaded game: reset the machine, load it, and
+        restart the session's recording/snapshot timeline so the capture is the
+        new game only."""
+        s = self.session(session_id)
+        m = s.machine
+        m.reset()
+        self._load_media_bytes(m, fmt, data)
+        s.frames_run = 0
+        s.last_snapshot_frame = 0
+        s.snapshots.clear()
+        if s.audio:
+            m.enable_audio(self.config.audio_rate)
+            m.drain_audio()
+        if s.recording:
+            m.start_recording(self.config.decimate)
+        s.last_active = time.time()
+        return s
 
     def session(self, session_id: str) -> Session:
         with self._lock:

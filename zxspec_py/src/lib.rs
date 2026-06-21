@@ -6,6 +6,7 @@
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
+use pyo3::wrap_pyfunction;
 use spectrum::keyboard::{self, KeyPos};
 use spectrum::Spectrum;
 
@@ -269,6 +270,44 @@ impl Machine {
     }
 }
 
+// --- World of Spectrum: search + download (module-level functions) ----------
+
+/// Search World of Spectrum for software matching `query`, best match first.
+/// Returns a list of `{id, title, year, machine, publisher}` dicts.
+#[pyfunction]
+#[pyo3(signature = (query, limit=10))]
+fn search_games<'py>(py: Python<'py>, query: &str, limit: usize) -> PyResult<Vec<Bound<'py, PyDict>>> {
+    let entries =
+        py.allow_threads(|| wos::search(query, limit)).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let mut out = Vec::with_capacity(entries.len());
+    for e in entries {
+        let d = PyDict::new_bound(py);
+        d.set_item("id", e.id)?;
+        d.set_item("title", e.title)?;
+        d.set_item("year", e.year)?;
+        d.set_item("machine", e.machine)?;
+        d.set_item("publisher", e.publisher)?;
+        out.push(d);
+    }
+    Ok(out)
+}
+
+/// Find + download the best loadable build for `query`. Returns
+/// `{title, year, format, data, source}` where `format` is "tap"|"z80"|"sna"
+/// and `data` is the raw file bytes (load it with `Machine.autoload_tape` for
+/// tap, or `Machine.load_snapshot` for snapshots). Raises if nothing loadable.
+#[pyfunction]
+fn fetch_game<'py>(py: Python<'py>, query: &str) -> PyResult<Bound<'py, PyDict>> {
+    let g = py.allow_threads(|| wos::fetch(query)).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let d = PyDict::new_bound(py);
+    d.set_item("title", g.title)?;
+    d.set_item("year", g.year)?;
+    d.set_item("format", g.format)?;
+    d.set_item("data", PyBytes::new_bound(py, &g.data))?;
+    d.set_item("source", g.source)?;
+    Ok(d)
+}
+
 /// Map a key name / single char to a matrix position plus an optional shift.
 fn parse_key(s: &str) -> Option<(KeyPos, Option<KeyPos>)> {
     match s.to_ascii_lowercase().as_str() {
@@ -299,6 +338,8 @@ fn parse_key(s: &str) -> Option<(KeyPos, Option<KeyPos>)> {
 #[pymodule]
 fn zxspec_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Machine>()?;
+    m.add_function(wrap_pyfunction!(search_games, m)?)?;
+    m.add_function(wrap_pyfunction!(fetch_game, m)?)?;
     m.add("__doc__", "Headless ZX Spectrum core (Rust) exposed to Python.")?;
     Ok(())
 }

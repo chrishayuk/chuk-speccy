@@ -67,6 +67,12 @@ restructured into the agent/admin two-endpoint model — see **A2**.
   recording** (frames captured at the `run_frame` chokepoint in the core).
 - [x] **Recording → MP4** (H.264 + AAC) with beeper sound, encoded host-side
   (imageio/ffmpeg), downloadable.
+- [x] **Game library** — search **World of Spectrum** (ZXInfo API) and download +
+  unzip a loadable `.tap`/`.z80`/`.sna`. Shared Rust **`wos`** crate, so it works
+  on the **CLI** (`speccy-gui <rom> "Jet Set Willy"`) *and* the MCP (admin
+  `search_games`/`load_game`). 48K-build preference; `.tzx`/custom-loader games
+  are reported as needing real-time tape loading (see the accuracy tail). The
+  `speccy-library` bin headlessly verifies a set of classics in one command.
 - [ ] `set_display(preset)` — expose the `display` crate themes so an agent can re-theme + screenshot.
 - [ ] `disassemble` / `trace` / breakpoints (need a disassembler in the core first).
 - [ ] Decision to lock: native `serialize_full()`/`deserialize_full()` for exact RL/debugger reset fidelity (vs lossy `.sna`/`.z80`). See [MCP spec §10](./02-mcp-server-layer-spec.md#10-open-decision-pyo3-boundary).

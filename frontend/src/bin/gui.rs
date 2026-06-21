@@ -4,8 +4,10 @@
 //! window, with real key-up/down events driving the keyboard matrix. No terminal
 //! resolution ceiling; this is the crisp way to play.
 //!
-//! Usage: `speccy-gui <48.rom> [snapshot.sna|.z80] [theme] [scaleN]`
-//!   theme: authentic | dark | light | terminal | amber | gameboy  (default authentic)
+//! Usage: `speccy-gui <48.rom> [game.tap|.sna|.z80 | "game title"] [theme] [scaleN]`
+//!   game:   a local `.tap`/`.sna`/`.z80` file, OR a title to fetch from World of
+//!           Spectrum (e.g. `speccy-gui 48.rom "Jet Set Willy"`).
+//!   theme:  authentic | dark | light | terminal | amber | gameboy  (default authentic)
 //!   scaleN: integer pixel zoom, e.g. `scale3` (default: auto-fit a sensible size)
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -29,6 +31,7 @@ fn main() {
     let mut theme_name = "authentic".to_string();
     let mut media_path: Option<String> = None;
     let mut scale = Scale::FitScreen;
+    let mut query_parts: Vec<String> = Vec::new();
     for a in args {
         if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") {
             media_path = Some(a);
@@ -43,7 +46,9 @@ fn main() {
         } else if DisplayConfig::preset(&a).is_some() {
             theme_name = a;
         } else {
-            eprintln!("ignoring unrecognised arg '{a}'");
+            // Anything left over is part of a game title to fetch (a bare,
+            // unquoted title arrives as several args — collect them all).
+            query_parts.push(a);
         }
     }
 
@@ -61,21 +66,27 @@ fn main() {
             eprintln!("could not read {p}: {e}");
             std::process::exit(1);
         });
-        if p.ends_with(".tap") {
-            // Boot to the prompt, insert the tape, and LOAD "" (the ROM trap
-            // fast-loads the blocks as the window runs).
-            for _ in 0..250 {
-                spec.run_frame();
-            }
-            if let Err(e) = spec.load_tap(&data) {
-                eprintln!("tape load failed: {e:?}");
-            } else {
-                spec.autoload_tape();
-            }
+        let fmt = if p.ends_with(".tap") {
+            "tap"
+        } else if p.ends_with(".sna") {
+            "sna"
         } else {
-            let fmt = if p.ends_with(".sna") { "sna" } else { "z80" };
-            if let Err(e) = spec.load_snapshot(fmt, &data) {
-                eprintln!("snapshot load failed: {e:?}");
+            "z80"
+        };
+        load_media(&mut spec, fmt, &data);
+    } else if !query_parts.is_empty() {
+        // A title was named: search World of Spectrum, download, and load it.
+        let query = query_parts.join(" ");
+        eprintln!("searching World of Spectrum for {query:?}…");
+        match wos::fetch(&query) {
+            Ok(game) => {
+                let year = game.year.map(|y| format!(" ({y})")).unwrap_or_default();
+                eprintln!("loaded {}{} [{}]", game.title, year, game.format);
+                load_media(&mut spec, &game.format, &game.data);
+            }
+            Err(e) => {
+                eprintln!("could not fetch {query:?}: {e}");
+                std::process::exit(1);
             }
         }
     } else {
@@ -170,6 +181,24 @@ fn push_audio(ring: &Audio, samples: Vec<f32>) {
         while q.len() > AUDIO_QUEUE_CAP {
             q.pop_front();
         }
+    }
+}
+
+/// Load a game by format. `.tap` boots to the BASIC prompt, inserts the tape and
+/// `LOAD ""`s it (the ROM trap fast-loads the blocks while the window runs);
+/// snapshots (`.sna`/`.z80`) load directly into a running machine.
+fn load_media(spec: &mut Spectrum, fmt: &str, data: &[u8]) {
+    if fmt == "tap" {
+        for _ in 0..250 {
+            spec.run_frame();
+        }
+        if let Err(e) = spec.load_tap(data) {
+            eprintln!("tape load failed: {e:?}");
+        } else {
+            spec.autoload_tape();
+        }
+    } else if let Err(e) = spec.load_snapshot(fmt, data) {
+        eprintln!("snapshot load failed: {e:?}");
     }
 }
 

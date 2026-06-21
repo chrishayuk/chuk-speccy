@@ -16,4 +16,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 spectrum = { path = "../spectrum" }
+# World of Spectrum search + download (shared with the frontend CLI).
+wos = { path = "../wos" }
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py311"] }

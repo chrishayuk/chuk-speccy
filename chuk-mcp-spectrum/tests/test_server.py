@@ -26,10 +26,10 @@ def test_two_surfaces_are_split():
     agent = names(server.build_agent())
     admin = names(server.build_admin())
     assert "screenshot" in agent and "press_keys" in agent
-    # agent is policy-free: no lifecycle / pokes / recording
-    assert not any(x in agent for x in ("create_machine", "write_memory", "stop_recording", "destroy_session"))
+    # agent is policy-free: no lifecycle / pokes / recording / library loading
+    assert not any(x in agent for x in ("create_machine", "write_memory", "stop_recording", "destroy_session", "load_game"))
     assert len(agent) < len(admin)
-    assert {"write_memory", "stop_recording", "restore_snapshot", "list_sessions"} <= set(admin)
+    assert {"write_memory", "stop_recording", "restore_snapshot", "list_sessions", "search_games", "load_game"} <= set(admin)
 
 
 def test_provision_records_by_default(sup):
@@ -70,6 +70,20 @@ def test_record_and_finalize_has_audio(sup, tmp_path):
     info = sup.finalize_recording(sid, filename=str(tmp_path / "rec.mp4"))
     assert info["has_audio"] is True
     assert os.path.getsize(info["path"]) > 0
+
+
+@pytest.mark.skipif(not os.environ.get("SPECTRUM_NET_TESTS"), reason="set SPECTRUM_NET_TESTS=1 for World of Spectrum network tests")
+def test_search_and_load_game(sup):
+    res = server._search_games("Jet Set Willy", 3)
+    assert res["results"]
+    assert any("willy" in r["title"].lower() for r in res["results"])
+
+    out = server._load_game("g-net", "Spy vs Spy")
+    assert out["ok"] is True
+    assert out["format"] in ("tap", "z80", "sna")
+    # The downloaded game rendered something (not a blank screen).
+    idx = bytes(sup.machine("g-net").screen_indexed())
+    assert sum(1 for b in idx if b) > 0
 
 
 def test_restore_snapshot_rewinds(sup):

@@ -10,7 +10,7 @@ VFS). See `../docs/02-mcp-server-layer-spec.md` (tools) and
 | Endpoint | Surface | Who |
 |---|---|---|
 | **agent** (`chuk-mcp-spectrum-agent`) | 8 tools — `screenshot`, `read_screen_text`, `get_registers`, `read_memory`, `press_keys`, `type_text`, `run_frames`, `run_until` | LLMs / consumers. Tiny tool list = little context. Operates the machine bound to *this* session (implicit via the framework's session id). **Policy-free**: no lifecycle, no pokes, no recording knobs. |
-| **admin** (`chuk-mcp-spectrum-admin`) | 20 tools — everything: operate any session, `write_memory`/`set_register`, `load_snapshot`/`load_tape`, recording control, snapshot timeline (`list_snapshots`/`restore_snapshot`), `list_sessions`, downloads | Operators. |
+| **admin** (`chuk-mcp-spectrum-admin`) | 22 tools — everything: operate any session, `write_memory`/`set_register`, `load_snapshot`/`load_tape`, **`search_games`/`load_game`** (World of Spectrum), recording control, snapshot timeline (`list_snapshots`/`restore_snapshot`), `list_sessions`, downloads | Operators. |
 
 Both share one in-process **`Supervisor`** (`supervisor.py`) — the *autonomy
 plane* that runs policy **without tool calls**:
@@ -23,6 +23,15 @@ plane* that runs policy **without tool calls**:
 - **Provision per session, reap when idle.**
 
 The agent just plays; the server records, checkpoints, and manages lifecycle.
+
+## Game library (World of Spectrum)
+
+`search_games(query)` and `load_game(session_id, query)` (admin) search the
+**ZXInfo API** (the programmatic World-of-Spectrum backend), download the best
+loadable build, and load it into a session — no local files needed. Backed by
+the shared Rust `wos` crate (also used by the `speccy-gui` CLI). The core loads
+`.tap`/`.z80`/`.sna`; `.tzx`/custom-loader games are reported as needing
+real-time tape loading (a future item), and 48K builds are preferred over 128K.
 
 ## Run
 
