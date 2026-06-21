@@ -23,8 +23,11 @@ spectrum = { path = "../spectrum" }
 display = { path = "../display" }
 # World of Spectrum search + download, so a game can be named instead of a file.
 wos = { path = "../wos" }
-# Native pixel-perfect window head (the desktop head from spec 05). Lightweight
-# software framebuffer + window + keyboard, cross-platform.
-minifb = "0.27"
+# Native pixel-perfect window head (the desktop head from spec 05): winit window
+# + a CPU framebuffer (softbuffer), with native menus (muda) for a real app shell
+# — runtime fullscreen + audio-device switching, multi-display, macOS green button.
+winit = "0.30"
+softbuffer = "0.4"
+muda = "0.19"
 # Cross-platform audio output for the beeper.
 cpal = "0.15"
