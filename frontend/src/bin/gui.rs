@@ -85,11 +85,13 @@ fn main() {
     }
 
     // Start audio (best-effort; the game stays playable if it fails). The cpal
-    // callback drains `ring`; the emulation loop fills it once per frame.
+    // callback drains `ring`; the emulation loop refills it (audio-driven pacing).
     let ring: Audio = Arc::new(Mutex::new(VecDeque::new()));
+    let mut audio_rate = 0u32;
     let _stream = match start_audio(ring.clone()) {
         Ok((stream, rate)) => {
             spec.enable_audio(rate);
+            audio_rate = rate;
             Some(stream)
         }
         Err(e) => {
@@ -97,6 +99,9 @@ fn main() {
             None
         }
     };
+    // Keep ~3 frames of audio buffered; the device consumes at real time, so
+    // refilling to this level paces emulation to the audio clock (no underrun).
+    let target_fill = (audio_rate as usize / 50) * 3;
 
     // Size the window from the first rendered frame.
     let probe = display::render(&spec.screen_indexed(), spec.border(), &cfg);
@@ -126,17 +131,18 @@ fn main() {
             apply_key(&mut spec, key);
         }
 
-        spec.run_frame();
-
-        // Hand this frame's beeper samples to the audio thread, bounding latency
-        // by dropping the oldest if the queue grows past the cap (~200 ms @ 44.1k).
-        let samples = spec.drain_audio();
-        if !samples.is_empty() {
-            if let Ok(mut q) = ring.lock() {
-                q.extend(samples);
-                while q.len() > AUDIO_QUEUE_CAP {
-                    q.pop_front();
-                }
+        // Advance one frame for the video, then run extra frames while the audio
+        // buffer is below target (so emulation keeps pace with real-time audio
+        // consumption even if the video refresh jitters). Capped so a stall can't
+        // spiral. With audio off, this is just one frame per refresh.
+        let mut frames_this_tick = 0;
+        loop {
+            spec.run_frame();
+            frames_this_tick += 1;
+            push_audio(&ring, spec.drain_audio());
+            let queued = ring.lock().map(|q| q.len()).unwrap_or(usize::MAX);
+            if audio_rate == 0 || queued >= target_fill || frames_this_tick >= 6 {
+                break;
             }
         }
 
@@ -154,6 +160,19 @@ type Audio = Arc<Mutex<VecDeque<f32>>>;
 /// Cap the queued mono samples to bound latency (~200 ms at 44.1 kHz).
 const AUDIO_QUEUE_CAP: usize = 8820;
 
+/// Append samples to the ring, dropping the oldest beyond the latency cap.
+fn push_audio(ring: &Audio, samples: Vec<f32>) {
+    if samples.is_empty() {
+        return;
+    }
+    if let Ok(mut q) = ring.lock() {
+        q.extend(samples);
+        while q.len() > AUDIO_QUEUE_CAP {
+            q.pop_front();
+        }
+    }
+}
+
 /// Open the default output device and start a stream that drains `ring`. Returns
 /// the live stream (keep it alive) and the sample rate to feed the emulator.
 fn start_audio(ring: Audio) -> Result<(cpal::Stream, u32), String> {
@@ -164,8 +183,17 @@ fn start_audio(ring: Audio) -> Result<(cpal::Stream, u32), String> {
     let config = device
         .default_output_config()
         .map_err(|e| e.to_string())?;
+    // This stream uses an f32 callback; on macOS CoreAudio the default is f32.
+    // If a platform's default isn't f32 the audio would be wrong, so surface it.
+    if config.sample_format() != cpal::SampleFormat::F32 {
+        eprintln!(
+            "warning: output sample format is {:?}, not F32 — audio may be wrong",
+            config.sample_format()
+        );
+    }
     let rate = config.sample_rate().0;
     let channels = config.channels() as usize;
+    eprintln!("audio: {rate} Hz, {channels} ch, {:?}", config.sample_format());
     let cfg: cpal::StreamConfig = config.into();
 
     let stream = device

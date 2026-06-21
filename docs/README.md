@@ -14,6 +14,7 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 | [03 — SDK / Developer Kit Spec](./03-sdk-spec.md) | The fidelity dial (pure vs hybrid), z88dk front-end, L0–L3 layers, and the `ED 70` **trap ABI** that lets Z80 apps escape to the host. |
 | [04 — Spectrum-Native Chat / Agent](./04-spectrum-native-chat-spec.md) | L3 showpiece: a 32-column chatbot/agent where the Z80 is a dumb terminal and `chuk-llm` + `chuk-tool-processor` + MCP servers do the thinking. Two decoupled clocks + a typed-event poll. |
 | [05 — Frontends & Display Pipeline](./05-frontends-display-spec.md) | Multi-head (desktop/web/TUI/MCP) over one core, and the shared theme + filter pipeline (palette remap / duotone ramp / effect chain). One `DisplayConfig`, every head. |
+| [06 — Roles, Sessions & Autonomy](./06-roles-autonomy-spec.md) | Admin vs agent capability tiers, implicit per-session machines, and the autonomy plane (always-on recording, snapshot timeline, reaping) — agents as pure consumers. |
 | [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8) and what's next (MCP, SDK, chatbot, frontends, accuracy tail). |
 
 ## Implementation status

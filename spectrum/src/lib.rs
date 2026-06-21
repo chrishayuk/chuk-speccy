@@ -82,6 +82,13 @@ pub struct Spectrum {
     pub board: Board,
     /// A loaded `.tap`, fast-loaded by trapping the ROM (`None` = no tape).
     pub tape: Option<Tape>,
+    /// Session recording: when on, every Nth frame's *indexed* screen is appended
+    /// here (a raw observation; the host applies the palette and encodes video).
+    rec_enabled: bool,
+    rec_decimate: u32,
+    rec_phase: u32,
+    rec_count: u32,
+    rec_indexed: Vec<u8>,
 }
 
 impl Spectrum {
@@ -98,6 +105,11 @@ impl Spectrum {
                 kb: Keyboard::new(),
             },
             tape: None,
+            rec_enabled: false,
+            rec_decimate: 1,
+            rec_phase: 0,
+            rec_count: 0,
+            rec_indexed: Vec::new(),
         }
     }
 
@@ -125,7 +137,48 @@ impl Spectrum {
             .finish_frame_audio(TSTATES_PER_FRAME, FRAMES_PER_SEC);
         self.board.ula.tstate -= TSTATES_PER_FRAME;
         self.board.ula.end_frame();
+
+        // Session capture: append every `rec_decimate`-th frame's indexed screen.
+        if self.rec_enabled {
+            if self.rec_phase == 0 {
+                let frame = self.board.ula.screen_indexed(self.board.mem.ram());
+                self.rec_indexed.extend_from_slice(&frame);
+                self.rec_count += 1;
+            }
+            self.rec_phase = (self.rec_phase + 1) % self.rec_decimate;
+        }
         StopReason::Completed
+    }
+
+    // --- session recording ---------------------------------------------------
+
+    /// Start capturing every `decimate`-th frame's indexed screen (audio is
+    /// captured separately via `enable_audio`/`drain_audio`).
+    pub fn start_recording(&mut self, decimate: u32) {
+        self.rec_enabled = true;
+        self.rec_decimate = decimate.max(1);
+        self.rec_phase = 0;
+        self.rec_count = 0;
+        self.rec_indexed.clear();
+    }
+
+    /// Stop capturing; the buffered frames remain until taken.
+    pub fn stop_recording(&mut self) {
+        self.rec_enabled = false;
+    }
+
+    /// Number of frames captured, and the decimation used.
+    pub fn recording_count(&self) -> u32 {
+        self.rec_count
+    }
+    pub fn recording_decimate(&self) -> u32 {
+        self.rec_decimate
+    }
+
+    /// Take the captured frames (flattened indexed screens, 256×192 bytes each).
+    pub fn take_recording(&mut self) -> Vec<u8> {
+        self.rec_count = 0;
+        core::mem::take(&mut self.rec_indexed)
     }
 
     /// Enable beeper audio at the host sample rate. After each `run_frame`, call
@@ -474,6 +527,24 @@ mod tests {
         // Outside the display area (e.g. vblank) even bottom-16K code isn't stalled.
         let border = elapsed_from(0x4000, 0);
         assert_eq!(border, 200, "no contention outside the display window");
+    }
+
+    #[test]
+    fn recording_captures_decimated_frames() {
+        let mut spec = Spectrum::new_48k(&[]);
+        spec.start_recording(2); // every 2nd frame
+        for _ in 0..10 {
+            spec.run_frame();
+        }
+        spec.stop_recording();
+        assert_eq!(spec.recording_count(), 5, "10 frames / decimate 2 = 5 captured");
+        let data = spec.take_recording();
+        assert_eq!(data.len(), 5 * 256 * 192, "flattened indexed screens");
+        // Buffer is drained.
+        assert_eq!(spec.recording_count(), 0);
+        // Stopped: further frames aren't captured.
+        spec.run_frame();
+        assert_eq!(spec.recording_count(), 0);
     }
 
     #[test]

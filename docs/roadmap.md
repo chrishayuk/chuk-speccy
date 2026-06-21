@@ -55,12 +55,31 @@ theme is a thin consumer of those; adding one is zero core change.
 
 ## Next — layers on top
 
-### A. MCP server (spec 02) — *recommended next*
-The core now loads, runs, observes, and is driven, so every tool is a thin wrapper.
-- [ ] `zxspec_py` PyO3 `#[pyclass] Machine` over the `spectrum` crate (maturin wheel).
-- [ ] `chuk-mcp-spectrum`: session registry + `@tool`s — `create_machine`, `run_frames`, `step`, `get_registers`, `read_memory`, `write_memory`, `screenshot` (PNG content), `read_screen_text`, `press_keys`, `type_text`, `save_/load_snapshot`, `disassemble`, breakpoints, `trace`.
-- [ ] `set_display(preset)` — reuse the `display` crate so an agent can re-theme + screenshot.
+### A. MCP server (spec 02) — **built**
+The core loads, runs, observes, is driven, and records — every tool is a thin
+wrapper. Lives in `../zxspec_py` (PyO3) + `../chuk-mcp-spectrum` (server, on
+`chuk-mcp-server`). The tool catalog and recording were first built flat, then
+restructured into the agent/admin two-endpoint model — see **A2**.
+- [x] `zxspec_py` PyO3 `Machine` over the `spectrum` crate (maturin wheel, abi3-py311):
+  registers/memory, screen (rgba/indexed/text), step/run/run_until, snapshots
+  (`.sna`/`.z80`), tape, keyboard (`press`/`type_text`), audio, and **session
+  recording** (frames captured at the `run_frame` chokepoint in the core).
+- [x] **Recording → MP4** (H.264 + AAC) with beeper sound, encoded host-side
+  (imageio/ffmpeg), downloadable.
+- [ ] `set_display(preset)` — expose the `display` crate themes so an agent can re-theme + screenshot.
+- [ ] `disassemble` / `trace` / breakpoints (need a disassembler in the core first).
 - [ ] Decision to lock: native `serialize_full()`/`deserialize_full()` for exact RL/debugger reset fidelity (vs lossy `.sna`/`.z80`). See [MCP spec §10](./02-mcp-server-layer-spec.md#10-open-decision-pyo3-boundary).
+
+### A2. Roles & autonomy (spec 06) — **built** (on `chuk-mcp-server`)
+Rebuilt the MCP layer on `chuk-mcp-server` (pydantic-native): **two endpoints**
+over one shared `Supervisor`.
+- [x] **Two endpoints** — `agent` (8 tools, observe + drive, implicit session) and `admin` (20 tools, everything). Small agent surface = little context.
+- [x] **Implicit session** via `get_session_id()`; agent tools take no `machine_id`, admin tools take explicit `session_id` across all sessions.
+- [x] **Autonomy plane** (`Supervisor`): provision-per-session, **record-by-default** → MP4 (H.264 + AAC) with snapshot-cadence checkpoints (`restore_snapshot` to rewind), idle reaping. All env-configurable.
+- [x] **Artifacts → VFS** when an artifact store is configured (downloadable), local-file + base64 fallback. `read_only_hint`/`destructive_hint` on every tool.
+- [ ] **Event-based snapshots** (watch a score/lives address) in addition to time-based.
+- [ ] **Wall-clock cadence** for the real-time path.
+- [ ] **Cross-process live control** (proxy) — today separate processes share metadata/artifacts via the framework's multi-server store; co-host (`serve.py`) for shared live machines.
 
 ### B. SDK / developer kit (spec 03)
 - [ ] **L0** toolchain: one-command source → `.tap` → run-in-emulator; PNG→Spectrum asset pipeline.
