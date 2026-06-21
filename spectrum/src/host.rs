@@ -70,10 +70,13 @@ pub trait HostCalls: Send {
 type Handler = Box<dyn FnMut(&mut HostCtx) -> u32 + Send>;
 
 /// A registry of id → Rust closure — the native handler path (math, asset DMA,
-/// tests). An unknown id fails cleanly (carry set, no-op).
+/// tests). An unknown id falls through to the optional `fallback` dispatcher
+/// (e.g. a Python bridge), else fails cleanly (carry set, no-op). This is how
+/// fast Rust math and a host-language chat handler compose into one dispatcher.
 #[derive(Default)]
 pub struct FnTable {
     map: HashMap<u8, Handler>,
+    fallback: Option<Box<dyn HostCalls>>,
 }
 
 impl FnTable {
@@ -85,16 +88,52 @@ impl FnTable {
     pub fn on(&mut self, id: u8, f: impl FnMut(&mut HostCtx) -> u32 + Send + 'static) {
         self.map.insert(id, Box::new(f));
     }
+
+    /// Route ids this table doesn't handle to `next`.
+    pub fn with_fallback(mut self, next: Box<dyn HostCalls>) -> Self {
+        self.fallback = Some(next);
+        self
+    }
 }
 
 impl HostCalls for FnTable {
     fn dispatch(&mut self, ctx: &mut HostCtx) -> u32 {
         match self.map.get_mut(&ctx.id()) {
             Some(h) => h(ctx),
-            None => {
-                ctx.fail(); // unknown id → CF=1, no-op
-                0
-            }
+            None => match self.fallback.as_mut() {
+                Some(f) => f.dispatch(ctx),
+                None => {
+                    ctx.fail(); // unknown id → CF=1, no-op
+                    0
+                }
+            },
         }
     }
+}
+
+/// The standard host math syscalls (id range `0x10–0x1F`) — the integer ops the
+/// Z80 is slow at, done host-cheap. Install with
+/// [`set_host_dispatcher`](crate::Spectrum::set_host_dispatcher).
+pub fn math_traps() -> FnTable {
+    let mut t = FnTable::new();
+    // 0x10 MUL16: HL = BC * DE (wrapping).
+    t.on(0x10, |c| {
+        let (bc, de) = (c.regs.bc(), c.regs.de());
+        c.regs.set_hl(bc.wrapping_mul(de));
+        c.ok();
+        0
+    });
+    // 0x11 DIVMOD16: HL = BC / DE, DE = BC % DE; carry set on divide-by-zero.
+    t.on(0x11, |c| {
+        let (bc, de) = (c.regs.bc(), c.regs.de());
+        if de == 0 {
+            c.fail();
+            return 0;
+        }
+        c.regs.set_hl(bc / de);
+        c.regs.set_de(bc % de);
+        c.ok();
+        0
+    });
+    t
 }

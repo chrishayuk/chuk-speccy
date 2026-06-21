@@ -141,6 +141,41 @@ def test_host_trap_abi():
     assert m.registers()["hl"] == 0
 
 
+def test_chat_trap_protocol():
+    """The CHAT_* host protocol over the ED FE trap: BEGIN a turn, then POLL the
+    streamed reply events back out of RAM (echo responder — no LLM needed)."""
+    import zxspec_py
+    from chuk_mcp_spectrum import chat
+
+    m = zxspec_py.Machine(open(ROM, "rb").read())
+    session = chat.ChatSession()  # echo responder
+    m.register_host_dispatcher(chat.make_dispatcher(session))
+    m.write_memory(0x8000, b"\xED\xFE")  # HOSTCALL
+
+    def trap(sid, hl=0, bc=0):
+        for name, val in (("pc", 0x8000), ("a", sid), ("hl", hl), ("bc", bc)):
+            m.set_register(name, val)
+        m.step(1)
+
+    prompt = b"HI"
+    m.write_memory(0x9000, prompt)
+    trap(chat.CHAT_BEGIN, hl=0x9000, bc=len(prompt) << 8)  # B = length
+
+    out = bytearray()
+    for _ in range(64):
+        trap(chat.CHAT_POLL, hl=0x9100, bc=64 << 8)  # B = capacity
+        code, n = m.registers()["a"], m.registers()["bc"]
+        if code == chat.EV_TEXT:
+            out += bytes(m.read_memory(0x9100, n))
+        elif code == chat.EV_DONE:
+            break
+    assert out.decode("latin-1") == "You said: HI"
+
+    # POLL after the queue drains → EV_NONE.
+    trap(chat.CHAT_POLL, hl=0x9100, bc=64 << 8)
+    assert m.registers()["a"] == chat.EV_NONE
+
+
 def test_restore_snapshot_rewinds(sup):
     sid = "s6"
     sup.session(sid)

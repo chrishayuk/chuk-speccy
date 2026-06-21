@@ -691,6 +691,30 @@ mod tests {
     }
 
     #[test]
+    fn math_traps_mul_and_divmod() {
+        let mut spec = Spectrum::new_48k(&[]);
+        spec.set_host_dispatcher(Box::new(host::math_traps()));
+        let run = |spec: &mut Spectrum, a: u8, bc: u16, de: u16| {
+            spec.write_memory(0x9000, &[0xED, 0xFE]);
+            spec.cpu.regs.pc = 0x9000;
+            spec.cpu.regs.a = a;
+            spec.cpu.regs.set_bc(bc);
+            spec.cpu.regs.set_de(de);
+            spec.step();
+        };
+        run(&mut spec, 0x10, 200, 50); // MUL16: 200*50
+        assert_eq!(spec.cpu.regs.hl(), 10_000);
+        assert!(!spec.cpu.regs.carry());
+
+        run(&mut spec, 0x11, 1000, 7); // DIVMOD16: 1000/7
+        assert_eq!(spec.cpu.regs.hl(), 142);
+        assert_eq!(spec.cpu.regs.de(), 6);
+
+        run(&mut spec, 0x11, 5, 0); // divide by zero → carry
+        assert!(spec.cpu.regs.carry());
+    }
+
+    #[test]
     fn host_trap_is_nop_without_dispatcher() {
         // The fidelity dial: with no host, ED FE does nothing (as on real silicon).
         let mut spec = Spectrum::new_48k(&[]);

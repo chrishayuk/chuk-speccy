@@ -98,9 +98,22 @@ impl Machine {
     /// Install a Python callable `cb(ctx)` to answer `ED FE` host traps. `ctx`
     /// exposes the registers (`a`, `bc`, `hl`, … + setters), `carry`, and
     /// `read(addr,len)`/`write(addr,bytes)` — valid only during the call. Switch
-    /// on `ctx.a` (the syscall id). Without one, `ED FE` is a NOP.
-    fn register_host_dispatcher(&mut self, cb: Py<PyAny>) {
-        self.spec.set_host_dispatcher(Box::new(trap::PyDispatcher::new(cb)));
+    /// on `ctx.a` (the syscall id). Without one, `ED FE` is a NOP. With
+    /// `with_math=True`, the native math syscalls (0x10–0x1F) are handled in Rust
+    /// and only other ids reach `cb`.
+    #[pyo3(signature = (cb, with_math = false))]
+    fn register_host_dispatcher(&mut self, cb: Py<PyAny>, with_math: bool) {
+        let py = Box::new(trap::PyDispatcher::new(cb));
+        if with_math {
+            self.spec.set_host_dispatcher(Box::new(spectrum::host::math_traps().with_fallback(py)));
+        } else {
+            self.spec.set_host_dispatcher(py);
+        }
+    }
+
+    /// Install only the native math syscalls (0x10–0x1F) — no Python callback.
+    fn install_math_traps(&mut self) {
+        self.spec.set_host_dispatcher(Box::new(spectrum::host::math_traps()));
     }
 
     /// Remove the host dispatcher; `ED FE` reverts to a NOP.

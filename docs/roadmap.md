@@ -101,12 +101,17 @@ over one shared `Supervisor`.
   (`register_host_dispatcher`, with a liveness-guarded `TrapCtx`). NOP on bare
   hardware (the fidelity dial), `HOST_PRESENT` probe, disassembles as `HOSTCALL`.
   Tested in Rust (`FnTable` mul16) and Python (round-trip + guard + both ways).
-  *Next: land the actual `mul16`/`CHAT_*` handlers (id map in [SDK spec §5]).*
-- [ ] **L2 handlers** — `mul16`/`div16` (math), then `CHAT_*` for the chatbot.
+- [x] **L2 math handlers** — `spectrum::host::math_traps()`: `0x10 MUL16`,
+  `0x11 DIVMOD16` (carry on ÷0). Composable via `FnTable::with_fallback`, so Rust
+  math + a Python chat handler share one dispatcher (`register_host_dispatcher(cb,
+  with_math=True)` / `install_math_traps`).
 - [ ] **L3** showpiece: one app calling an MCP server through a trap.
 
 ### C. Spectrum-native chatbot / agent (spec 04)
-- [ ] `CHAT_BEGIN`/`CHAT_POLL` trap ABI + per-session event queue.
+- [x] **`CHAT_*` host protocol + event queue** (`chat.py`): `CHAT_BEGIN`/`POLL`/
+  `CANCEL`/`RESET` over the trap ABI, a `ChatSession` that queues the reply as
+  teletype events, pluggable responder (stub echo now). Tested end-to-end via the
+  trap. *(Z80 terminal app + chuk-llm backend still to come.)*
 - [ ] Host `run_chat` over `chuk-llm` + `chuk-tool-processor`; `speccy()` ASCII sanitiser + 32-col system prompt.
 - [ ] Z80 terminal: input line, custom colour-by-event print, `PRINT_FIFO` teletype drain + beeper, UDG spinner.
 - Prereq: SDK trap ABI (B/L2) and beeper (✓ M6).
