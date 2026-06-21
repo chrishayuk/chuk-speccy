@@ -252,6 +252,36 @@ fn arrays() {
 }
 
 #[test]
+fn byte_arrays() {
+    // u8 arrays store/load one byte per element; values widen to u16 with `as`.
+    check!({
+        let mut a = [0u8; 4];
+        a[2] = 200u8;
+        a[2] as u16
+    }); // 200
+    check!({
+        let a = [10u8, 20u8, 30u8, 250u8];
+        a[0] as u16 + a[3] as u16
+    }); // 260
+    // Low-byte truncation must match `as u8`.
+    check!({
+        let mut a = [0u8; 2];
+        a[0] = 300u16 as u8;
+        a[0] as u16
+    }); // 300 as u8 = 44
+    // Fill a byte array in a loop, read back.
+    check!({
+        let mut a = [0u8; 5];
+        let mut i = 0u16;
+        while i < 5u16 {
+            a[i as usize] = (i * 10u16) as u8;
+            i = i + 1u16;
+        }
+        a[4] as u16
+    }); // 40
+}
+
+#[test]
 fn structs() {
     // A struct literal, field reads/writes, and a struct passed across functions
     // by mutating fields locally — checked against rustc.

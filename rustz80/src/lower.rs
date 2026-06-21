@@ -23,28 +23,37 @@ struct Ctx<'a> {
     temp: usize,
 }
 
-/// Name → (base slot, size in slots, struct type if any). Flat scoping.
+struct VarInfo {
+    base: usize,
+    sty: Option<String>,
+    elem: Width, // array element width (Word for scalars/word arrays)
+}
+
+/// Name → variable info. Flat scoping; arrays use one 2-byte slot per element.
 #[derive(Default)]
 struct Vars {
-    map: HashMap<String, (usize, usize, Option<String>)>,
+    map: HashMap<String, VarInfo>,
     next: usize,
 }
 
 impl Vars {
-    fn declare(&mut self, name: &str, size: usize, sty: Option<String>) -> usize {
+    fn declare(&mut self, name: &str, size: usize, sty: Option<String>, elem: Width) -> usize {
         let base = self.next;
-        self.map.insert(name.to_string(), (base, size, sty));
+        self.map.insert(name.to_string(), VarInfo { base, sty, elem });
         self.next += size;
         base
     }
     fn base(&mut self, name: &str) -> usize {
         match self.map.get(name) {
-            Some((b, _, _)) => *b,
-            None => self.declare(name, 1, None),
+            Some(v) => v.base,
+            None => self.declare(name, 1, None, Width::Word),
         }
     }
     fn struct_of(&self, name: &str) -> Option<(usize, String)> {
-        self.map.get(name).and_then(|(b, _, s)| s.as_ref().map(|s| (*b, s.clone())))
+        self.map.get(name).and_then(|v| v.sty.as_ref().map(|s| (v.base, s.clone())))
+    }
+    fn array_width(&self, name: &str) -> Width {
+        self.map.get(name).map(|v| v.elem).unwrap_or(Width::Word)
     }
 }
 
@@ -114,7 +123,7 @@ fn lower_with(item: &syn::ItemFn, structs: &Structs, enums: &Enums) -> Result<Fu
         let syn::FnArg::Typed(pt) = arg else {
             return Err("`self` parameters are not supported".into());
         };
-        ctx.vars.declare(&pat_ident(&pt.pat)?, 1, None);
+        ctx.vars.declare(&pat_ident(&pt.pat)?, 1, None, Width::Word);
         params += 1;
     }
     if params > 3 {
@@ -160,23 +169,25 @@ fn lower_local(local: &syn::Local, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Resul
     match &*init.expr {
         syn::Expr::Repeat(r) => {
             let n = lit_len(&r.len)?;
-            let base = ctx.vars.declare(&name, n, None);
+            let elem = elem_width(&r.expr);
+            let base = ctx.vars.declare(&name, n, None, elem);
             for i in 0..n {
                 let v = lower_expr(&r.expr, ctx)?;
-                body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v));
+                body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v, elem));
             }
         }
         syn::Expr::Array(arr) => {
-            let base = ctx.vars.declare(&name, arr.elems.len(), None);
+            let elem = arr.elems.first().map(elem_width).unwrap_or(Width::Word);
+            let base = ctx.vars.declare(&name, arr.elems.len(), None, elem);
             for (i, e) in arr.elems.iter().enumerate() {
                 let v = lower_expr(e, ctx)?;
-                body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v));
+                body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v, elem));
             }
         }
         syn::Expr::Struct(lit) => {
             let sname = path_str(&lit.path)?;
             let fields = ctx.structs.get(&sname).ok_or_else(|| format!("unknown struct {sname}"))?.clone();
-            let base = ctx.vars.declare(&name, fields.len(), Some(sname.clone()));
+            let base = ctx.vars.declare(&name, fields.len(), Some(sname.clone()), Width::Word);
             for fv in &lit.fields {
                 let fname = member_name(&fv.member)?;
                 let off = field_offset(&fields, &fname)?;
@@ -186,7 +197,7 @@ fn lower_local(local: &syn::Local, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Resul
         }
         other => {
             let e = lower_expr(other, ctx)?;
-            let base = ctx.vars.declare(&name, 1, None);
+            let base = ctx.vars.declare(&name, 1, None, Width::Word);
             body.push(Stmt::Assign(base, e));
         }
     }
@@ -197,10 +208,12 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
     match expr {
         syn::Expr::Assign(a) => match &*a.left {
             syn::Expr::Index(ix) => {
-                let base = ctx.vars.base(&path_ident(&ix.expr)?);
+                let arr = path_ident(&ix.expr)?;
+                let base = ctx.vars.base(&arr);
+                let w = ctx.vars.array_width(&arr);
                 let idx = lower_expr(&ix.index, ctx)?;
                 let val = lower_expr(&a.right, ctx)?;
-                body.push(Stmt::StoreIndex(base, idx, val));
+                body.push(Stmt::StoreIndex(base, idx, val, w));
             }
             syn::Expr::Field(_) => {
                 let slot = field_slot(&a.left, ctx)?;
@@ -230,7 +243,7 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
         // `match` lowers to an if-chain over a scrutinee temporary (no codegen change).
         syn::Expr::Match(m) => {
             let scrut = lower_expr(&m.expr, ctx)?;
-            let temp = ctx.vars.declare(&format!("__match{}", ctx.temp), 1, None);
+            let temp = ctx.vars.declare(&format!("__match{}", ctx.temp), 1, None, Width::Word);
             ctx.temp += 1;
             body.push(Stmt::Assign(temp, scrut));
 
@@ -311,8 +324,10 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<Expr, String> {
         syn::Expr::Cast(c) => lower_expr(&c.expr, ctx),
         syn::Expr::Field(_) => Ok(Expr::Var(field_slot(expr, ctx)?)),
         syn::Expr::Index(ix) => {
-            let base = ctx.vars.base(&path_ident(&ix.expr)?);
-            Ok(Expr::Index(base, Box::new(lower_expr(&ix.index, ctx)?)))
+            let arr = path_ident(&ix.expr)?;
+            let base = ctx.vars.base(&arr);
+            let w = ctx.vars.array_width(&arr);
+            Ok(Expr::Index(base, Box::new(lower_expr(&ix.index, ctx)?), w))
         }
         syn::Expr::Binary(b) => {
             let op = match b.op {
@@ -394,6 +409,19 @@ fn member_name(m: &syn::Member) -> Result<String, String> {
         syn::Member::Named(n) => Ok(n.to_string()),
         syn::Member::Unnamed(_) => Err("tuple-struct fields not supported".into()),
     }
+}
+
+/// Element width inferred from an initialiser value's literal suffix (`0u8` →
+/// byte; everything else → word). Good enough for Stage 1e byte arrays.
+fn elem_width(e: &syn::Expr) -> Width {
+    if let syn::Expr::Lit(l) = e {
+        if let syn::Lit::Int(i) = &l.lit {
+            if i.suffix() == "u8" {
+                return Width::Byte;
+            }
+        }
+    }
+    Width::Word
 }
 
 fn lit_len(e: &syn::Expr) -> Result<usize, String> {
