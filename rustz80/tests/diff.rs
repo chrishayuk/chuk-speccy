@@ -4,6 +4,10 @@
 //! single-source property is what makes this airtight: there's no second copy to
 //! drift.
 
+// `check!` blocks are stringified into dialect source, so they must use the
+// dialect's long-form (`x = x + 1`, an explicit swap) — not Rust's `+=`/`swap`.
+#![allow(clippy::assign_op_pattern, clippy::manual_swap)]
+
 /// A flat 64K RAM bus — enough to run a compiled function.
 struct Ram {
     mem: Vec<u8>,

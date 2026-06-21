@@ -7,8 +7,8 @@ across seven specs ([README index](./README.md)); this tracks delivery against t
 ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
-(Snake), and the `rustz80` compiler at **Stage 3a** (full u8 + arrays/structs/enum/match, and now raw-memory pokes — a dialect plot() writes screen RAM).
-Remaining: `rustz80` Stage 3b (the Game-prelude → Snake on hardware), extra frontends, the RL env, and the accuracy tail.
+(Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM, differential-tested against a Rust replica.
+Remaining: `rustz80` Stage 3b (the Game-trait prelude — full dial ergonomics), extra frontends, the RL env, and the accuracy tail.
 
 ---
 
@@ -179,9 +179,15 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   math + a mask table) now compiles to real **screen-RAM pokes** — verified by
   running it on the CPU and comparing the bitmap against the canonical ZX address
   formula computed independently.
-- [ ] **Stage 3b (the milestone)** — recognise the `Game` trait + an SDK prelude so
-  the *same* `impl Game` compiles host (rustc) and pure (rustz80) → **Snake on real
-  hardware**, closing the dial. (Recursion needs stack frames — Stage 4.)
+- [x] **dialect Snake (the payoff)** — a real Snake written in the dialect (body in
+  `bx`/`by` arrays, `match` steering with wrap, tail-erase + head-draw via
+  `set_px`/`clr_px` over `poke`/`peek`), compiled by `compile_program`, run on the
+  CPU, and **differential-tested** against a Rust replica — final-state checksum
+  *and* the screen bitmap (`0x4000..0x5800`) match byte-for-byte across 0..64 steps;
+  exactly the 6-cell body stays lit. The whole dialect exercised at once.
+- [ ] **Stage 3b (ergonomics)** — recognise a `Game` trait + ship an SDK prelude so
+  the *same* `impl Game` file compiles host (rustc) and pure (rustz80) with no
+  per-target edits, closing the dial fully. (Recursion needs stack frames — Stage 4.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -234,7 +240,7 @@ core M0–M8 ✓ ──▶ A. MCP server ✓ ──▶ E. RL env (free re-skin)
                       │
                       └──▶ B. SDK ✓ (trap ABI + host-composite SDK) ──▶ C. chatbot ✓
                                   │
-                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 3a (full dialect + screen pokes) ✓; the big, escapable bet
+                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 3 (Snake compiles + runs on the CPU) ✓; the big, escapable bet
    D. frontends (WASM / shaders / streamed)        ── parallel, any time
    Later. accuracy tail (real-time .tzx ✓ done)    ── parallel, as desired
 ```
