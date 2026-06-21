@@ -474,6 +474,83 @@ fn match_literals_with_wildcard_and_enum_param() {
 }
 
 #[test]
+fn bitwise() {
+    check!({ 12u16 | 10u16 }); // 14
+    check!({ 12u16 & 10u16 }); // 8
+    check!({ 12u16 ^ 10u16 }); // 6
+    check!({
+        let a = 0xF0u8;
+        let b = 0x0Fu8;
+        (a | b) as u16
+    }); // 255
+    check!({
+        let a = 200u8;
+        let b = 0x0Fu8;
+        (a & b) as u16
+    }); // 200 & 15 = 8
+}
+
+/// Run a no-result program (entry `run`) on a 64K RAM bus and return the bus.
+fn run_to_memory(prog: &rustz80::Program, entry: &str) -> Vec<u8> {
+    let mut bus = Ram { mem: vec![0u8; 0x1_0000] };
+    let target = prog.symbols[entry];
+    bus.mem[0x7000] = 0xCD;
+    bus.mem[0x7001] = target as u8;
+    bus.mem[0x7002] = (target >> 8) as u8;
+    bus.mem[0x7003] = 0x76;
+    let org = rustz80::ORG as usize;
+    bus.mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
+    let mut cpu = z80::Cpu::new();
+    cpu.reset();
+    cpu.regs.pc = 0x7000;
+    cpu.regs.sp = 0xFFF0;
+    for _ in 0..1_000_000 {
+        if cpu.halted {
+            break;
+        }
+        cpu.step(&mut bus);
+    }
+    assert!(cpu.halted, "program did not return");
+    bus.mem
+}
+
+#[test]
+fn pixels_to_screen() {
+    // A `plot()` written in the dialect (div/mod screen math + a mask table),
+    // writing pixels through the poke/peek raw-memory intrinsics. Verified against
+    // the canonical ZX Spectrum address formula computed independently in Rust.
+    let src = "
+        fn plot(x: u16, y: u16) {
+            let masks = [128u8, 64u8, 32u8, 16u8, 8u8, 4u8, 2u8, 1u8];
+            let addr = 16384u16
+                + (y / 64u16) * 2048u16
+                + (y % 8u16) * 256u16
+                + ((y / 8u16) % 8u16) * 32u16
+                + x / 8u16;
+            let m = masks[(x % 8u16) as usize];
+            poke(addr, peek(addr) | m);
+        }
+        fn run() {
+            plot(0u16, 0u16);
+            plot(255u16, 191u16);
+            plot(128u16, 96u16);
+            plot(7u16, 1u16);
+            plot(1u16, 100u16);
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    let mem = run_to_memory(&prog, "run");
+
+    let pixels = [(0u16, 0u16), (255, 191), (128, 96), (7, 1), (1, 100)];
+    let mut want = vec![0u8; 0x1_0000];
+    for (x, y) in pixels {
+        let addr = 0x4000 + ((y & 0xC0) << 5) + ((y & 0x07) << 8) + ((y & 0x38) << 2) + (x >> 3);
+        want[addr as usize] |= 0x80 >> (x & 7);
+    }
+    assert_eq!(&mem[0x4000..0x5800], &want[0x4000..0x5800], "screen bytes differ");
+}
+
+#[test]
 fn unsupported_is_an_error() {
     // f32 is outside the dialect → a clear compile error (the host-only signal).
     assert!(rustz80::compile_fn("fn f() -> u16 { let x = 1.5f32; 0u16 }").is_err());

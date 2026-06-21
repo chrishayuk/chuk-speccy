@@ -8,6 +8,9 @@ pub enum BinOp {
     Mul,
     Div,
     Rem,
+    Or,
+    And,
+    Xor,
 }
 
 /// Element width for array access. Both kinds occupy a 2-byte slot per element
@@ -42,6 +45,8 @@ pub enum Expr {
     Index(usize, Box<Expr>, Width),
     /// Truncate to 8 bits (`expr as u8`).
     Trunc(Box<Expr>),
+    /// Read a byte from a raw address: `peek(addr)` (intrinsic).
+    Peek(Box<Expr>),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -58,6 +63,11 @@ pub enum Stmt {
     Assign(usize, Expr),
     /// Store into array element `base[index] = value`.
     StoreIndex(usize, Expr, Expr, Width),
+    /// Write a byte to a raw address: `poke(addr, val)` (intrinsic).
+    Poke(Expr, Expr),
+    /// Evaluate an expression for its side effect, discarding the result
+    /// (e.g. a `void` function call as a statement).
+    Eval(Expr),
     /// `if cond { then } else { els }`.
     If(Cond, Vec<Stmt>, Vec<Stmt>),
     /// `while cond { body }`.

@@ -215,6 +215,9 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                     a.byte(0xEB); // EX DE, HL  -> HL = remainder
                     a.needs_div = true;
                 }
+                BinOp::Or => gen_bitwise(a, l, r, 0xB3, 0xB2), // OR E / OR D
+                BinOp::And => gen_bitwise(a, l, r, 0xA3, 0xA2), // AND E / AND D
+                BinOp::Xor => gen_bitwise(a, l, r, 0xAB, 0xAA), // XOR E / XOR D
             }
             if *w == Width::Byte {
                 a.byte(0x26); // LD H, 0   (wrap to u8)
@@ -253,7 +256,28 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.byte(0x26); // LD H, 0   (mask to u8)
             a.byte(0x00);
         }
+        Expr::Peek(addr) => {
+            gen_expr(a, addr); // HL = addr
+            a.byte(0x6E); // LD L,(HL)   -- read mem[addr] into L
+            a.byte(0x26); // LD H, 0     -> HL = zero-extended byte
+            a.byte(0x00);
+        }
     }
+}
+
+/// `HL = left <op> right` (16-bit, byte-wise), where `op_e`/`op_d` are the
+/// `OP E` / `OP D` opcodes (commutative, so operand order is irrelevant).
+fn gen_bitwise(a: &mut Asm, l: &Expr, r: &Expr, op_e: u8, op_d: u8) {
+    gen_expr(a, l);
+    a.byte(0xE5); // PUSH HL
+    gen_expr(a, r);
+    a.byte(0xD1); // POP DE       (DE = l, HL = r)
+    a.byte(0x7D); // LD A,L
+    a.byte(op_e); // OP E
+    a.byte(0x6F); // LD L,A
+    a.byte(0x7C); // LD A,H
+    a.byte(op_d); // OP D
+    a.byte(0x67); // LD H,A
 }
 
 /// Evaluate so that `HL = second`, `DE = first` (the operand layout the runtime
@@ -301,6 +325,16 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
                 a.byte(0x23); // INC HL
                 a.byte(0x72); // LD (HL),D   (high byte)
             }
+        }
+        Stmt::Poke(addr, value) => {
+            gen_expr(a, value);
+            a.byte(0xE5); // PUSH HL  (value)
+            gen_expr(a, addr); // HL = addr
+            a.byte(0xD1); // POP DE   (DE = value)
+            a.byte(0x73); // LD (HL),E   (store low byte)
+        }
+        Stmt::Eval(e) => {
+            gen_expr(a, e); // result left in HL, discarded
         }
         Stmt::If(cond, then, els) => {
             let else_l = a.label();

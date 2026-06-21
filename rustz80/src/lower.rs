@@ -65,6 +65,8 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
     let mut out = Vec::new();
     for item in &file.items {
         match item {
+            // `poke`/`peek` are host-only prelude intrinsics — skip their bodies.
+            syn::Item::Fn(f) if is_intrinsic(&f.sig.ident.to_string()) => {}
             syn::Item::Fn(f) => out.push((f.sig.ident.to_string(), lower_with(f, &structs, &enums)?)),
             syn::Item::Struct(_) | syn::Item::Enum(_) => {} // already collected
             other => return Err(format!("only `fn`/`struct`/`enum` items are supported: {other:?}")),
@@ -79,6 +81,11 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
 /// Lower a standalone function (no struct/enum context — used by `compile_fn`).
 pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
     lower_with(item, &Structs::new(), &Enums::new())
+}
+
+/// Names the compiler handles itself (their host definitions are prelude-only).
+fn is_intrinsic(name: &str) -> bool {
+    matches!(name, "poke" | "peek")
 }
 
 fn collect_enums(file: &syn::File) -> Enums {
@@ -264,6 +271,19 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
             }
             body.extend(chain);
         }
+        // A call as a statement: the `poke` intrinsic, or a void call (discarded).
+        syn::Expr::Call(c) => {
+            let name = path_ident(&c.func)?;
+            if name == "poke" {
+                let addr = c.args.first().ok_or("poke(addr, val) needs an address")?;
+                let val = c.args.get(1).ok_or("poke(addr, val) needs a value")?;
+                let addr = lower_expr(addr, ctx)?.0;
+                let val = lower_expr(val, ctx)?.0;
+                body.push(Stmt::Poke(addr, val));
+            } else {
+                body.push(Stmt::Eval(lower_expr(expr, ctx)?.0));
+            }
+        }
         other => return Err(format!("unsupported statement expression: {other:?}")),
     }
     Ok(())
@@ -365,6 +385,11 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> 
         }
         syn::Expr::Call(c) => {
             let name = path_ident(&c.func)?;
+            // `peek(addr)` intrinsic — read a byte from raw memory.
+            if name == "peek" {
+                let addr = c.args.first().ok_or("peek(addr) needs an address")?;
+                return Ok((Expr::Peek(Box::new(lower_expr(addr, ctx)?.0)), Width::Byte));
+            }
             if c.args.len() > 3 {
                 return Err("more than 3 call arguments not supported yet".into());
             }
@@ -382,6 +407,9 @@ fn bin_op(op: &syn::BinOp) -> Result<BinOp, String> {
         syn::BinOp::Mul(_) => BinOp::Mul,
         syn::BinOp::Div(_) => BinOp::Div,
         syn::BinOp::Rem(_) => BinOp::Rem,
+        syn::BinOp::BitOr(_) => BinOp::Or,
+        syn::BinOp::BitAnd(_) => BinOp::And,
+        syn::BinOp::BitXor(_) => BinOp::Xor,
         other => return Err(format!("unsupported arithmetic op: {other:?}")),
     })
 }
