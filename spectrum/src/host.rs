@@ -8,21 +8,30 @@
 //! / tests — never crosses a language boundary) and any custom [`HostCalls`] impl
 //! (e.g. the PyO3 bridge that forwards to a Python callable).
 
+use crate::keyboard::{Keyboard, KeyPos};
 use crate::memory::Memory;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use z80::Regs;
 
-/// What a handler sees during a trap: the live register file plus scoped memory
-/// access. Valid only for the duration of the synchronous dispatch call.
+/// What a handler sees during a trap: the live register file, scoped memory
+/// access, and a read-only view of the keyboard. Valid only for the duration of
+/// the synchronous dispatch call.
 pub struct HostCtx<'a> {
     pub regs: &'a mut Regs,
     mem: &'a mut Memory,
+    kb: &'a Keyboard,
 }
 
 impl<'a> HostCtx<'a> {
-    pub(crate) fn new(regs: &'a mut Regs, mem: &'a mut Memory) -> Self {
-        Self { regs, mem }
+    pub(crate) fn new(regs: &'a mut Regs, mem: &'a mut Memory, kb: &'a Keyboard) -> Self {
+        Self { regs, mem, kb }
+    }
+
+    /// True if the matrix key at `pos` is currently held (for input-reading traps
+    /// like the game loop — the runtime needs no input-packing code).
+    pub fn key(&self, pos: KeyPos) -> bool {
+        self.kb.is_pressed(pos)
     }
 
     /// The syscall id (register `A`).

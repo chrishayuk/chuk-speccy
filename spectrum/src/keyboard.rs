@@ -108,6 +108,12 @@ impl Keyboard {
     pub fn release_all(&mut self) {
         self.rows = [0x1F; 8];
     }
+
+    /// True if the key at `pos` is currently held (its active-low matrix bit = 0).
+    pub fn is_pressed(&self, pos: KeyPos) -> bool {
+        let (row, col) = (pos.row as usize, pos.col as usize);
+        row < 8 && col < 5 && self.rows[row] & (1 << col) == 0
+    }
 }
 
 impl Default for Keyboard {
