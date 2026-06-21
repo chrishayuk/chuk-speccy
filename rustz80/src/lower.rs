@@ -26,7 +26,7 @@ struct Ctx<'a> {
 struct VarInfo {
     base: usize,
     sty: Option<String>,
-    elem: Width, // array element width (Word for scalars/word arrays)
+    ty: Width, // scalar value type, or array element type
 }
 
 /// Name → variable info. Flat scoping; arrays use one 2-byte slot per element.
@@ -37,9 +37,9 @@ struct Vars {
 }
 
 impl Vars {
-    fn declare(&mut self, name: &str, size: usize, sty: Option<String>, elem: Width) -> usize {
+    fn declare(&mut self, name: &str, size: usize, sty: Option<String>, ty: Width) -> usize {
         let base = self.next;
-        self.map.insert(name.to_string(), VarInfo { base, sty, elem });
+        self.map.insert(name.to_string(), VarInfo { base, sty, ty });
         self.next += size;
         base
     }
@@ -52,8 +52,9 @@ impl Vars {
     fn struct_of(&self, name: &str) -> Option<(usize, String)> {
         self.map.get(name).and_then(|v| v.sty.as_ref().map(|s| (v.base, s.clone())))
     }
-    fn array_width(&self, name: &str) -> Width {
-        self.map.get(name).map(|v| v.elem).unwrap_or(Width::Word)
+    /// The variable's value type (scalar) or element type (array).
+    fn ty(&self, name: &str) -> Width {
+        self.map.get(name).map(|v| v.ty).unwrap_or(Width::Word)
     }
 }
 
@@ -123,7 +124,7 @@ fn lower_with(item: &syn::ItemFn, structs: &Structs, enums: &Enums) -> Result<Fu
         let syn::FnArg::Typed(pt) = arg else {
             return Err("`self` parameters are not supported".into());
         };
-        ctx.vars.declare(&pat_ident(&pt.pat)?, 1, None, Width::Word);
+        ctx.vars.declare(&pat_ident(&pt.pat)?, 1, None, ty_of_type(&pt.ty));
         params += 1;
     }
     if params > 3 {
@@ -137,7 +138,7 @@ fn lower_with(item: &syn::ItemFn, structs: &Structs, enums: &Enums) -> Result<Fu
             syn::Stmt::Local(local) => lower_local(local, &mut ctx, &mut body)?,
             syn::Stmt::Expr(expr, semi) => {
                 if last && semi.is_none() && is_value_expr(expr) {
-                    ret = Some(lower_expr(expr, &mut ctx)?);
+                    ret = Some(lower_expr(expr, &mut ctx)?.0);
                 } else {
                     lower_stmt_expr(expr, &mut ctx, &mut body)?;
                 }
@@ -172,7 +173,7 @@ fn lower_local(local: &syn::Local, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Resul
             let elem = elem_width(&r.expr);
             let base = ctx.vars.declare(&name, n, None, elem);
             for i in 0..n {
-                let v = lower_expr(&r.expr, ctx)?;
+                let v = lower_expr(&r.expr, ctx)?.0;
                 body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v, elem));
             }
         }
@@ -180,7 +181,7 @@ fn lower_local(local: &syn::Local, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Resul
             let elem = arr.elems.first().map(elem_width).unwrap_or(Width::Word);
             let base = ctx.vars.declare(&name, arr.elems.len(), None, elem);
             for (i, e) in arr.elems.iter().enumerate() {
-                let v = lower_expr(e, ctx)?;
+                let v = lower_expr(e, ctx)?.0;
                 body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v, elem));
             }
         }
@@ -191,13 +192,13 @@ fn lower_local(local: &syn::Local, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Resul
             for fv in &lit.fields {
                 let fname = member_name(&fv.member)?;
                 let off = field_offset(&fields, &fname)?;
-                let v = lower_expr(&fv.expr, ctx)?;
+                let v = lower_expr(&fv.expr, ctx)?.0;
                 body.push(Stmt::Assign(base + off, v));
             }
         }
         other => {
-            let e = lower_expr(other, ctx)?;
-            let base = ctx.vars.declare(&name, 1, None, Width::Word);
+            let (e, ty) = lower_expr(other, ctx)?;
+            let base = ctx.vars.declare(&name, 1, None, ty);
             body.push(Stmt::Assign(base, e));
         }
     }
@@ -210,19 +211,19 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
             syn::Expr::Index(ix) => {
                 let arr = path_ident(&ix.expr)?;
                 let base = ctx.vars.base(&arr);
-                let w = ctx.vars.array_width(&arr);
-                let idx = lower_expr(&ix.index, ctx)?;
-                let val = lower_expr(&a.right, ctx)?;
+                let w = ctx.vars.ty(&arr);
+                let idx = lower_expr(&ix.index, ctx)?.0;
+                let val = lower_expr(&a.right, ctx)?.0;
                 body.push(Stmt::StoreIndex(base, idx, val, w));
             }
             syn::Expr::Field(_) => {
                 let slot = field_slot(&a.left, ctx)?;
-                let e = lower_expr(&a.right, ctx)?;
+                let e = lower_expr(&a.right, ctx)?.0;
                 body.push(Stmt::Assign(slot, e));
             }
             _ => {
                 let slot = ctx.vars.base(&path_ident(&a.left)?);
-                let e = lower_expr(&a.right, ctx)?;
+                let e = lower_expr(&a.right, ctx)?.0;
                 body.push(Stmt::Assign(slot, e));
             }
         },
@@ -242,7 +243,7 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
         }
         // `match` lowers to an if-chain over a scrutinee temporary (no codegen change).
         syn::Expr::Match(m) => {
-            let scrut = lower_expr(&m.expr, ctx)?;
+            let scrut = lower_expr(&m.expr, ctx)?.0;
             let temp = ctx.vars.declare(&format!("__match{}", ctx.temp), 1, None, Width::Word);
             ctx.temp += 1;
             body.push(Stmt::Assign(temp, scrut));
@@ -305,51 +306,94 @@ fn lower_cond(expr: &syn::Expr, ctx: &mut Ctx) -> Result<Cond, String> {
         syn::BinOp::Ne(_) => Cmp::Ne,
         other => return Err(format!("unsupported comparison op: {other:?}")),
     };
-    Ok(Cond { cmp, lhs: lower_expr(&b.left, ctx)?, rhs: lower_expr(&b.right, ctx)? })
+    Ok(Cond { cmp, lhs: lower_expr(&b.left, ctx)?.0, rhs: lower_expr(&b.right, ctx)?.0 })
 }
 
-fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<Expr, String> {
+/// Lower an expression, returning its IR and inferred width (`u8`/`u16`).
+fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> {
     match expr {
         syn::Expr::Lit(l) => {
             let syn::Lit::Int(i) = &l.lit else {
                 return Err("only integer literals are supported".into());
             };
-            Ok(Expr::Lit(i.base10_parse::<u16>().map_err(|e| e.to_string())?))
+            let w = if i.suffix() == "u8" { Width::Byte } else { Width::Word };
+            Ok((Expr::Lit(i.base10_parse::<u16>().map_err(|e| e.to_string())?), w))
         }
         syn::Expr::Path(p) => match resolve_enum_path(&p.path, ctx.enums) {
-            Some(v) => Ok(Expr::Lit(v)),
-            None => Ok(Expr::Var(ctx.vars.base(&path_ident(expr)?))),
+            Some(v) => Ok((Expr::Lit(v), Width::Word)),
+            None => {
+                let name = path_ident(expr)?;
+                Ok((Expr::Var(ctx.vars.base(&name)), ctx.vars.ty(&name)))
+            }
         },
         syn::Expr::Paren(p) => lower_expr(&p.expr, ctx),
-        syn::Expr::Cast(c) => lower_expr(&c.expr, ctx),
-        syn::Expr::Field(_) => Ok(Expr::Var(field_slot(expr, ctx)?)),
+        // `e as u8` truncates to a byte; `as u16`/`as usize` is a no-op (16-bit).
+        syn::Expr::Cast(c) => {
+            let (e, _) = lower_expr(&c.expr, ctx)?;
+            if ty_of_type(&c.ty) == Width::Byte {
+                Ok((Expr::Trunc(Box::new(e)), Width::Byte))
+            } else {
+                Ok((e, Width::Word))
+            }
+        }
+        syn::Expr::Field(_) => Ok((Expr::Var(field_slot(expr, ctx)?), Width::Word)),
         syn::Expr::Index(ix) => {
             let arr = path_ident(&ix.expr)?;
             let base = ctx.vars.base(&arr);
-            let w = ctx.vars.array_width(&arr);
-            Ok(Expr::Index(base, Box::new(lower_expr(&ix.index, ctx)?), w))
+            let w = ctx.vars.ty(&arr);
+            let idx = lower_expr(&ix.index, ctx)?.0;
+            Ok((Expr::Index(base, Box::new(idx), w), w))
         }
         syn::Expr::Binary(b) => {
-            let op = match b.op {
-                syn::BinOp::Add(_) => BinOp::Add,
-                syn::BinOp::Sub(_) => BinOp::Sub,
-                syn::BinOp::Mul(_) => BinOp::Mul,
-                syn::BinOp::Div(_) => BinOp::Div,
-                syn::BinOp::Rem(_) => BinOp::Rem,
-                other => return Err(format!("unsupported arithmetic op: {other:?}")),
+            let op = bin_op(&b.op)?;
+            let (le, lw) = lower_expr(&b.left, ctx)?;
+            let (re, _) = lower_expr(&b.right, ctx)?;
+            Ok((Expr::Bin(op, Box::new(le), Box::new(re), lw), lw))
+        }
+        // `x.wrapping_add(y)` etc. — the op at the receiver's width.
+        syn::Expr::MethodCall(m) => {
+            let op = match m.method.to_string().as_str() {
+                "wrapping_add" => BinOp::Add,
+                "wrapping_sub" => BinOp::Sub,
+                "wrapping_mul" => BinOp::Mul,
+                other => return Err(format!("unsupported method: {other}")),
             };
-            Ok(Expr::Bin(op, Box::new(lower_expr(&b.left, ctx)?), Box::new(lower_expr(&b.right, ctx)?)))
+            let (recv, rw) = lower_expr(&m.receiver, ctx)?;
+            let arg = m.args.first().ok_or("wrapping_* needs an argument")?;
+            let (re, _) = lower_expr(arg, ctx)?;
+            Ok((Expr::Bin(op, Box::new(recv), Box::new(re), rw), rw))
         }
         syn::Expr::Call(c) => {
             let name = path_ident(&c.func)?;
             if c.args.len() > 3 {
                 return Err("more than 3 call arguments not supported yet".into());
             }
-            let args = c.args.iter().map(|a| lower_expr(a, ctx)).collect::<Result<_, _>>()?;
-            Ok(Expr::Call(name, args))
+            let args = c.args.iter().map(|a| Ok(lower_expr(a, ctx)?.0)).collect::<Result<_, String>>()?;
+            Ok((Expr::Call(name, args), Width::Word)) // Stage 1f assumes u16 returns
         }
         other => Err(format!("unsupported expression: {other:?}")),
     }
+}
+
+fn bin_op(op: &syn::BinOp) -> Result<BinOp, String> {
+    Ok(match op {
+        syn::BinOp::Add(_) => BinOp::Add,
+        syn::BinOp::Sub(_) => BinOp::Sub,
+        syn::BinOp::Mul(_) => BinOp::Mul,
+        syn::BinOp::Div(_) => BinOp::Div,
+        syn::BinOp::Rem(_) => BinOp::Rem,
+        other => return Err(format!("unsupported arithmetic op: {other:?}")),
+    })
+}
+
+/// A type annotation's width (`u8` → byte, everything else → word).
+fn ty_of_type(t: &syn::Type) -> Width {
+    if let syn::Type::Path(p) = t {
+        if p.path.is_ident("u8") {
+            return Width::Byte;
+        }
+    }
+    Width::Word
 }
 
 /// Resolve `s.field` (a `syn::Expr::Field`) to its constant local slot.
