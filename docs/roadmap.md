@@ -43,7 +43,7 @@ theme is a thin consumer of those; adding one is zero core change.
 
 ### Heads (spec 05) shipped alongside
 - **Terminal (TUI):** live 50 Hz loop, truecolor **quadrant** block glyphs (2×2 px/char, exact per-cell colour), aspect-correct fractional sampling (queries `CSI 16 t`), opt-in sextant, ASCII fallback for pipes. Themes: `authentic`/`dark`/`light`/`terminal`/`amber`/`gameboy`.
-- **Native window (`speccy-gui`, winit + softbuffer):** pixel-perfect 256×192, aspect-correct + letterboxed, real key up/down, cpal sound with **audio-driven frame pacing** (emulation refills the ring to ~3 frames, so it tracks the real-time audio clock instead of the jittery video refresh — no underrun, stable beeper pitch). A real app shell with **native menus** (muda): a *View* menu / F11 / the macOS green button toggle **full screen** at runtime (any display), and an *Audio* menu switches the **output device live** (e.g. an AirPlay/TV speaker when projecting). Accepts a **game title** (fetched from World of Spectrum) as well as a file.
+- **Native window (`speccy-gui`, winit + softbuffer):** pixel-perfect 256×192, aspect-correct + letterboxed, real key up/down, cpal sound with **audio-driven frame pacing** (emulation refills the ring to ~3 frames, so it tracks the real-time audio clock instead of the jittery video refresh — no underrun, stable beeper pitch). A real app shell with **native menus** (muda): a *Machine* menu (Save/Load Snapshot via native file dialogs, Reset), a *View* menu / F11 / the macOS green button toggle **full screen** at runtime (any display), and an *Audio* menu switches the **output device live** (e.g. an AirPlay/TV speaker when projecting). Accepts a **game title** (fetched from World of Spectrum) as well as a file.
 
 ### Test inventory
 - `z80-tests`: 32 unit + ZEX harness (`run_zex`, CP/M BDOS trap).
@@ -71,10 +71,15 @@ restructured into the agent/admin two-endpoint model — see **A2**.
   unzip a loadable `.tap`/`.z80`/`.sna`. Shared Rust **`wos`** crate, so it works
   on the **CLI** (`speccy-gui <rom> "Jet Set Willy"`) *and* the MCP (admin
   `search_games`/`load_game`). 48K-build preference; `.tzx`/custom-loader games
-  are reported as needing real-time tape loading (see the accuracy tail). The
-  `speccy-library` bin headlessly verifies a set of classics in one command.
+  load in **real time** (see the accuracy tail), so the Dizzy series etc. work.
+  The `speccy-library` bin headlessly verifies a set of classics in one command.
 - [ ] `set_display(preset)` — expose the `display` crate themes so an agent can re-theme + screenshot.
-- [ ] `disassemble` / `trace` / breakpoints (need a disassembler in the core first).
+- [x] **Disassembler** — `z80::disassemble` (a pure read-only mirror of the
+  decoder: prefixes, `(IX+d)`, DDCB, ED block ops + undocumented slots; absolute
+  JR/DJNZ targets). Surfaced as `Spectrum::disassemble`, `zxspec_py`, and the MCP
+  `disassemble` tool (agent + admin). Tested by golden + all-opcode fuzz + a CPU
+  length cross-check.
+- [ ] `trace` / breakpoints (`StopReason::Breakpoint` already exists in the core).
 - [ ] Decision to lock: native `serialize_full()`/`deserialize_full()` for exact RL/debugger reset fidelity (vs lossy `.sna`/`.z80`). See [MCP spec §10](./02-mcp-server-layer-spec.md#10-open-decision-pyo3-boundary).
 
 ### A2. Roles & autonomy (spec 06) — **built** (on `chuk-mcp-server`)
@@ -91,11 +96,22 @@ over one shared `Supervisor`.
 ### B. SDK / developer kit (spec 03)
 - [ ] **L0** toolchain: one-command source → `.tap` → run-in-emulator; PNG→Spectrum asset pipeline.
 - [ ] **L1** framework over z88dk (sprites clash-aware + mono, tilemap, input, beeper SFX, fixed-point, RNG).
-- [ ] **L2** trap ABI: the `ED 70 <id>` host syscall + dispatch table, behind a pure/hybrid build flag. (The `z80` ED decoder already NOPs undefined slots — the degrade-on-real-hardware property is in place.)
+- [x] **L2** trap ABI — `ED FE` (`HOSTCALL`, id in `A`) → defaulted `Bus::host_trap`
+  → `spectrum::host` registry (`HostCalls`/`HostCtx`/`FnTable`) → PyO3 bridge
+  (`register_host_dispatcher`, with a liveness-guarded `TrapCtx`). NOP on bare
+  hardware (the fidelity dial), `HOST_PRESENT` probe, disassembles as `HOSTCALL`.
+  Tested in Rust (`FnTable` mul16) and Python (round-trip + guard + both ways).
+- [x] **L2 math handlers** — `spectrum::host::math_traps()`: `0x10 MUL16`,
+  `0x11 DIVMOD16` (carry on ÷0). Composable via `FnTable::with_fallback`, so Rust
+  math + a Python chat handler share one dispatcher (`register_host_dispatcher(cb,
+  with_math=True)` / `install_math_traps`).
 - [ ] **L3** showpiece: one app calling an MCP server through a trap.
 
 ### C. Spectrum-native chatbot / agent (spec 04)
-- [ ] `CHAT_BEGIN`/`CHAT_POLL` trap ABI + per-session event queue.
+- [x] **`CHAT_*` host protocol + event queue** (`chat.py`): `CHAT_BEGIN`/`POLL`/
+  `CANCEL`/`RESET` over the trap ABI, a `ChatSession` that queues the reply as
+  teletype events, pluggable responder (stub echo now). Tested end-to-end via the
+  trap. *(Z80 terminal app + chuk-llm backend still to come.)*
 - [ ] Host `run_chat` over `chuk-llm` + `chuk-tool-processor`; `speccy()` ASCII sanitiser + 32-col system prompt.
 - [ ] Z80 terminal: input line, custom colour-by-event print, `PRINT_FIFO` teletype drain + beeper, UDG spinner.
 - Prereq: SDK trap ABI (B/L2) and beeper (✓ M6).
@@ -116,7 +132,11 @@ Deliberately deferred; affects timing-precise demos, not games.
 - [ ] I/O-port contention (the 4-case ULA/high-byte timing model).
 - [ ] Floating-bus reads.
 - [ ] Per-T-state / per-scanline video (mid-frame writes → multicolour demos).
-- [ ] Real-time tape edge loading + `.tzx` (currently trap-load `.tap` only).
+- [x] **Real-time tape edge loading + `.tzx`** — `TapeSignal` plays the tape as a
+  pulse stream into the EAR line so turbo/custom loaders work (the trap fast-load
+  stays for standard `.tap`). TZX common blocks (standard/turbo/tone/pulse/data/
+  pause/loops). Proven end-to-end; the Dizzy games load. *(Direct-recording /
+  CSW / generalised TZX blocks not yet handled.)*
 - [ ] 128K model: memory paging + AY-3-8912 sound (memory layer is written bank-ready).
 
 ---

@@ -25,7 +25,7 @@ def test_two_surfaces_are_split():
 
     agent = names(server.build_agent())
     admin = names(server.build_admin())
-    assert "screenshot" in agent and "press_keys" in agent
+    assert "screenshot" in agent and "press_keys" in agent and "disassemble" in agent
     # agent is policy-free: no lifecycle / pokes / recording / library loading
     assert not any(x in agent for x in ("create_machine", "write_memory", "stop_recording", "destroy_session", "load_game"))
     assert len(agent) < len(admin)
@@ -52,6 +52,17 @@ def test_screenshot_is_png(sup):
     sup.session("s3")
     shot = server._screenshot("s3")
     assert shot.mimeType == "image/png" and len(shot.data) > 0
+
+
+def test_disassemble(sup):
+    sid = "s3d"
+    sup.session(sid)
+    # Poke a tiny program into RAM and disassemble it back.
+    sup.machine(sid).write_memory(0x8000, b"\x21\x00\x40\x76")  # LD HL,$4000 ; HALT
+    out = server._disassemble(sid, 0x8000, 2)
+    assert out["lines"][0]["text"] == "LD HL,$4000"
+    assert out["lines"][0]["bytes"] == "210040"
+    assert out["lines"][1]["text"] == "HALT"
 
 
 def test_auto_snapshot_cadence(sup):
@@ -84,6 +95,85 @@ def test_search_and_load_game(sup):
     # The downloaded game rendered something (not a blank screen).
     idx = bytes(sup.machine("g-net").screen_indexed())
     assert sum(1 for b in idx if b) > 0
+
+
+def test_host_trap_abi():
+    """The ED FE host-trap ABI: dispatch, register/memory access, carry, the
+    liveness guard, and clean NOP without a dispatcher."""
+    import zxspec_py
+
+    m = zxspec_py.Machine(open(ROM, "rb").read())
+    retained = {}
+
+    def on_trap(ctx):
+        retained["ctx"] = ctx  # keep it to test the guard
+        if ctx.a == 0x10:  # mul16
+            ctx.set_hl((ctx.bc * ctx.de) & 0xFFFF)
+            ctx.set_carry(False)
+        else:
+            ctx.set_carry(True)
+
+    m.register_host_dispatcher(on_trap)
+    m.write_memory(0x8000, b"\xED\xFE")
+    for name, val in (("pc", 0x8000), ("a", 0x10), ("bc", 7), ("de", 6)):
+        m.set_register(name, val)
+    m.step(1)
+    assert m.registers()["hl"] == 42
+    assert m.registers()["pc"] == 0x8002
+
+    # A retained ctx raises instead of dereferencing freed state.
+    with pytest.raises(RuntimeError):
+        retained["ctx"].read(0x4000, 1)
+
+    # Unknown id → carry set.
+    m.set_register("pc", 0x8000)
+    m.set_register("a", 0x99)
+    m.set_register("f", 0)
+    m.step(1)
+    assert m.registers()["f"] & 1
+
+    # No dispatcher → ED FE is a clean NOP (the fidelity dial).
+    m.clear_host_dispatcher()
+    m.set_register("pc", 0x8000)
+    m.set_register("hl", 0)
+    m.set_register("a", 0)
+    m.step(1)
+    assert m.registers()["hl"] == 0
+
+
+def test_chat_trap_protocol():
+    """The CHAT_* host protocol over the ED FE trap: BEGIN a turn, then POLL the
+    streamed reply events back out of RAM (echo responder — no LLM needed)."""
+    import zxspec_py
+    from chuk_mcp_spectrum import chat
+
+    m = zxspec_py.Machine(open(ROM, "rb").read())
+    session = chat.ChatSession()  # echo responder
+    m.register_host_dispatcher(chat.make_dispatcher(session))
+    m.write_memory(0x8000, b"\xED\xFE")  # HOSTCALL
+
+    def trap(sid, hl=0, bc=0):
+        for name, val in (("pc", 0x8000), ("a", sid), ("hl", hl), ("bc", bc)):
+            m.set_register(name, val)
+        m.step(1)
+
+    prompt = b"HI"
+    m.write_memory(0x9000, prompt)
+    trap(chat.CHAT_BEGIN, hl=0x9000, bc=len(prompt) << 8)  # B = length
+
+    out = bytearray()
+    for _ in range(64):
+        trap(chat.CHAT_POLL, hl=0x9100, bc=64 << 8)  # B = capacity
+        code, n = m.registers()["a"], m.registers()["bc"]
+        if code == chat.EV_TEXT:
+            out += bytes(m.read_memory(0x9100, n))
+        elif code == chat.EV_DONE:
+            break
+    assert out.decode("latin-1") == "You said: HI"
+
+    # POLL after the queue drains → EV_NONE.
+    trap(chat.CHAT_POLL, hl=0x9100, bc=64 << 8)
+    assert m.registers()["a"] == chat.EV_NONE
 
 
 def test_restore_snapshot_rewinds(sup):

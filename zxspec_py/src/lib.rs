@@ -3,6 +3,8 @@
 //! all MCP-shaping (PNG, base64, content blocks) happens in the Python layer
 //! (`docs/02-mcp-server-layer-spec.md`).
 
+mod trap;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -70,6 +72,53 @@ impl Machine {
             .map_err(|e| PyValueError::new_err(format!("{e:?}")))?;
         self.spec.autoload_tape();
         Ok(())
+    }
+
+    /// Type `LOAD ""` (without inserting a `.tap`) — for real-time tape loading
+    /// where the signal, not the ROM trap, feeds the loader.
+    fn type_load(&mut self) {
+        self.spec.autoload_tape();
+    }
+
+    /// Start **real-time** tape playback from `.tap`/`.tzx` bytes (`fmt`). Drives
+    /// the EAR line so turbo/custom loaders work; run frames to load it.
+    fn play_tape(&mut self, fmt: &str, data: &[u8]) -> PyResult<()> {
+        self.spec
+            .play_tape(fmt, data)
+            .map_err(|e| PyValueError::new_err(format!("{e:?}")))
+    }
+
+    /// True while a real-time tape is still playing.
+    fn tape_playing(&self) -> bool {
+        self.spec.tape_playing()
+    }
+
+    // --- host traps (`ED FE`) -----------------------------------------------
+
+    /// Install a Python callable `cb(ctx)` to answer `ED FE` host traps. `ctx`
+    /// exposes the registers (`a`, `bc`, `hl`, … + setters), `carry`, and
+    /// `read(addr,len)`/`write(addr,bytes)` — valid only during the call. Switch
+    /// on `ctx.a` (the syscall id). Without one, `ED FE` is a NOP. With
+    /// `with_math=True`, the native math syscalls (0x10–0x1F) are handled in Rust
+    /// and only other ids reach `cb`.
+    #[pyo3(signature = (cb, with_math = false))]
+    fn register_host_dispatcher(&mut self, cb: Py<PyAny>, with_math: bool) {
+        let py = Box::new(trap::PyDispatcher::new(cb));
+        if with_math {
+            self.spec.set_host_dispatcher(Box::new(spectrum::host::math_traps().with_fallback(py)));
+        } else {
+            self.spec.set_host_dispatcher(py);
+        }
+    }
+
+    /// Install only the native math syscalls (0x10–0x1F) — no Python callback.
+    fn install_math_traps(&mut self) {
+        self.spec.set_host_dispatcher(Box::new(spectrum::host::math_traps()));
+    }
+
+    /// Remove the host dispatcher; `ED FE` reverts to a NOP.
+    fn clear_host_dispatcher(&mut self) {
+        self.spec.clear_host_dispatcher();
     }
 
     // --- execution -----------------------------------------------------------
@@ -148,6 +197,23 @@ impl Machine {
     /// Read `len` bytes from `addr` (wrapping the 64K space).
     fn read_memory<'py>(&self, py: Python<'py>, addr: u16, len: u16) -> Bound<'py, PyBytes> {
         PyBytes::new_bound(py, &self.spec.read_memory(addr, len))
+    }
+
+    /// Disassemble `count` instructions from `addr`. Returns a list of
+    /// `{addr, bytes, text}` dicts (the next instruction is at `addr + len(bytes)`).
+    #[pyo3(signature = (addr, count=16))]
+    fn disassemble<'py>(&self, py: Python<'py>, addr: u16, count: u16) -> Vec<Bound<'py, PyDict>> {
+        self.spec
+            .disassemble(addr, count)
+            .into_iter()
+            .map(|l| {
+                let d = PyDict::new_bound(py);
+                d.set_item("addr", l.addr).unwrap();
+                d.set_item("bytes", PyBytes::new_bound(py, &l.bytes)).unwrap();
+                d.set_item("text", l.text).unwrap();
+                d
+            })
+            .collect()
     }
 
     /// Decoded display as RGBA bytes (256×192×4, no border).

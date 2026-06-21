@@ -43,8 +43,8 @@ cargo run --release --bin speccy-library -- testroms/48.rom "Chaos" "Green Beret
 ```
 
 Fetches each title, loads it, runs a few seconds, and reports which render. The
-core loads `.tap`/`.z80`/`.sna`; `.tzx`/custom-loader games (e.g. the Dizzy
-series) are reported as needing real-time tape loading (a future item).
+core loads `.tap`/`.z80`/`.sna` instantly and `.tzx` in real time (signal-level,
+so turbo/custom loaders like the Dizzy series work).
 
 ## MCP server
 

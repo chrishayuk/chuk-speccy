@@ -72,6 +72,20 @@ macro_rules! pair {
 }
 
 impl Regs {
+    /// Carry flag (bit 0 of F) — the host-trap error convention (CF=1 ⇒ failed).
+    #[inline]
+    pub fn carry(&self) -> bool {
+        self.f & crate::flags::CF != 0
+    }
+    #[inline]
+    pub fn set_carry(&mut self, on: bool) {
+        if on {
+            self.f |= crate::flags::CF;
+        } else {
+            self.f &= !crate::flags::CF;
+        }
+    }
+
     pair!(af, set_af, a, f);
     pair!(bc, set_bc, b, c);
     pair!(de, set_de, d, e);

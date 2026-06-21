@@ -412,6 +412,13 @@ impl Cpu {
 
     fn exec_ed<B: Bus>(&mut self, bus: &mut B) {
         let op = self.fetch_op(bus);
+        // `ED FE` is the reserved host-trap opcode (otherwise an undefined NOP).
+        // The two fetches already charged 8T; a handler may add latency.
+        if op == crate::TRAP_OP {
+            let extra = bus.host_trap(&mut self.regs);
+            bus.tick(extra);
+            return;
+        }
         let x = op >> 6;
         let y = (op >> 3) & 7;
         let z = op & 7;

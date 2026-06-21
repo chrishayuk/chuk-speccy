@@ -5,6 +5,7 @@
 //! [`z80::Bus`], so the borrow checker stays happy and all timing lives in the
 //! ULA (`docs/01-core-emulator-spec.md` §3).
 
+pub mod host;
 pub mod keyboard;
 pub mod memory;
 pub mod snapshot;
@@ -13,7 +14,7 @@ pub mod ula;
 
 use keyboard::{Keyboard, KeyPos};
 use memory::Memory;
-use tape::Tape;
+use tape::{Tape, TapeSignal};
 use ula::Ula;
 use z80::{Bus, Cpu, StopReason};
 
@@ -29,6 +30,25 @@ pub struct Board {
     pub mem: Memory,
     pub ula: Ula,
     pub kb: Keyboard,
+    /// A real-time tape signal (turbo/custom loaders); `None` = no tape playing.
+    /// Advanced in lockstep with the ULA clock; drives the EAR input bit.
+    pub tape_signal: Option<TapeSignal>,
+    /// Optional host-trap dispatcher (`ED FE`); `None` = traps are NOPs.
+    host: Option<Box<dyn host::HostCalls>>,
+}
+
+impl Board {
+    /// Advance the real-time tape by `cycles` master T-states and reflect its
+    /// EAR level into the keyboard port (bit 6). Called wherever the ULA clock
+    /// advances, so the tape stays in sync with the CPU.
+    fn advance_tape(&mut self, cycles: u32) {
+        if let Some(t) = &mut self.tape_signal {
+            if t.playing() {
+                t.advance(cycles);
+                self.kb.ear = t.level();
+            }
+        }
+    }
 }
 
 impl Bus for Board {
@@ -68,11 +88,25 @@ impl Bus for Board {
         let delay = self.ula.contention(addr);
         if delay > 0 {
             self.ula.tick(delay);
+            self.advance_tape(delay);
         }
     }
 
     fn tick(&mut self, cycles: u32) {
         self.ula.tick(cycles);
+        self.advance_tape(cycles);
+    }
+
+    fn host_trap(&mut self, regs: &mut z80::Regs) -> u32 {
+        // Split borrow: `host` and `mem` are disjoint fields, so the dispatcher
+        // can read/write memory while it runs.
+        match self.host.as_mut() {
+            Some(h) => {
+                let mut ctx = host::HostCtx::new(regs, &mut self.mem);
+                h.dispatch(&mut ctx)
+            }
+            None => 0,
+        }
     }
 }
 
@@ -91,6 +125,15 @@ pub struct Spectrum {
     rec_indexed: Vec<u8>,
 }
 
+/// One disassembled instruction: its address, the raw bytes it spans, and the
+/// mnemonic. Returned by [`Spectrum::disassemble`].
+#[derive(Debug, Clone)]
+pub struct DisasmLine {
+    pub addr: u16,
+    pub bytes: Vec<u8>,
+    pub text: String,
+}
+
 impl Spectrum {
     /// Build a 48K machine. `rom` should be the 16K system ROM image; pass an
     /// empty slice to start with a blank ROM (useful for unit tests).
@@ -103,6 +146,8 @@ impl Spectrum {
                 mem: Memory::new_48k(rom),
                 ula: Ula::new(),
                 kb: Keyboard::new(),
+                tape_signal: None,
+                host: None,
             },
             tape: None,
             rec_enabled: false,
@@ -225,6 +270,21 @@ impl Spectrum {
         }
     }
 
+    /// Disassemble `count` instructions from live memory starting at `addr`.
+    /// Each line carries its address, raw bytes, and mnemonic; the next line
+    /// begins at `addr + bytes.len()`.
+    pub fn disassemble(&self, addr: u16, count: u16) -> Vec<DisasmLine> {
+        let mut out = Vec::with_capacity(count as usize);
+        let mut pc = addr;
+        for _ in 0..count {
+            let d = z80::disassemble(pc, |a| self.board.mem.read(a));
+            let bytes = (0..d.len).map(|i| self.board.mem.read(pc.wrapping_add(i as u16))).collect();
+            out.push(DisasmLine { addr: pc, bytes, text: d.text });
+            pc = pc.wrapping_add(d.len as u16);
+        }
+        out
+    }
+
     // --- snapshots -----------------------------------------------------------
 
     /// Load a snapshot by format (`"sna"` or `"z80"`); the format is also sniffed
@@ -263,6 +323,36 @@ impl Spectrum {
     /// the prompt.
     pub fn autoload_tape(&mut self) {
         self.type_text("j\"\"\n");
+    }
+
+    /// Insert a tape for **real-time** (signal-level) loading and start playback.
+    /// Unlike [`load_tap`](Self::load_tap)'s ROM trap, this drives the EAR line
+    /// edge by edge, so turbo/custom loaders (most `.tzx` games) work. It loads in
+    /// real time — a pilot tone alone is ~2 s — so run the machine for a while.
+    /// `fmt` is `"tap"` or `"tzx"`.
+    pub fn play_tape(&mut self, fmt: &str, data: &[u8]) -> Result<(), snapshot::SnapshotError> {
+        let mut sig = TapeSignal::from_bytes(fmt, data)?;
+        sig.play();
+        self.board.tape_signal = Some(sig);
+        Ok(())
+    }
+
+    /// True while a real-time tape is still playing.
+    pub fn tape_playing(&self) -> bool {
+        self.board.tape_signal.as_ref().is_some_and(|t| t.playing())
+    }
+
+    // --- host traps (`ED FE`) -----------------------------------------------
+
+    /// Install the dispatcher that answers `ED FE` host traps. Without one, the
+    /// opcode is a clean NOP (so a hybrid binary degrades on bare hardware).
+    pub fn set_host_dispatcher(&mut self, d: Box<dyn host::HostCalls>) {
+        self.board.host = Some(d);
+    }
+
+    /// Remove the host dispatcher; `ED FE` reverts to a NOP.
+    pub fn clear_host_dispatcher(&mut self) {
+        self.board.host = None;
     }
 
     /// Service the ROM `LD-BYTES` trap: read the next tape block and inject it.
@@ -545,6 +635,96 @@ mod tests {
         // Stopped: further frames aren't captured.
         spec.run_frame();
         assert_eq!(spec.recording_count(), 0);
+    }
+
+    #[test]
+    fn disassembles_from_memory() {
+        let mut spec = Spectrum::new_48k(&[]);
+        // LD HL,$4000 ; INC HL ; LD A,(HL) ; HALT
+        spec.write_memory(0x8000, &[0x21, 0x00, 0x40, 0x23, 0x7E, 0x76]);
+        let lines = spec.disassemble(0x8000, 4);
+        let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["LD HL,$4000", "INC HL", "LD A,(HL)", "HALT"]);
+        assert_eq!(lines[0].addr, 0x8000);
+        assert_eq!(lines[0].bytes, vec![0x21, 0x00, 0x40]);
+        assert_eq!(lines[1].addr, 0x8003, "next line follows the previous length");
+    }
+
+    #[test]
+    fn host_trap_dispatches_to_fntable() {
+        use crate::host::{FnTable, HostCtx};
+        let mut spec = Spectrum::new_48k(&[]);
+        let mut table = FnTable::new();
+        // 0x10 = mul16: HL = BC * DE.
+        table.on(0x10, |ctx: &mut HostCtx| {
+            let bc = (ctx.regs.b as u16) << 8 | ctx.regs.c as u16;
+            let de = (ctx.regs.d as u16) << 8 | ctx.regs.e as u16;
+            ctx.regs.set_hl(bc.wrapping_mul(de));
+            ctx.ok();
+            0
+        });
+        spec.set_host_dispatcher(Box::new(table));
+
+        spec.write_memory(0x8000, &[0xED, 0xFE]); // HOSTCALL
+        spec.cpu.regs.pc = 0x8000;
+        spec.cpu.regs.a = 0x10;
+        spec.cpu.regs.set_bc(7);
+        spec.cpu.regs.set_de(6);
+        spec.step();
+
+        assert_eq!(spec.cpu.regs.hl(), 42, "BC*DE written back to HL");
+        assert_eq!(spec.cpu.regs.pc, 0x8002, "two-byte opcode consumed");
+        assert!(!spec.cpu.regs.carry(), "ok() cleared carry");
+    }
+
+    #[test]
+    fn host_trap_unknown_id_sets_carry() {
+        let mut spec = Spectrum::new_48k(&[]);
+        spec.set_host_dispatcher(Box::new(crate::host::FnTable::new()));
+        spec.write_memory(0x8000, &[0xED, 0xFE]);
+        spec.cpu.regs.pc = 0x8000;
+        spec.cpu.regs.a = 0x99; // no handler registered
+        spec.cpu.regs.set_carry(false);
+        spec.step();
+        assert!(spec.cpu.regs.carry(), "unknown id fails with CF=1");
+        assert_eq!(spec.cpu.regs.pc, 0x8002);
+    }
+
+    #[test]
+    fn math_traps_mul_and_divmod() {
+        let mut spec = Spectrum::new_48k(&[]);
+        spec.set_host_dispatcher(Box::new(host::math_traps()));
+        let run = |spec: &mut Spectrum, a: u8, bc: u16, de: u16| {
+            spec.write_memory(0x9000, &[0xED, 0xFE]);
+            spec.cpu.regs.pc = 0x9000;
+            spec.cpu.regs.a = a;
+            spec.cpu.regs.set_bc(bc);
+            spec.cpu.regs.set_de(de);
+            spec.step();
+        };
+        run(&mut spec, 0x10, 200, 50); // MUL16: 200*50
+        assert_eq!(spec.cpu.regs.hl(), 10_000);
+        assert!(!spec.cpu.regs.carry());
+
+        run(&mut spec, 0x11, 1000, 7); // DIVMOD16: 1000/7
+        assert_eq!(spec.cpu.regs.hl(), 142);
+        assert_eq!(spec.cpu.regs.de(), 6);
+
+        run(&mut spec, 0x11, 5, 0); // divide by zero → carry
+        assert!(spec.cpu.regs.carry());
+    }
+
+    #[test]
+    fn host_trap_is_nop_without_dispatcher() {
+        // The fidelity dial: with no host, ED FE does nothing (as on real silicon).
+        let mut spec = Spectrum::new_48k(&[]);
+        spec.write_memory(0x8000, &[0xED, 0xFE]);
+        spec.cpu.regs.pc = 0x8000;
+        spec.cpu.regs.set_hl(0);
+        spec.cpu.regs.a = 0x00; // HOST_PRESENT probe
+        spec.step();
+        assert_eq!(spec.cpu.regs.hl(), 0, "HL unchanged → bare hardware");
+        assert_eq!(spec.cpu.regs.pc, 0x8002);
     }
 
     #[test]
