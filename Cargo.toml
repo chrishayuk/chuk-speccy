@@ -1,0 +1,16 @@
+# chuk-speccy workspace — see docs/01-core-emulator-spec.md §2 for the layout.
+# Dependency arrow is strictly: frontend -> spectrum -> z80.
+[workspace]
+resolver = "2"
+members = ["z80", "spectrum", "display", "frontend", "z80-tests"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/chrishayuk/chuk-speccy"
+
+# Keep release builds tight; the CPU core is hot.
+[profile.release]
+opt-level = 3
+lto = "thin"

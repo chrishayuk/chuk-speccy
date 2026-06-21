@@ -1,0 +1,10 @@
+[package]
+name = "spectrum"
+description = "The 48K Spectrum machine: memory, ULA, contention, ports — over the z80 core."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+z80 = { path = "../z80" }

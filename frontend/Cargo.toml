@@ -1,0 +1,24 @@
+[package]
+name = "frontend"
+description = "Heads over the spectrum core. For now: a themed terminal (TUI) head via the display pipeline."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "speccy"
+path = "src/main.rs"
+
+[[bin]]
+name = "speccy-gui"
+path = "src/bin/gui.rs"
+
+[dependencies]
+spectrum = { path = "../spectrum" }
+display = { path = "../display" }
+# Native pixel-perfect window head (the desktop head from spec 05). Lightweight
+# software framebuffer + window + keyboard, cross-platform.
+minifb = "0.27"
+# Cross-platform audio output for the beeper.
+cpal = "0.15"

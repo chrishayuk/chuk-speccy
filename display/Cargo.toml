@@ -1,0 +1,9 @@
+[package]
+name = "display"
+description = "Presentation pipeline: indexed framebuffer -> theme -> effects -> RGBA. Standalone, no emulator deps."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]

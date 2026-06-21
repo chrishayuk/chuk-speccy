@@ -1,0 +1,9 @@
+[package]
+name = "z80"
+description = "Pure, no_std Z80 CPU core (registers, decode, Bus trait)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]

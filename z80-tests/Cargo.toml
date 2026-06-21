@@ -1,0 +1,14 @@
+[package]
+name = "z80-tests"
+description = "SingleStepTests JSON harness + ZEX runner for the z80 core."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+z80 = { path = "../z80" }
+
+# TODO(M0): add a JSON dep (serde_json) and the SingleStepTests harness once
+# building online; ZEXDOC/ZEXALL runner lands alongside it.
