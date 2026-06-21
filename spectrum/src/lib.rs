@@ -13,7 +13,7 @@ pub mod ula;
 
 use keyboard::{Keyboard, KeyPos};
 use memory::Memory;
-use tape::Tape;
+use tape::{Tape, TapeSignal};
 use ula::Ula;
 use z80::{Bus, Cpu, StopReason};
 
@@ -29,6 +29,23 @@ pub struct Board {
     pub mem: Memory,
     pub ula: Ula,
     pub kb: Keyboard,
+    /// A real-time tape signal (turbo/custom loaders); `None` = no tape playing.
+    /// Advanced in lockstep with the ULA clock; drives the EAR input bit.
+    pub tape_signal: Option<TapeSignal>,
+}
+
+impl Board {
+    /// Advance the real-time tape by `cycles` master T-states and reflect its
+    /// EAR level into the keyboard port (bit 6). Called wherever the ULA clock
+    /// advances, so the tape stays in sync with the CPU.
+    fn advance_tape(&mut self, cycles: u32) {
+        if let Some(t) = &mut self.tape_signal {
+            if t.playing() {
+                t.advance(cycles);
+                self.kb.ear = t.level();
+            }
+        }
+    }
 }
 
 impl Bus for Board {
@@ -68,11 +85,13 @@ impl Bus for Board {
         let delay = self.ula.contention(addr);
         if delay > 0 {
             self.ula.tick(delay);
+            self.advance_tape(delay);
         }
     }
 
     fn tick(&mut self, cycles: u32) {
         self.ula.tick(cycles);
+        self.advance_tape(cycles);
     }
 }
 
@@ -112,6 +131,7 @@ impl Spectrum {
                 mem: Memory::new_48k(rom),
                 ula: Ula::new(),
                 kb: Keyboard::new(),
+                tape_signal: None,
             },
             tape: None,
             rec_enabled: false,
@@ -287,6 +307,23 @@ impl Spectrum {
     /// the prompt.
     pub fn autoload_tape(&mut self) {
         self.type_text("j\"\"\n");
+    }
+
+    /// Insert a tape for **real-time** (signal-level) loading and start playback.
+    /// Unlike [`load_tap`](Self::load_tap)'s ROM trap, this drives the EAR line
+    /// edge by edge, so turbo/custom loaders (most `.tzx` games) work. It loads in
+    /// real time — a pilot tone alone is ~2 s — so run the machine for a while.
+    /// `fmt` is `"tap"` or `"tzx"`.
+    pub fn play_tape(&mut self, fmt: &str, data: &[u8]) -> Result<(), snapshot::SnapshotError> {
+        let mut sig = TapeSignal::from_bytes(fmt, data)?;
+        sig.play();
+        self.board.tape_signal = Some(sig);
+        Ok(())
+    }
+
+    /// True while a real-time tape is still playing.
+    pub fn tape_playing(&self) -> bool {
+        self.board.tape_signal.as_ref().is_some_and(|t| t.playing())
     }
 
     /// Service the ROM `LD-BYTES` trap: read the next tape block and inject it.
