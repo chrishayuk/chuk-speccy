@@ -29,5 +29,7 @@ wos = { path = "../wos" }
 winit = "0.30"
 softbuffer = "0.4"
 muda = "0.19"
+# Native open/save dialogs for the Machine menu (load/save snapshot).
+rfd = "0.15"
 # Cross-platform audio output for the beeper.
 cpal = "0.15"

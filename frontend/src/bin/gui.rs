@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use display::DisplayConfig;
-use muda::{CheckMenuItem, Menu, MenuEvent, PredefinedMenuItem, Submenu};
+use muda::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use softbuffer::{Context, Surface};
 use spectrum::keyboard::{self, KeyPos};
 use spectrum::Spectrum;
@@ -132,6 +132,7 @@ fn main() {
 
     let mut app = Gui {
         spec,
+        rom,
         cfg,
         title: format!("chuk-speccy — {theme_name}"),
         init_scale,
@@ -147,6 +148,9 @@ fn main() {
         held: HashSet::new(),
         next_frame: Instant::now(),
         audio_items: Vec::new(),
+        save_item: None,
+        load_item: None,
+        reset_item: None,
         _menu: None,
         menu_built: false,
     };
@@ -161,6 +165,7 @@ fn main() {
 /// The app: emulator + window + audio + native menus, all on the main thread.
 struct Gui {
     spec: Spectrum,
+    rom: Vec<u8>, // kept so the Machine ▸ Reset menu item can rebuild the machine
     cfg: DisplayConfig,
     title: String,
     init_scale: u32,
@@ -179,6 +184,9 @@ struct Gui {
     next_frame: Instant,
     // menus (muda) — kept alive for the program's life
     audio_items: Vec<CheckMenuItem>,
+    save_item: Option<MenuItem>,
+    load_item: Option<MenuItem>,
+    reset_item: Option<MenuItem>,
     _menu: Option<Menu>,
     menu_built: bool,
 }
@@ -307,6 +315,17 @@ impl Gui {
         let _ = app.append(&PredefinedMenuItem::quit(None));
         let _ = menu.append(&app);
 
+        // Machine: snapshot save/load + reset.
+        let machine = Submenu::new("Machine", true);
+        let save = MenuItem::new("Save Snapshot…", true, None);
+        let load = MenuItem::new("Load Snapshot…", true, None);
+        let reset = MenuItem::new("Reset", true, None);
+        let _ = machine.append(&save);
+        let _ = machine.append(&load);
+        let _ = machine.append(&PredefinedMenuItem::separator());
+        let _ = machine.append(&reset);
+        let _ = menu.append(&machine);
+
         // A "View" menu that macOS auto-populates with its native "Enter Full
         // Screen" (⌃⌘F) + window-tabbing items — so we add no fullscreen item of
         // our own (that produced a duplicate). The green button and F11 also work.
@@ -326,6 +345,9 @@ impl Gui {
         #[cfg(target_os = "macos")]
         menu.init_for_nsapp();
 
+        self.save_item = Some(save);
+        self.load_item = Some(load);
+        self.reset_item = Some(reset);
         self.audio_items = items;
         self._menu = Some(menu);
         self.menu_built = true;
@@ -333,10 +355,61 @@ impl Gui {
 
     fn poll_menu(&mut self) {
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
-            if let Some(idx) = self.audio_items.iter().position(|it| it.id() == &ev.id) {
+            if self.save_item.as_ref().is_some_and(|i| i.id() == &ev.id) {
+                self.save_snapshot();
+            } else if self.load_item.as_ref().is_some_and(|i| i.id() == &ev.id) {
+                self.load_snapshot();
+            } else if self.reset_item.as_ref().is_some_and(|i| i.id() == &ev.id) {
+                self.reset();
+            } else if let Some(idx) = self.audio_items.iter().position(|it| it.id() == &ev.id) {
                 let name = self.audio_devices[idx].clone();
                 self.switch_audio(&name);
             }
+        }
+    }
+
+    // --- machine: snapshot + reset ------------------------------------------
+
+    fn save_snapshot(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Spectrum snapshot", &["sna"])
+            .set_file_name("snapshot.sna")
+            .save_file()
+        {
+            match std::fs::write(&path, self.spec.save_sna()) {
+                Ok(()) => eprintln!("saved snapshot to {}", path.display()),
+                Err(e) => eprintln!("could not save snapshot: {e}"),
+            }
+        }
+    }
+
+    fn load_snapshot(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Spectrum snapshot", &["sna", "z80"])
+            .pick_file()
+        else {
+            return;
+        };
+        let data = match std::fs::read(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("could not read {}: {e}", path.display());
+                return;
+            }
+        };
+        let fmt = match path.extension().and_then(|e| e.to_str()) {
+            Some(e) if e.eq_ignore_ascii_case("sna") => "sna",
+            _ => "z80",
+        };
+        if let Err(e) = self.spec.load_snapshot(fmt, &data) {
+            eprintln!("snapshot load failed: {e:?}");
+        }
+    }
+
+    fn reset(&mut self) {
+        self.spec = Spectrum::new_48k(&self.rom);
+        if self.audio_rate > 0 {
+            self.spec.enable_audio(self.audio_rate); // the fresh machine needs audio re-armed
         }
     }
 
