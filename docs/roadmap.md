@@ -7,7 +7,7 @@ across seven specs ([README index](./README.md)); this tracks delivery against t
 ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
-(Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM, differential-tested against a Rust replica.
+(Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), and a `.tap` emitter so a compiled dialect game **boots on the real 48K ROM**.
 Remaining: `rustz80` Stage 3b (the Game-trait prelude — full dial ergonomics), extra frontends, the RL env, and the accuracy tail.
 
 ---
@@ -185,6 +185,13 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   CPU, and **differential-tested** against a Rust replica — final-state checksum
   *and* the screen bitmap (`0x4000..0x5800`) match byte-for-byte across 0..64 steps;
   exactly the 6-cell body stays lit. The whole dialect exercised at once.
+- [x] **`.tap` emitter + `speccy-compile` CLI** — wrap compiled code in a BASIC
+  autoloader (`10 CLEAR org-1: LOAD "" CODE: RANDOMIZE USR entry`) so a dialect
+  `.rs` becomes a **bootable tape** (`speccy-compile game.rs -o game.tap`, then load
+  in `speccy-gui`). Proven end-to-end: a dialect program loaded via the **real 48K
+  ROM** tape loader auto-runs and executes (sentinel + screen poke verified; ROM-
+  gated test). So a rustz80 game now boots on the actual machine — the dial closed
+  through to hardware.
 - [ ] **Stage 3b (ergonomics)** — recognise a `Game` trait + ship an SDK prelude so
   the *same* `impl Game` file compiles host (rustc) and pure (rustz80) with no
   per-target edits, closing the dial fully. (Recursion needs stack frames — Stage 4.)
@@ -240,7 +247,7 @@ core M0–M8 ✓ ──▶ A. MCP server ✓ ──▶ E. RL env (free re-skin)
                       │
                       └──▶ B. SDK ✓ (trap ABI + host-composite SDK) ──▶ C. chatbot ✓
                                   │
-                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 3 (Snake compiles + runs on the CPU) ✓; the big, escapable bet
+                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 3 (Snake runs; games boot from .tap on real ROM) ✓; the big, escapable bet
    D. frontends (WASM / shaders / streamed)        ── parallel, any time
    Later. accuracy tail (real-time .tzx ✓ done)    ── parallel, as desired
 ```

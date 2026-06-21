@@ -13,8 +13,10 @@
 mod codegen;
 mod ir;
 mod lower;
+mod tap;
 
 pub use ir::Func;
+pub use tap::to_tap;
 
 use std::collections::HashMap;
 
@@ -35,6 +37,15 @@ pub fn compile_program(src: &str) -> Result<Program, String> {
     let funcs = lower::lower_program(&file)?;
     let (code, symbols) = codegen::codegen_program(&funcs, ORG);
     Ok(Program { code, symbols })
+}
+
+/// Compile a program and wrap it as a bootable `.tap` that runs from `entry`
+/// (a function name, default `"main"`). The autoloader `CLEAR`s below [`ORG`],
+/// `LOAD`s the code there, and `RANDOMIZE USR`s the entry.
+pub fn compile_to_tap(src: &str, entry: &str, name: &str) -> Result<Vec<u8>, String> {
+    let prog = compile_program(src)?;
+    let addr = *prog.symbols.get(entry).ok_or_else(|| format!("no `{entry}` function"))?;
+    Ok(to_tap(&prog.code, ORG, addr, name))
 }
 
 /// Compile a single Rust `fn` to Z80 machine code with its entry at [`ORG`]
