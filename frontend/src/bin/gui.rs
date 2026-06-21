@@ -16,6 +16,7 @@
 //!   fullscreen: start full screen (borderless). Toggle anytime via View menu / F11.
 //!   audiodev=NAME: start with sound on the output whose name contains NAME.
 //!   audiolist: print the available output audio devices and exit.
+//!   chat: boot the Z80 chat terminal — type a line, ENTER, the host replies.
 
 use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroU32;
@@ -58,12 +59,15 @@ fn main() {
     let mut media_path: Option<String> = None;
     let mut init_scale: u32 = 3;
     let mut start_fullscreen = false;
+    let mut chat_mode = false;
     let mut audio_device: Option<String> = None;
     let mut query_parts: Vec<String> = Vec::new();
     for a in args {
         if a == "audiolist" {
             list_output_devices();
             return;
+        } else if a == "chat" {
+            chat_mode = true;
         } else if let Some(name) = a.strip_prefix("audiodev=") {
             audio_device = Some(name.to_string());
         } else if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") {
@@ -90,7 +94,17 @@ fn main() {
     });
     let mut spec = Spectrum::new_48k(&rom);
 
-    if let Some(p) = &media_path {
+    if chat_mode {
+        // Boot, then install the chat host + load the Z80 terminal: type a line,
+        // press ENTER, and the host's reply teletypes back (docs/04).
+        for _ in 0..250 {
+            spec.run_frame();
+        }
+        spec.set_host_dispatcher(Box::new(spectrum::host::chat_traps()));
+        spec.write_memory(spectrum::sdk::CHAT_TERMINAL_ORG, &spectrum::sdk::CHAT_TERMINAL);
+        spec.cpu.regs.pc = spectrum::sdk::CHAT_TERMINAL_ORG;
+        eprintln!("chat mode: type a line and press ENTER (echo responder)");
+    } else if let Some(p) = &media_path {
         let data = std::fs::read(p).unwrap_or_else(|e| {
             eprintln!("could not read {p}: {e}");
             std::process::exit(1);

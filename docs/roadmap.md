@@ -112,12 +112,15 @@ over one shared `Supervisor`.
   Python `chat.py` (`ChatSession`, pluggable responder, optional `llm_responder`
   for chuk-llm) and native Rust `spectrum::host::chat_traps()`. `CHAT_BEGIN`/`POLL`/
   `CANCEL`/`RESET`; reply streamed as teletype events. Tested end-to-end.
-- [x] **Z80 terminal (demo)** — `spectrum --example chat_terminal`: a hand-assembled
-  Z80 loop does `CHAT_BEGIN` then drains `CHAT_POLL`, printing the reply via the ROM
-  (`RST $10`). Proves the two-clock loop end to end (screen shows the host's reply).
+- [x] **Z80 terminal — interactive** (`spectrum::sdk::CHAT_TERMINAL`): reads a
+  keyboard **input line** (echoed; forces L-mode so letters aren't keywords), and
+  on ENTER sends it via `CHAT_BEGIN` then teletypes the reply (in cyan) via
+  `CHAT_POLL` + `RST $10`. Live in the GUI: **`speccy-gui <rom> chat`** — type and
+  chat. Headless round-trip test; `spectrum --example chat_terminal` is the canned
+  one-shot demo.
 - [ ] Real chat backend: wire `chuk-llm` into the responder (hook is in place).
-- [ ] Full Z80 terminal: keyboard **input line**, colour-by-event print, `PRINT_FIFO`
-  teletype + beeper, UDG spinner (the demo uses a canned prompt + plain print).
+- [ ] Terminal polish: colour-by-event beyond ink, `PRINT_FIFO` + beeper click, a
+  UDG "thinking" spinner while `CHAT_POLL` returns NONE (matters with a slow LLM).
 - Prereq: SDK trap ABI (B/L2) and beeper (✓ M6).
 
 ### D. More frontends (spec 05)
