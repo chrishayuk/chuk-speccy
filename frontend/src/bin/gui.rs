@@ -10,6 +10,8 @@
 //!   theme:  authentic | dark | light | terminal | amber | gameboy  (default authentic)
 //!   scaleN: integer pixel zoom, e.g. `scale3` (default: auto-fit a sensible size)
 //!   fullscreen: borderless, screen-filling, on top — for a second display / AirPlay.
+//!   audiodev=NAME: send sound to the output whose name contains NAME.
+//!   audiolist: print the available output audio devices and exit.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use display::{BorderMode, DisplayConfig};
@@ -33,9 +35,17 @@ fn main() {
     let mut media_path: Option<String> = None;
     let mut scale = Scale::FitScreen;
     let mut fullscreen = false;
+    let mut audio_device: Option<String> = None;
     let mut query_parts: Vec<String> = Vec::new();
     for a in args {
-        if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") {
+        if a == "audiolist" {
+            list_output_devices();
+            return;
+        } else if let Some(name) = a.strip_prefix("audiodev=") {
+            // Route the beeper to a named output (substring match), e.g. an
+            // AirPlay/TV device when projecting. `audiolist` prints the choices.
+            audio_device = Some(name.to_string());
+        } else if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") {
             media_path = Some(a);
         } else if a == "fullscreen" || a == "present" {
             // Borderless, screen-filling, always-on-top — clean for projecting to
@@ -105,7 +115,7 @@ fn main() {
     // callback drains `ring`; the emulation loop refills it (audio-driven pacing).
     let ring: Audio = Arc::new(Mutex::new(VecDeque::new()));
     let mut audio_rate = 0u32;
-    let _stream = match start_audio(ring.clone()) {
+    let _stream = match start_audio(ring.clone(), audio_device.as_deref()) {
         Ok((stream, rate)) => {
             spec.enable_audio(rate);
             audio_rate = rate;
@@ -213,13 +223,15 @@ fn load_media(spec: &mut Spectrum, fmt: &str, data: &[u8]) {
     }
 }
 
-/// Open the default output device and start a stream that drains `ring`. Returns
+/// Open an output device and start a stream that drains `ring`. `device_name`
+/// selects an output by case-insensitive substring (else the default). Returns
 /// the live stream (keep it alive) and the sample rate to feed the emulator.
-fn start_audio(ring: Audio) -> Result<(cpal::Stream, u32), String> {
+fn start_audio(ring: Audio, device_name: Option<&str>) -> Result<(cpal::Stream, u32), String> {
     let host = cpal::default_host();
-    let device = host
-        .default_output_device()
-        .ok_or("no output device")?;
+    let device = pick_output_device(&host, device_name)?;
+    if let Ok(name) = device.name() {
+        eprintln!("audio device: {name}");
+    }
     let config = device
         .default_output_config()
         .map_err(|e| e.to_string())?;
@@ -254,6 +266,41 @@ fn start_audio(ring: Audio) -> Result<(cpal::Stream, u32), String> {
         .map_err(|e| e.to_string())?;
     stream.play().map_err(|e| e.to_string())?;
     Ok((stream, rate))
+}
+
+/// Pick an output device by case-insensitive substring of its name, falling back
+/// to the system default (with a warning) when nothing matches.
+fn pick_output_device(host: &cpal::Host, want: Option<&str>) -> Result<cpal::Device, String> {
+    if let Some(substr) = want {
+        let lc = substr.to_lowercase();
+        if let Ok(devices) = host.output_devices() {
+            for d in devices {
+                if d.name().map(|n| n.to_lowercase().contains(&lc)).unwrap_or(false) {
+                    return Ok(d);
+                }
+            }
+        }
+        eprintln!("no audio output matching {substr:?}; using the default");
+    }
+    host.default_output_device().ok_or_else(|| "no output device".to_string())
+}
+
+/// Print the available output devices (marking the default), then return.
+fn list_output_devices() {
+    let host = cpal::default_host();
+    let default = host.default_output_device().and_then(|d| d.name().ok());
+    println!("output audio devices:");
+    match host.output_devices() {
+        Ok(devices) => {
+            for d in devices {
+                if let Ok(name) = d.name() {
+                    let mark = if Some(&name) == default.as_ref() { "  (default)" } else { "" };
+                    println!("  {name}{mark}");
+                }
+            }
+        }
+        Err(e) => eprintln!("could not enumerate output devices: {e}"),
+    }
 }
 
 /// Press the matrix key(s) for a held host key. Modifier keys map to CAPS/SYM
