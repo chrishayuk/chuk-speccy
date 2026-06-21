@@ -103,7 +103,7 @@ impl Bus for Board {
         // can read/write memory while it runs.
         match self.host.as_mut() {
             Some(h) => {
-                let mut ctx = host::HostCtx::new(regs, &mut self.mem);
+                let mut ctx = host::HostCtx::new(regs, &mut self.mem, &self.kb);
                 h.dispatch(&mut ctx)
             }
             None => 0,

@@ -22,6 +22,10 @@ cargo run --release --bin speccy-gui -- testroms/48.rom "Jet Set Willy" fullscre
 
 # Themed terminal (TUI) head:
 cargo run --release --bin speccy -- testroms/48.rom testroms/manic.z80 terminal
+
+# A native Rust game (speccy-sdk) running on the substrate, and the chatbot:
+cargo run --release --bin speccy-gui -- testroms/48.rom snake
+cargo run --release --bin speccy-gui -- testroms/48.rom chat
 ```
 
 ### `speccy-gui` options
@@ -64,6 +68,7 @@ is exposed to Python via the [`zxspec_py`](./zxspec_py) PyO3 binding.
 | [`display`](./display) | Theme + effect pipeline (palette remap / duotone ramp / scanlines). One `DisplayConfig`, every head. |
 | [`frontend`](./frontend) | `speccy` (TUI), `speccy-gui` (native window), `speccy-library` (headless check). |
 | [`wos`](./wos) | World of Spectrum search + download (ZXInfo API), shared by the CLI and MCP. |
+| [`speccy-sdk`](./speccy-sdk) | Native Rust game SDK — write `Game::update`, run on the substrate over the trap ABI (Snake demo). |
 | [`zxspec_py`](./zxspec_py) | PyO3 binding exposing the core to Python (maturin). |
 | [`chuk-mcp-spectrum`](./chuk-mcp-spectrum) | The MCP server (two endpoints + autonomy plane). |
 

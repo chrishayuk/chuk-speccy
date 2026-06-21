@@ -23,6 +23,8 @@ spectrum = { path = "../spectrum" }
 display = { path = "../display" }
 # World of Spectrum search + download, so a game can be named instead of a file.
 wos = { path = "../wos" }
+# Native Rust game SDK (the `snake` demo mode).
+speccy-sdk = { path = "../speccy-sdk" }
 # Native pixel-perfect window head (the desktop head from spec 05): winit window
 # + a CPU framebuffer (softbuffer), with native menus (muda) for a real app shell
 # — runtime fullscreen + audio-device switching, multi-display, macOS green button.

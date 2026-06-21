@@ -94,6 +94,13 @@ over one shared `Supervisor`.
 - [ ] **Cross-process live control** (proxy) — today separate processes share metadata/artifacts via the framework's multi-server store; co-host (`serve.py`) for shared live machines.
 
 ### B. SDK / developer kit (spec 03)
+- [x] **Native Rust game SDK** (`speccy-sdk`, host-composite backend) — author a
+  game as one `Game::update(&Input, &mut Frame)`; the Z80 is an ~11-byte frame
+  pump (`di/im1/ei/halt/HOSTCALL 0x60/jr`) and all logic + rendering is host Rust.
+  `Frame` rasterises 1-bit pixels + attrs into the interleaved 6912-byte screen;
+  `Input` reads the matrix via the trap; the ROM font drives `text`. **First light:
+  Snake** — `speccy-gui <rom> snake` (also a headless render + long-run test).
+  Composes with every head/MCP/recording for free. *(z80-native backend = the dial, later.)*
 - [ ] **L0** toolchain: one-command source → `.tap` → run-in-emulator; PNG→Spectrum asset pipeline.
 - [ ] **L1** framework over z88dk (sprites clash-aware + mono, tilemap, input, beeper SFX, fixed-point, RNG).
 - [x] **L2** trap ABI — `ED FE` (`HOSTCALL`, id in `A`) → defaulted `Bus::host_trap`

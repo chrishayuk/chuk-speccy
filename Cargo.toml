@@ -3,7 +3,7 @@
 # `wos` is a standalone host utility (no emulator deps) used by the frontend CLI.
 [workspace]
 resolver = "2"
-members = ["z80", "spectrum", "display", "frontend", "z80-tests", "wos"]
+members = ["z80", "spectrum", "display", "frontend", "z80-tests", "wos", "speccy-sdk"]
 
 [workspace.package]
 edition = "2021"
