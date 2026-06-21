@@ -7,8 +7,8 @@ across seven specs ([README index](./README.md)); this tracks delivery against t
 ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
-(Snake), and the `rustz80` compiler at **Stage 1** (calls, mul/div, arrays, structs, enum/match — differential-tested).
-Remaining: `rustz80` Stage 1e (u8 + raw memory → Snake), extra frontends, the RL env, and the accuracy tail.
+(Snake), and the `rustz80` compiler at **Stage 1** (calls, mul/div, arrays, structs, enum/match, byte arrays — differential-tested).
+Remaining: `rustz80` Stage 1f/3 (scalar u8 + the Game-prelude → Snake), extra frontends, the RL env, and the accuracy tail.
 
 ---
 
@@ -166,8 +166,15 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   `match` lowered to an if-chain over a scrutinee temp (literal + variant patterns
   + `_`). Lowering-only, no codegen change. Differential-tested (enum match → 200;
   literal/enum-param match → 162).
-- [ ] **Stage 1e** — real `u8` + raw memory writes (screen RAM), then **compile
-  Snake** and run it on real hardware. (Recursion needs stack frames — Stage 4.)
+- [x] **Stage 1e (byte arrays)** — `[u8; N]`: byte load (zero-extend) / store,
+  element width inferred from the `u8` literal suffix; `x as u8` truncates to the
+  low byte. Differential-tested (`300 as u8 = 44`, fill/sum). (u8 and u16 arrays
+  share 2-byte slots; only the access width differs.)
+- [ ] **Stage 1f** — scalar `u8` arithmetic (masked/wrapping) + `wrapping_*`.
+- [ ] **Stage 3 (the milestone)** — recognise the `Game` trait + an SDK prelude so
+  the *same* `impl Game` compiles host (rustc) and pure (rustz80) → **Snake on real
+  hardware**, closing the dial. Needs raw screen writes via the prelude; the bigger
+  piece. (Recursion needs stack frames — Stage 4.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -220,7 +227,7 @@ core M0–M8 ✓ ──▶ A. MCP server ✓ ──▶ E. RL env (free re-skin)
                       │
                       └──▶ B. SDK ✓ (trap ABI + host-composite SDK) ──▶ C. chatbot ✓
                                   │
-                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 1 (calls/mul/div/arrays/structs/match) ✓; the big, escapable bet
+                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 1 (arith/calls/arrays/structs/match/u8-arrays) ✓; the big, escapable bet
    D. frontends (WASM / shaders / streamed)        ── parallel, any time
    Later. accuracy tail (real-time .tzx ✓ done)    ── parallel, as desired
 ```

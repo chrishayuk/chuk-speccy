@@ -10,6 +10,14 @@ pub enum BinOp {
     Rem,
 }
 
+/// Element width for array access. Both kinds occupy a 2-byte slot per element
+/// (1 element per slot); only the load/store size differs (`u8` zero-extends).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Width {
+    Byte,
+    Word,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Cmp {
     Lt,
@@ -31,7 +39,7 @@ pub enum Expr {
     /// A call to another function by name (args by the calling convention).
     Call(String, Vec<Expr>),
     /// Read array element `base[index]` (`base` is the array's first slot).
-    Index(usize, Box<Expr>),
+    Index(usize, Box<Expr>, Width),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -47,7 +55,7 @@ pub enum Stmt {
     /// Store an expression into a local slot (covers `let` and reassignment).
     Assign(usize, Expr),
     /// Store into array element `base[index] = value`.
-    StoreIndex(usize, Expr, Expr),
+    StoreIndex(usize, Expr, Expr, Width),
     /// `if cond { then } else { els }`.
     If(Cond, Vec<Stmt>, Vec<Stmt>),
     /// `while cond { body }`.

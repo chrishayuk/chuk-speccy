@@ -213,12 +213,21 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.byte(0xEB); // EX DE, HL  -> HL = remainder
             a.needs_div = true;
         }
-        Expr::Index(base, index) => {
+        Expr::Index(base, index, w) => {
             gen_elem_addr(a, *base, index); // HL = &base[index]
-            a.byte(0x5E); // LD E,(HL)
-            a.byte(0x23); // INC HL
-            a.byte(0x56); // LD D,(HL)
-            a.byte(0xEB); // EX DE,HL   -> HL = value
+            match w {
+                Width::Word => {
+                    a.byte(0x5E); // LD E,(HL)
+                    a.byte(0x23); // INC HL
+                    a.byte(0x56); // LD D,(HL)
+                    a.byte(0xEB); // EX DE,HL   -> HL = value
+                }
+                Width::Byte => {
+                    a.byte(0x6E); // LD L,(HL)
+                    a.byte(0x26); // LD H, 0    -> HL = zero-extended byte
+                    a.byte(0x00);
+                }
+            }
         }
         Expr::Call(name, args) => {
             for arg in args {
@@ -269,14 +278,16 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             let addr = slot_addr(a.base, *slot);
             a.word(addr);
         }
-        Stmt::StoreIndex(base, index, value) => {
+        Stmt::StoreIndex(base, index, value, w) => {
             gen_expr(a, value);
             a.byte(0xE5); // PUSH HL  (value)
             gen_elem_addr(a, *base, index); // HL = &base[index]
             a.byte(0xD1); // POP DE   (DE = value)
-            a.byte(0x73); // LD (HL),E
-            a.byte(0x23); // INC HL
-            a.byte(0x72); // LD (HL),D
+            a.byte(0x73); // LD (HL),E   (low byte)
+            if *w == Width::Word {
+                a.byte(0x23); // INC HL
+                a.byte(0x72); // LD (HL),D   (high byte)
+            }
         }
         Stmt::If(cond, then, els) => {
             let else_l = a.label();
