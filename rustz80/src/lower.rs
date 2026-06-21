@@ -11,10 +11,16 @@ use std::collections::HashMap;
 /// every field is one `u16` slot in Stage 1).
 type Structs = HashMap<String, Vec<String>>;
 
-/// Per-function lowering context: locals + the program's struct layouts.
+/// C-like enum layouts: name → variant names in order (value = position).
+type Enums = HashMap<String, Vec<String>>;
+
+/// Per-function lowering context: locals + the program's struct/enum layouts.
 struct Ctx<'a> {
     vars: Vars,
     structs: &'a Structs,
+    enums: &'a Enums,
+    /// Counter for synthesised `match` scrutinee temporaries.
+    temp: usize,
 }
 
 /// Name → (base slot, size in slots, struct type if any). Flat scoping.
@@ -45,12 +51,13 @@ impl Vars {
 /// Lower every `fn` in a file to `(name, Func)`, using the file's struct layouts.
 pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
     let structs = collect_structs(file)?;
+    let enums = collect_enums(file);
     let mut out = Vec::new();
     for item in &file.items {
         match item {
-            syn::Item::Fn(f) => out.push((f.sig.ident.to_string(), lower_with(f, &structs)?)),
-            syn::Item::Struct(_) => {} // already collected
-            other => return Err(format!("only `fn`/`struct` items are supported: {other:?}")),
+            syn::Item::Fn(f) => out.push((f.sig.ident.to_string(), lower_with(f, &structs, &enums)?)),
+            syn::Item::Struct(_) | syn::Item::Enum(_) => {} // already collected
+            other => return Err(format!("only `fn`/`struct`/`enum` items are supported: {other:?}")),
         }
     }
     if out.is_empty() {
@@ -59,9 +66,20 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
     Ok(out)
 }
 
-/// Lower a standalone function (no struct context — used by `compile_fn`).
+/// Lower a standalone function (no struct/enum context — used by `compile_fn`).
 pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
-    lower_with(item, &Structs::new())
+    lower_with(item, &Structs::new(), &Enums::new())
+}
+
+fn collect_enums(file: &syn::File) -> Enums {
+    let mut m = Enums::new();
+    for item in &file.items {
+        if let syn::Item::Enum(e) = item {
+            let variants = e.variants.iter().map(|v| v.ident.to_string()).collect();
+            m.insert(e.ident.to_string(), variants);
+        }
+    }
+    m
 }
 
 fn collect_structs(file: &syn::File) -> Result<Structs, String> {
@@ -86,8 +104,8 @@ fn collect_structs(file: &syn::File) -> Result<Structs, String> {
     Ok(m)
 }
 
-fn lower_with(item: &syn::ItemFn, structs: &Structs) -> Result<Func, String> {
-    let mut ctx = Ctx { vars: Vars::default(), structs };
+fn lower_with(item: &syn::ItemFn, structs: &Structs, enums: &Enums) -> Result<Func, String> {
+    let mut ctx = Ctx { vars: Vars::default(), structs, enums, temp: 0 };
     let mut body = Vec::new();
     let mut ret = None;
 
@@ -209,6 +227,29 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
             let inner = lower_block(&w.body, ctx)?;
             body.push(Stmt::While(cond, inner));
         }
+        // `match` lowers to an if-chain over a scrutinee temporary (no codegen change).
+        syn::Expr::Match(m) => {
+            let scrut = lower_expr(&m.expr, ctx)?;
+            let temp = ctx.vars.declare(&format!("__match{}", ctx.temp), 1, None);
+            ctx.temp += 1;
+            body.push(Stmt::Assign(temp, scrut));
+
+            let mut default: Vec<Stmt> = Vec::new();
+            let mut arms: Vec<(Expr, Vec<Stmt>)> = Vec::new();
+            for arm in &m.arms {
+                let arm_body = lower_arm_body(&arm.body, ctx)?;
+                match pattern_value(&arm.pat, ctx)? {
+                    Some(v) => arms.push((v, arm_body)),
+                    None => default = arm_body, // `_` wildcard
+                }
+            }
+            let mut chain = default;
+            for (val, arm_body) in arms.into_iter().rev() {
+                let cond = Cond { cmp: Cmp::Eq, lhs: Expr::Var(temp), rhs: val };
+                chain = vec![Stmt::If(cond, arm_body, chain)];
+            }
+            body.extend(chain);
+        }
         other => return Err(format!("unsupported statement expression: {other:?}")),
     }
     Ok(())
@@ -262,7 +303,10 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<Expr, String> {
             };
             Ok(Expr::Lit(i.base10_parse::<u16>().map_err(|e| e.to_string())?))
         }
-        syn::Expr::Path(_) => Ok(Expr::Var(ctx.vars.base(&path_ident(expr)?))),
+        syn::Expr::Path(p) => match resolve_enum_path(&p.path, ctx.enums) {
+            Some(v) => Ok(Expr::Lit(v)),
+            None => Ok(Expr::Var(ctx.vars.base(&path_ident(expr)?))),
+        },
         syn::Expr::Paren(p) => lower_expr(&p.expr, ctx),
         syn::Expr::Cast(c) => lower_expr(&c.expr, ctx),
         syn::Expr::Field(_) => Ok(Expr::Var(field_slot(expr, ctx)?)),
@@ -302,6 +346,43 @@ fn field_slot(expr: &syn::Expr, ctx: &mut Ctx) -> Result<usize, String> {
     let (base, sname) = ctx.vars.struct_of(&obj).ok_or_else(|| format!("{obj} is not a struct"))?;
     let fields = ctx.structs.get(&sname).ok_or_else(|| format!("unknown struct {sname}"))?;
     Ok(base + field_offset(fields, &member_name(&f.member)?)?)
+}
+
+/// `Enum::Variant` (a 2-segment path) → its integer value, if known.
+fn resolve_enum_path(path: &syn::Path, enums: &Enums) -> Option<u16> {
+    if path.segments.len() != 2 {
+        return None;
+    }
+    let name = path.segments[0].ident.to_string();
+    let variant = path.segments[1].ident.to_string();
+    enums.get(&name)?.iter().position(|v| *v == variant).map(|i| i as u16)
+}
+
+/// A match arm body: a `{ block }` or a single expression-statement.
+fn lower_arm_body(e: &syn::Expr, ctx: &mut Ctx) -> Result<Vec<Stmt>, String> {
+    match e {
+        syn::Expr::Block(b) => lower_block(&b.block, ctx),
+        other => {
+            let mut v = Vec::new();
+            lower_stmt_expr(other, ctx, &mut v)?;
+            Ok(v)
+        }
+    }
+}
+
+/// A match pattern's value, or `None` for the `_` wildcard.
+fn pattern_value(pat: &syn::Pat, ctx: &Ctx) -> Result<Option<Expr>, String> {
+    match pat {
+        syn::Pat::Wild(_) => Ok(None),
+        syn::Pat::Lit(pl) => match &pl.lit {
+            syn::Lit::Int(i) => Ok(Some(Expr::Lit(i.base10_parse::<u16>().map_err(|e| e.to_string())?))),
+            other => Err(format!("only integer literal patterns: {other:?}")),
+        },
+        syn::Pat::Path(pp) => resolve_enum_path(&pp.path, ctx.enums)
+            .map(|v| Some(Expr::Lit(v)))
+            .ok_or_else(|| "unknown enum variant in pattern".into()),
+        other => Err(format!("unsupported match pattern: {other:?}")),
+    }
 }
 
 fn field_offset(fields: &[String], name: &str) -> Result<usize, String> {

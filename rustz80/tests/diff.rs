@@ -307,6 +307,102 @@ fn structs_compose_with_functions() {
 }
 
 #[test]
+#[allow(unused_assignments)]
+fn enum_and_match() {
+    // C-like enum + match on it (arms assign a result), checked against rustc.
+    #[allow(dead_code)]
+    enum Color {
+        Red,
+        Green,
+        Blue,
+    }
+    fn host() -> u16 {
+        let c = Color::Green;
+        let mut v = 0u16;
+        match c {
+            Color::Red => v = 100,
+            Color::Green => v = 200,
+            Color::Blue => v = 300,
+        }
+        v
+    }
+    let src = "
+        enum Color { Red, Green, Blue }
+        fn run() -> u16 {
+            let c = Color::Green;
+            let mut v = 0u16;
+            match c {
+                Color::Red => v = 100u16,
+                Color::Green => v = 200u16,
+                Color::Blue => v = 300u16,
+            }
+            v
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
+#[allow(unused_assignments)]
+fn match_literals_with_wildcard_and_enum_param() {
+    #[allow(dead_code)]
+    enum Op {
+        Add,
+        Sub,
+        Mul,
+    }
+    fn apply(op: Op, a: u16, b: u16) -> u16 {
+        let mut r = 0u16;
+        match op {
+            Op::Add => r = a + b,
+            Op::Sub => r = a - b,
+            Op::Mul => r = a * b,
+        }
+        r
+    }
+    fn classify(n: u16) -> u16 {
+        let mut r = 0u16;
+        match n {
+            0 => r = 10,
+            1 => r = 20,
+            _ => r = 99,
+        }
+        r
+    }
+    fn host() -> u16 {
+        apply(Op::Add, 7, 6) + apply(Op::Mul, 4, 5) + classify(0) + classify(1) + classify(7)
+    }
+    let src = "
+        enum Op { Add, Sub, Mul }
+        fn apply(op: Op, a: u16, b: u16) -> u16 {
+            let mut r = 0u16;
+            match op {
+                Op::Add => r = a + b,
+                Op::Sub => r = a - b,
+                Op::Mul => r = a * b,
+            }
+            r
+        }
+        fn classify(n: u16) -> u16 {
+            let mut r = 0u16;
+            match n {
+                0u16 => r = 10u16,
+                1u16 => r = 20u16,
+                _ => r = 99u16,
+            }
+            r
+        }
+        fn run() -> u16 {
+            apply(Op::Add, 7u16, 6u16) + apply(Op::Mul, 4u16, 5u16)
+                + classify(0u16) + classify(1u16) + classify(7u16)
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 13 + 20 + 10 + 20 + 99 = 162
+}
+
+#[test]
 fn unsupported_is_an_error() {
     // f32 is outside the dialect → a clear compile error (the host-only signal).
     assert!(rustz80::compile_fn("fn f() -> u16 { let x = 1.5f32; 0u16 }").is_err());
