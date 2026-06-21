@@ -10,6 +10,9 @@ never knows what a Spectrum is).
 
 ## Quick start
 
+> New here? The **[Getting Started guide](./docs/getting-started.md)** walks through
+> install → run a game → write your own → drive it over MCP.
+
 You need a 48K system ROM at `testroms/48.rom` (gitignored — supply your own).
 
 ```bash
@@ -59,6 +62,25 @@ full *admin* surface (lifecycle, pokes, recording, snapshot timeline, and
 every session to MP4 and checkpoints a rewindable snapshot timeline. The Rust core
 is exposed to Python via the [`zxspec_py`](./zxspec_py) PyO3 binding.
 
+## Write a game in Rust, boot it on the Spectrum (`rustz80`)
+
+[`rustz80`](./rustz80) is a small **Rust → Z80 compiler** for a restricted dialect
+that is *also real Rust*: the same `.rs` runs under `rustc` (host, for debugging)
+**and** compiles to Z80 that runs on the real machine — the two kept honest by
+differential testing on the emulator. It supports `u8`/`u16`, arrays, `struct`,
+`enum`/`match`, functions, `*`/`/`/`%`, bitwise ops, and `poke`/`peek` raw-memory
+intrinsics — enough to write a game.
+
+```bash
+# Compile the dialect Snake to a bootable tape, then run it on the real ROM:
+cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
+```
+
+Any dialect `.rs` with a no-arg `fn main()` compiles the same way (the autoloader
+`CLEAR`s, `LOAD`s the code, and `RANDOMIZE USR`s it). See
+[spec 07](./docs/07-rust-z80-compiler-spec.md) and `rustz80/samples/`.
+
 ## Workspace layout
 
 | Crate | What |
@@ -69,13 +91,17 @@ is exposed to Python via the [`zxspec_py`](./zxspec_py) PyO3 binding.
 | [`frontend`](./frontend) | `speccy` (TUI), `speccy-gui` (native window), `speccy-library` (headless check). |
 | [`wos`](./wos) | World of Spectrum search + download (ZXInfo API), shared by the CLI and MCP. |
 | [`speccy-sdk`](./speccy-sdk) | Native Rust game SDK — write `Game::update`, run on the substrate over the trap ABI (Snake demo). |
+| [`rustz80`](./rustz80) | Restricted Rust → Z80 compiler (`syn` frontend, own IR/codegen, mul/div micro-runtime) + `speccy-compile` (`.rs` → bootable `.tap`). |
 | [`zxspec_py`](./zxspec_py) | PyO3 binding exposing the core to Python (maturin). |
 | [`chuk-mcp-spectrum`](./chuk-mcp-spectrum) | The MCP server (two endpoints + autonomy plane). |
 
 ## Status & design
 
-The emulator core is feature-complete (M0–M8). What's built and what's next is
-tracked in the **[roadmap](./docs/roadmap.md)**; the design is split across six
+The emulator core is feature-complete (M0–M8). On top of it: the MCP server +
+autonomy plane, a World-of-Spectrum game library, a disassembler, the `ED FE` trap
+ABI, a Spectrum-native chatbot, a native Rust game SDK, and the **`rustz80`**
+compiler (write Rust → boot it on a real Spectrum). What's built and what's next is
+tracked in the **[roadmap](./docs/roadmap.md)**; the design is split across seven
 specs indexed in **[docs/](./docs/README.md)**.
 
 ## Build & test

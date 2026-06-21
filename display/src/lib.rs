@@ -296,8 +296,8 @@ mod tests {
             border: BorderMode::Hidden,
         };
         let f = render(&solid(7), 0, &cfg); // white
-        let row0 = (0 * f.width) * 4;
-        let row1 = (1 * f.width) * 4;
+        let row0 = 0; // first scanline (RGBA byte offset 0)
+        let row1 = f.width * 4; // second scanline
         assert_eq!(f.rgba[row0], 0xD7, "even row unchanged");
         assert!(f.rgba[row1] < 0xD7, "odd row darkened");
     }

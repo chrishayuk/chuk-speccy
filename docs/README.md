@@ -11,12 +11,13 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 |---|---|
 | [01 — Core Emulator Spec](./01-core-emulator-spec.md) | Z80 core, ULA video/timing/contention, memory map, I/O, snapshots, test strategy, milestones. Cycle-accurate 48K first; 128K-ready architecture. |
 | [02 — MCP Server Layer Spec](./02-mcp-server-layer-spec.md) | PyO3 boundary, headless/stepped execution model, the `Machine` surface, MCP tool catalog (incl. the `screenshot` PNG tool), and the free `chuk-rl-env` corollary. |
-| [03 — SDK / Developer Kit Spec](./03-sdk-spec.md) | The fidelity dial (pure vs hybrid), z88dk front-end, L0–L3 layers, and the `ED 70` **trap ABI** that lets Z80 apps escape to the host. |
+| [03 — SDK / Developer Kit Spec](./03-sdk-spec.md) | The fidelity dial (pure vs hybrid), z88dk front-end, L0–L3 layers, and the `ED FE` **trap ABI** that lets Z80 apps escape to the host. |
 | [04 — Spectrum-Native Chat / Agent](./04-spectrum-native-chat-spec.md) | L3 showpiece: a 32-column chatbot/agent where the Z80 is a dumb terminal and `chuk-llm` + `chuk-tool-processor` + MCP servers do the thinking. Two decoupled clocks + a typed-event poll. |
 | [05 — Frontends & Display Pipeline](./05-frontends-display-spec.md) | Multi-head (desktop/web/TUI/MCP) over one core, and the shared theme + filter pipeline (palette remap / duotone ramp / effect chain). One `DisplayConfig`, every head. |
 | [06 — Roles, Sessions & Autonomy](./06-roles-autonomy-spec.md) | Admin vs agent capability tiers, implicit per-session machines, and the autonomy plane (always-on recording, snapshot timeline, reaping) — agents as pure consumers. |
-| [07 — Rust → Z80 Compiler](./07-rust-z80-compiler-spec.md) | `rustz80` (planned): a restricted Rust dialect that's *also real Rust*, compiled to a pure `.tap` via `syn` + own IR/codegen + a micro-runtime. One source, both compilers — imperative Rust spans the fidelity dial. |
-| [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8) and what's next (MCP, SDK, chatbot, frontends, compiler, accuracy tail). |
+| [07 — Rust → Z80 Compiler](./07-rust-z80-compiler-spec.md) | `rustz80` (**built**): a restricted Rust dialect that's *also real Rust*, compiled to a bootable `.tap` via `syn` + own IR/codegen + a micro-runtime. One source, both compilers — a dialect Snake boots on the real ROM. See the [`rustz80` README](../rustz80/README.md). |
+| [Getting Started](./getting-started.md) | **Start here** — install, supply a ROM, run a game, write one in Rust, drive it over MCP. |
+| [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8 + the layers) and what's next (Game-trait prelude, frontends, RL env, accuracy tail). |
 
 ## Implementation status
 
@@ -24,7 +25,11 @@ The **emulator core is feature-complete (M0–M8)** — a cycle-accurate, **ZEXA
 (67/67)** 48K Spectrum: Z80, ULA video + contention, keyboard, beeper, `.sna`/`.z80`
 snapshots, and `.tap` tape — with two heads (terminal + native pixel window) over
 one themeable `display` pipeline, plus a **World of Spectrum** game fetcher and an
-MCP server. Try it:
+MCP server. **On top of the core, also built:** the MCP server + autonomy plane
+(spec 02/06), a **native Rust game SDK** (spec 03, [`speccy-sdk`](../speccy-sdk/README.md)),
+a **Spectrum-native chatbot** (spec 04), and the **`rustz80`** compiler (spec 07,
+[`rustz80`](../rustz80/README.md)) — a restricted-Rust→Z80 compiler whose output
+**boots on the real ROM** (a dialect Snake runs). Try it:
 
 ```
 # A local file…
@@ -32,9 +37,13 @@ cargo run --release --bin speccy-gui -- testroms/48.rom testroms/manic.z80   # p
 # …or fetch a game by name from World of Spectrum:
 cargo run --release --bin speccy-gui -- testroms/48.rom "Skool Daze"          # add `fullscreen` to project it
 cargo run --release --bin speccy     -- testroms/48.rom testroms/manic.z80 terminal   # themed TUI
+# …or write a game in Rust and boot it:
+cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 ```
 
-The MCP server (search/load games, drive + record sessions) lives in
+New here? Start with **[Getting Started](./getting-started.md)**. The MCP server
+(search/load games, drive + record sessions) lives in
 [`../chuk-mcp-spectrum`](../chuk-mcp-spectrum/README.md).
 
 The milestone-by-milestone breakdown, test inventory, and remaining tracks (MCP
@@ -54,6 +63,7 @@ the **[Roadmap](./roadmap.md)**.
 ## Build order at a glance
 
 Core M0–M8 is done (workspace → Z80 → memory/ROM → ULA/keyboard → snapshots →
-beeper → contention → tape). The layers on top — MCP server, SDK, chatbot, extra
-frontends — attach over the finished core. Full sequencing in the
+beeper → contention → tape). The layers on top — MCP server, SDK, chatbot, and the
+`rustz80` compiler — are built over the finished core; remaining tracks (extra
+frontends, RL env, accuracy tail) attach the same way. Full sequencing in the
 **[Roadmap](./roadmap.md)**.

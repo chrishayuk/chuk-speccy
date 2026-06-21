@@ -1,0 +1,101 @@
+# `rustz80` — a restricted Rust → Z80 compiler
+
+Write a game in a **subset of Rust that is also real Rust**, and compile it to Z80
+machine code that boots on a real ZX Spectrum — no C, no external toolchain. The
+same `.rs` runs two ways:
+
+- under **`rustc`** (`cargo run`) — host execution, fast iteration, a real debugger;
+- through **`rustz80`** — Z80 you can package as a `.tap` and boot on the ROM.
+
+The two are kept honest by **differential testing**: every feature is run both ways
+and the results must match (see [`tests/`](./tests)). Design rationale lives in
+[spec 07](../docs/07-rust-z80-compiler-spec.md).
+
+Not an LLVM backend and not real `core`: a `syn` frontend → a small typed IR → naive
+Z80 codegen (`HL` accumulator, `DE` secondary, a fixed RAM "register file"), plus a
+hand-written mul/div micro-runtime.
+
+## Quick start
+
+```bash
+# Compile a dialect program to a bootable tape (entry: a no-arg `fn main`):
+cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+
+# Boot it on the emulator (needs a 48K ROM at testroms/48.rom):
+cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
+```
+
+`speccy-compile <input.rs> [-o out.tap] [--entry main] [--name GAME]`. Samples live
+in [`samples/`](./samples) (`snake.rs`, `pixels.rs`).
+
+## The dialect
+
+Supported today (all differential-tested):
+
+| Feature | Notes |
+|---|---|
+| Types | `u16` (default) and `u8` (wraps at 256). `as u8` truncates, `as u16`/`as usize` widen. |
+| Arithmetic | `+ - * / %`, `wrapping_add/sub/mul`. `*`/`/`/`%` use the appended micro-runtime. |
+| Bitwise | `\|` `&` `^`. |
+| Control flow | `if`/`else if`/`else`, `while`, comparison conditions (`< <= > >= == !=`). |
+| Arrays | `let a = [0u16; N];` / `[e0, e1, …]`; `a[i]`, `a[i] = v`. Index with `i as usize`. `[u8; N]` are byte-packed-per-slot with byte load/store. |
+| Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar fields only. |
+| Enums + match | C-like `enum Dir { Up, Down, … }` (variant = its index); `match` on integers/variants with `_`. |
+| Functions | Up to 3 args (passed in `HL`/`DE`/`BC`), result in `HL`; multi-function programs. |
+| Raw memory | `poke(addr, val)` / `peek(addr)` intrinsics — e.g. to write screen RAM at `0x4000`. |
+
+Out of scope (use `rustc`-only host code, or wait for later stages): recursion
+(needs stack frames — Stage 4), references / `&mut` params, `>3` params, slices,
+`String`/`Vec`/`alloc`, floats, traits/generics, closures, array/nested struct
+*fields*. Anything unsupported is a **clear compile error** — that error is the
+"this is host-only" budget detector.
+
+## A whole program
+
+```rust
+// The canonical ZX screen-address math + a pixel plotter, in the dialect.
+fn addr_of(x: u16, y: u16) -> u16 {
+    16384u16 + (y / 64u16) * 2048u16 + (y % 8u16) * 256u16
+        + ((y / 8u16) % 8u16) * 32u16 + x / 8u16
+}
+fn mask_of(x: u16) -> u16 {
+    let masks = [128u8, 64u8, 32u8, 16u8, 8u8, 4u8, 2u8, 1u8];
+    masks[(x % 8u16) as usize] as u16
+}
+fn main() {
+    let a = addr_of(0u16, 0u16);
+    poke(a, peek(a) | mask_of(0u16)); // light the top-left pixel
+}
+```
+
+`samples/snake.rs` is a complete game (body in arrays, `match` steering, draw via
+`poke`/`peek`) — the worked example end to end.
+
+## How it works
+
+- **Frontend** (`lower.rs`): `syn::parse_str` → accepted subset → typed IR
+  (`ir.rs`). Unsupported nodes become errors.
+- **Codegen** (`codegen.rs`): IR → Z80. Locals (incl. params) live in a per-function
+  scratch region; expressions evaluate via `HL` + the stack; `*`/`/`/`%` `CALL` an
+  appended `__mul16`/`__divmod16`.
+- **Library API**: `compile_program(src) -> Program { code, symbols }`,
+  `compile_fn(src) -> Vec<u8>`, `to_tap(code, org, entry, name)`,
+  `compile_to_tap(src, entry, name)`. Code is laid out from `ORG = 0x8000`.
+- **Tape boot**: `compile_to_tap` emits a `DI; CALL entry; EI; RET` trampoline at
+  `ORG` and a BASIC autoloader (`CLEAR; LOAD "" CODE; RANDOMIZE USR`). The `DI` is
+  load-bearing: the ROM's interrupt routine clobbers `BC`/`DE` (keyboard scan),
+  which the codegen keeps live — so games run with interrupts off.
+
+## Tests
+
+```bash
+cargo test -p rustz80                                   # differential + tap structure
+SPECTRUM_ROM="$PWD/testroms/48.rom" \
+  cargo test -p rustz80 -- --ignored                    # boot on the real ROM
+```
+
+- `tests/diff.rs` — the oracle: each `check!` runs one Rust block under `rustc` and
+  through `rustz80` on the emulator and asserts they agree.
+- `tests/snake.rs` — the whole dialect at once: a Snake checked against a Rust replica
+  (state checksum + screen bitmap).
+- `tests/tap.rs` — `.tap` structure, and ROM-gated boot/animation of `samples/snake.rs`.

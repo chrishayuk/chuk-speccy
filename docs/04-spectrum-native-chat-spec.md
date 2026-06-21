@@ -50,7 +50,7 @@ the new line — it has neither the RAM nor the need for context.
 
 ## 2. The chat trap ABI (the centerpiece)
 
-Reserved syscalls in the chat block (`ED 70 <id>`, ids `0x30–0x3F`). Calling
+Reserved syscalls in the chat block (`ED FE`, ids `0x30–0x3F` in `A`). Calling
 convention from the [SDK spec §4](./03-sdk-spec.md#4-the-trap-abi-the-distinctive-layer):
 small args in registers, results in `A`/`HL`, error in carry.
 

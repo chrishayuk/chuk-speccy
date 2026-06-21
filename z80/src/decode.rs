@@ -426,15 +426,10 @@ impl Cpu {
         let q = y & 1;
         match x {
             1 => self.exec_ed_x1(bus, y, z, p, q),
-            2 => {
-                if z <= 3 && y >= 4 {
-                    self.block_op(bus, y, z);
-                }
-                // else: NONI/NOP
-            }
-            _ => {
-                // x==0 / x==3 ED slots are undefined NOPs on a 48K.
-            }
+            2 if z <= 3 && y >= 4 => self.block_op(bus, y, z),
+            // Everything else (x==0/x==3, and x==2 non-block slots) is an
+            // undefined NOP / NONI on a 48K.
+            _ => {}
         }
     }
 

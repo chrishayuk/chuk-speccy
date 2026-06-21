@@ -7,9 +7,17 @@ small, finishable end — a compiler for a **restricted Rust dialect that is als
 real Rust**, with a `syn` frontend, our own IR + Z80 codegen, and a hand-written
 micro-runtime.
 
-> **Status: planned.** This is the largest and riskiest single component in the
-> project, and explicitly *escapable* — if it stalls, the host-Rust SDK (spec 03)
-> and z88dk still ship games, so it is not a bet-the-project move.
+> **Status: built and running.** Implemented in the [`rustz80`](../rustz80) crate
+> with a `syn` frontend, own IR + Z80 codegen, and a mul/div micro-runtime. The
+> dialect's value layer is complete (`u8`/`u16`, arrays, `struct`, `enum`/`match`,
+> functions + calling convention, `*`/`/`/`%`, bitwise ops) plus `poke`/`peek`
+> raw-memory intrinsics and a `.tap` emitter (`speccy-compile`). A **Snake written
+> in the dialect compiles and boots on the real 48K ROM**. Everything is
+> differential-tested against `rustc` on the emulator (`rustz80/tests/`). Remaining:
+> Stage 3b (a `Game`-trait prelude for full one-source ergonomics), Stage 2
+> (peephole/strength-reduce), and the larger-type / generics tail. It stayed
+> *escapable* throughout — the host-Rust SDK (spec 03) ships games independently.
+> See the [`rustz80` README](../rustz80/README.md) to write and compile one.
 
 ---
 
