@@ -161,7 +161,7 @@ your CHUK MCP servers. That makes possible things that have no precedent on a
 - A maritime/heritage browser on the Speccy backed by `chuk-mcp-maritime-archives`
   / `chuk-mcp-her`.
 
-Mechanically it's `ED 70 <id>` → host handler → MCP client → result marshalled
+Mechanically it's `ED FE` (id in `A`) → host handler → MCP client → result marshalled
 back into a RAM block. It's gimmicky and it's also a very clean demo of the whole
 stack (emulator + trap ABI + CHUK servers) in one artifact. Worth one showpiece —
 see [04 — Spectrum-Native Chat / Agent](./04-spectrum-native-chat-spec.md) for the
@@ -204,7 +204,7 @@ with reward signals for free, no memory-address sniffing. The SDK author writes
    for and is fully authentic.
 2. **L1 framework in C** over z88dk — sprites (clash-aware + mono fast-path),
    tilemap, input (Kempston/Sinclair), beeper SFX, fixed-point math, RNG.
-3. **L2 trap ABI** — the `ED 70` syscall + host dispatch table + the math/asset
+3. **L2 trap ABI** — the `ED FE` syscall + host dispatch table + the math/asset
    host helpers, behind a pure/hybrid build flag.
 4. **L3 showpiece** — one app that calls an MCP server through a trap, to prove the
    stack.

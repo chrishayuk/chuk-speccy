@@ -294,7 +294,7 @@ mod tests {
         let (mut cpu, mut bus) = run(&[0x3E, 0x80, 0xCB, 0x7F], 2);
         assert_eq!(cpu.regs.f & 0x40, 0x00, "BIT 7 of 0x80: not zero");
         assert_eq!(cpu.regs.f & 0x80, 0x80, "BIT 7 set -> SF");
-        bus.load(cpu.regs.pc as u16, &[0xCB, 0x47]); // BIT 0,A
+        bus.load(cpu.regs.pc, &[0xCB, 0x47]); // BIT 0,A
         cpu.step(&mut bus);
         assert_eq!(cpu.regs.f & 0x40, 0x40, "BIT 0 of 0x80: zero -> ZF");
     }

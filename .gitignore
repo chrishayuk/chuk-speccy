@@ -3,3 +3,6 @@ Cargo.lock
 **/*.rs.bk
 .DS_Store
 /testroms
+
+# generated dialect tapes (rustz80 speccy-compile output)
+/*.tap
