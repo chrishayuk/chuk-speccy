@@ -45,8 +45,12 @@ zxspec/
 │       ├── memory.rs     # 16K ROM + 48K RAM, Bus impl
 │       ├── keyboard.rs   # 8x5 matrix
 │       └── snapshot.rs   # .sna / .z80
-├── frontend/     # binary: window, audio, input mapping
-│   └── src/main.rs       # minifb|pixels + cpal
+├── frontend/     # binaries: window, terminal, library check
+│   └── src/
+│       ├── main.rs           # speccy: themed terminal (TUI) head
+│       └── bin/gui.rs        # speccy-gui: native window (winit + softbuffer + cpal)
+│       └── bin/library.rs    # speccy-library: headless "do these games work?" check
+├── wos/          # World of Spectrum search + download (used by the CLI + MCP)
 └── z80-tests/    # SingleStepTests JSON harness + ZEX runner
 ```
 

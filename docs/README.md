@@ -22,12 +22,19 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 The **emulator core is feature-complete (M0–M8)** — a cycle-accurate, **ZEXALL-clean
 (67/67)** 48K Spectrum: Z80, ULA video + contention, keyboard, beeper, `.sna`/`.z80`
 snapshots, and `.tap` tape — with two heads (terminal + native pixel window) over
-one themeable `display` pipeline. Try it:
+one themeable `display` pipeline, plus a **World of Spectrum** game fetcher and an
+MCP server. Try it:
 
 ```
+# A local file…
 cargo run --release --bin speccy-gui -- testroms/48.rom testroms/manic.z80   # pixel-perfect + sound
+# …or fetch a game by name from World of Spectrum:
+cargo run --release --bin speccy-gui -- testroms/48.rom "Skool Daze"          # add `fullscreen` to project it
 cargo run --release --bin speccy     -- testroms/48.rom testroms/manic.z80 terminal   # themed TUI
 ```
+
+The MCP server (search/load games, drive + record sessions) lives in
+[`../chuk-mcp-spectrum`](../chuk-mcp-spectrum/README.md).
 
 The milestone-by-milestone breakdown, test inventory, and remaining tracks (MCP
 server, SDK, chatbot showpiece, web/WASM head, RL env, accuracy long tail) live in
