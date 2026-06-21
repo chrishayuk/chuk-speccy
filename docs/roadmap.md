@@ -192,9 +192,14 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   ROM** tape loader auto-runs and executes (sentinel + screen poke verified; ROM-
   gated test). So a rustz80 game now boots on the actual machine — the dial closed
   through to hardware.
-- [ ] **Stage 3b (ergonomics)** — recognise a `Game` trait + ship an SDK prelude so
-  the *same* `impl Game` file compiles host (rustc) and pure (rustz80) with no
-  per-target edits, closing the dial fully. (Recursion needs stack frames — Stage 4.)
+- [x] **Stage 3b.1 (methods + references)** — `impl T { fn m(&mut self, …) }`,
+  `self.field` (indirect through the receiver pointer), and `obj.m(args)` lowering to
+  `T::m(&obj, …)` (`self` as a leading pointer arg; method names mangled `T::m`).
+  Differential-tested. The machinery `impl Game` needs.
+- [ ] **Stage 3b.2 (ergonomics)** — recognise the `Game` trait + ship an SDK prelude
+  (`Frame`/`Input` as intrinsics + a generated frame loop) so the *same* `impl Game`
+  file compiles host (rustc) and pure (rustz80), closing the dial fully. (Recursion
+  needs stack frames — Stage 4.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.

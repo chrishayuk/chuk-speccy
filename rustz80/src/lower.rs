@@ -26,7 +26,8 @@ struct Ctx<'a> {
 struct VarInfo {
     base: usize,
     sty: Option<String>,
-    ty: Width, // scalar value type, or array element type
+    ty: Width,    // scalar value type, or array element type
+    is_ptr: bool, // a pointer to a struct (e.g. `self`) vs a by-value struct local
 }
 
 /// Name → variable info. Flat scoping; arrays use one 2-byte slot per element.
@@ -39,8 +40,18 @@ struct Vars {
 impl Vars {
     fn declare(&mut self, name: &str, size: usize, sty: Option<String>, ty: Width) -> usize {
         let base = self.next;
-        self.map.insert(name.to_string(), VarInfo { base, sty, ty });
+        self.map.insert(name.to_string(), VarInfo { base, sty, ty, is_ptr: false });
         self.next += size;
+        base
+    }
+    /// Declare a pointer-to-struct local (one slot holding an address) — `self`.
+    fn declare_ptr(&mut self, name: &str, sty: &str) -> usize {
+        let base = self.next;
+        self.map.insert(
+            name.to_string(),
+            VarInfo { base, sty: Some(sty.to_string()), ty: Width::Word, is_ptr: true },
+        );
+        self.next += 1;
         base
     }
     fn base(&mut self, name: &str) -> usize {
@@ -49,8 +60,9 @@ impl Vars {
             None => self.declare(name, 1, None, Width::Word),
         }
     }
-    fn struct_of(&self, name: &str) -> Option<(usize, String)> {
-        self.map.get(name).and_then(|v| v.sty.as_ref().map(|s| (v.base, s.clone())))
+    /// A struct-typed var as a method receiver: `(base, struct name, is_ptr)`.
+    fn receiver(&self, name: &str) -> Option<(usize, String, bool)> {
+        self.map.get(name).and_then(|v| v.sty.as_ref().map(|s| (v.base, s.clone(), v.is_ptr)))
     }
     /// The variable's value type (scalar) or element type (array).
     fn ty(&self, name: &str) -> Width {
@@ -68,8 +80,20 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
             // `poke`/`peek` are host-only prelude intrinsics — skip their bodies.
             syn::Item::Fn(f) if is_intrinsic(&f.sig.ident.to_string()) => {}
             syn::Item::Fn(f) => out.push((f.sig.ident.to_string(), lower_with(f, &structs, &enums)?)),
+            // `impl T { fn m(&mut self, …) }` — each method becomes a `T::m` function
+            // taking `self` as a leading pointer argument.
+            syn::Item::Impl(imp) => {
+                let self_ty = type_name(&imp.self_ty)?;
+                for it in &imp.items {
+                    let syn::ImplItem::Fn(m) = it else {
+                        return Err("only methods are supported in impl blocks".into());
+                    };
+                    let name = format!("{self_ty}::{}", m.sig.ident);
+                    out.push((name, lower_method(m, &self_ty, &structs, &enums)?));
+                }
+            }
             syn::Item::Struct(_) | syn::Item::Enum(_) => {} // already collected
-            other => return Err(format!("only `fn`/`struct`/`enum` items are supported: {other:?}")),
+            other => return Err(format!("only `fn`/`struct`/`enum`/`impl` items are supported: {other:?}")),
         }
     }
     if out.is_empty() {
@@ -81,6 +105,15 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
 /// Lower a standalone function (no struct/enum context — used by `compile_fn`).
 pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
     lower_with(item, &Structs::new(), &Enums::new())
+}
+
+/// Lower an `impl` method. The receiver (`&self`/`&mut self`) becomes a leading
+/// pointer parameter; `self.field` reads/writes through it.
+fn lower_method(m: &syn::ImplItemFn, self_ty: &str, structs: &Structs, enums: &Enums) -> Result<Func, String> {
+    let mut ctx = Ctx { vars: Vars::default(), structs, enums, temp: 0 };
+    let params = lower_inputs(&m.sig.inputs, &mut ctx, Some(self_ty))?;
+    let (body, ret) = lower_fn_block(&m.block, &mut ctx)?;
+    Ok(Func { params, n_locals: ctx.vars.next, body, ret })
 }
 
 /// Names the compiler handles itself (their host definitions are prelude-only).
@@ -123,38 +156,56 @@ fn collect_structs(file: &syn::File) -> Result<Structs, String> {
 
 fn lower_with(item: &syn::ItemFn, structs: &Structs, enums: &Enums) -> Result<Func, String> {
     let mut ctx = Ctx { vars: Vars::default(), structs, enums, temp: 0 };
-    let mut body = Vec::new();
-    let mut ret = None;
+    let params = lower_inputs(&item.sig.inputs, &mut ctx, None)?;
+    let (body, ret) = lower_fn_block(&item.block, &mut ctx)?;
+    Ok(Func { params, n_locals: ctx.vars.next, body, ret })
+}
 
+/// Declare a function's parameters, returning the count. `self_ty` is `Some` for
+/// methods — then a leading `&self`/`&mut self` receiver is a pointer parameter.
+fn lower_inputs(inputs: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>, ctx: &mut Ctx, self_ty: Option<&str>) -> Result<usize, String> {
     let mut params = 0;
-    for arg in &item.sig.inputs {
-        let syn::FnArg::Typed(pt) = arg else {
-            return Err("`self` parameters are not supported".into());
-        };
-        ctx.vars.declare(&pat_ident(&pt.pat)?, 1, None, ty_of_type(&pt.ty));
+    for (i, arg) in inputs.iter().enumerate() {
+        match arg {
+            syn::FnArg::Receiver(_) => {
+                if i != 0 {
+                    return Err("`self` must be the first parameter".into());
+                }
+                let sty = self_ty.ok_or("`self` outside an impl block")?;
+                ctx.vars.declare_ptr("self", sty);
+            }
+            syn::FnArg::Typed(pt) => {
+                ctx.vars.declare(&pat_ident(&pt.pat)?, 1, None, ty_of_type(&pt.ty));
+            }
+        }
         params += 1;
     }
     if params > 3 {
         return Err("more than 3 parameters not supported yet (no stack args)".into());
     }
+    Ok(params)
+}
 
-    let stmts = &item.block.stmts;
+/// Lower a function body: statements + an optional tail expression.
+fn lower_fn_block(block: &syn::Block, ctx: &mut Ctx) -> Result<(Vec<Stmt>, Option<Expr>), String> {
+    let mut body = Vec::new();
+    let mut ret = None;
+    let stmts = &block.stmts;
     for (i, st) in stmts.iter().enumerate() {
         let last = i + 1 == stmts.len();
         match st {
-            syn::Stmt::Local(local) => lower_local(local, &mut ctx, &mut body)?,
+            syn::Stmt::Local(local) => lower_local(local, ctx, &mut body)?,
             syn::Stmt::Expr(expr, semi) => {
                 if last && semi.is_none() && is_value_expr(expr) {
-                    ret = Some(lower_expr(expr, &mut ctx)?.0);
+                    ret = Some(lower_expr(expr, ctx)?.0);
                 } else {
-                    lower_stmt_expr(expr, &mut ctx, &mut body)?;
+                    lower_stmt_expr(expr, ctx, &mut body)?;
                 }
             }
             other => return Err(format!("unsupported statement: {other:?}")),
         }
     }
-
-    Ok(Func { params, n_locals: ctx.vars.next, body, ret })
+    Ok((body, ret))
 }
 
 fn is_value_expr(e: &syn::Expr) -> bool {
@@ -168,6 +219,7 @@ fn is_value_expr(e: &syn::Expr) -> bool {
             | syn::Expr::Index(_)
             | syn::Expr::Cast(_)
             | syn::Expr::Field(_)
+            | syn::Expr::MethodCall(_)
     )
 }
 
@@ -223,10 +275,9 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
                 let val = lower_expr(&a.right, ctx)?.0;
                 body.push(Stmt::StoreIndex(base, idx, val, w));
             }
-            syn::Expr::Field(_) => {
-                let slot = field_slot(&a.left, ctx)?;
-                let e = lower_expr(&a.right, ctx)?.0;
-                body.push(Stmt::Assign(slot, e));
+            syn::Expr::Field(f) => {
+                let val = lower_expr(&a.right, ctx)?.0;
+                body.push(lower_field_store(f, val, ctx)?);
             }
             _ => {
                 let slot = ctx.vars.base(&path_ident(&a.left)?);
@@ -283,6 +334,10 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
             } else {
                 body.push(Stmt::Eval(lower_expr(expr, ctx)?.0));
             }
+        }
+        // A method call as a statement (e.g. `self.move_head();`).
+        syn::Expr::MethodCall(m) => {
+            body.push(Stmt::Eval(lower_method_call(m, ctx)?.0));
         }
         other => return Err(format!("unsupported statement expression: {other:?}")),
     }
@@ -356,7 +411,7 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> 
                 Ok((e, Width::Word))
             }
         }
-        syn::Expr::Field(_) => Ok((Expr::Var(field_slot(expr, ctx)?), Width::Word)),
+        syn::Expr::Field(f) => Ok((lower_field_read(f, ctx)?, Width::Word)),
         syn::Expr::Index(ix) => {
             let arr = path_ident(&ix.expr)?;
             let base = ctx.vars.base(&arr);
@@ -370,19 +425,7 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> 
             let (re, _) = lower_expr(&b.right, ctx)?;
             Ok((Expr::Bin(op, Box::new(le), Box::new(re), lw), lw))
         }
-        // `x.wrapping_add(y)` etc. — the op at the receiver's width.
-        syn::Expr::MethodCall(m) => {
-            let op = match m.method.to_string().as_str() {
-                "wrapping_add" => BinOp::Add,
-                "wrapping_sub" => BinOp::Sub,
-                "wrapping_mul" => BinOp::Mul,
-                other => return Err(format!("unsupported method: {other}")),
-            };
-            let (recv, rw) = lower_expr(&m.receiver, ctx)?;
-            let arg = m.args.first().ok_or("wrapping_* needs an argument")?;
-            let (re, _) = lower_expr(arg, ctx)?;
-            Ok((Expr::Bin(op, Box::new(recv), Box::new(re), rw), rw))
-        }
+        syn::Expr::MethodCall(m) => lower_method_call(m, ctx),
         syn::Expr::Call(c) => {
             let name = path_ident(&c.func)?;
             // `peek(addr)` intrinsic — read a byte from raw memory.
@@ -424,15 +467,74 @@ fn ty_of_type(t: &syn::Type) -> Width {
     Width::Word
 }
 
-/// Resolve `s.field` (a `syn::Expr::Field`) to its constant local slot.
-fn field_slot(expr: &syn::Expr, ctx: &mut Ctx) -> Result<usize, String> {
-    let syn::Expr::Field(f) = expr else {
-        return Err("expected a field access".into());
-    };
+/// Resolve a field access `obj.field` to `(obj base slot, field offset, is_ptr)`.
+fn field_target(f: &syn::ExprField, ctx: &mut Ctx) -> Result<(usize, usize, bool), String> {
     let obj = path_ident(&f.base)?;
-    let (base, sname) = ctx.vars.struct_of(&obj).ok_or_else(|| format!("{obj} is not a struct"))?;
+    let (base, sname, is_ptr) =
+        ctx.vars.receiver(&obj).ok_or_else(|| format!("{obj} is not a struct"))?;
     let fields = ctx.structs.get(&sname).ok_or_else(|| format!("unknown struct {sname}"))?;
-    Ok(base + field_offset(fields, &member_name(&f.member)?)?)
+    let off = field_offset(fields, &member_name(&f.member)?)?;
+    Ok((base, off, is_ptr))
+}
+
+/// Read `obj.field` — a constant slot for a by-value struct, an indirect load
+/// through the pointer for `self`-style receivers.
+fn lower_field_read(f: &syn::ExprField, ctx: &mut Ctx) -> Result<Expr, String> {
+    let (base, off, is_ptr) = field_target(f, ctx)?;
+    if is_ptr {
+        Ok(Expr::Deref(Box::new(Expr::Var(base)), off * 2))
+    } else {
+        Ok(Expr::Var(base + off))
+    }
+}
+
+/// Write `obj.field = val`.
+fn lower_field_store(f: &syn::ExprField, val: Expr, ctx: &mut Ctx) -> Result<Stmt, String> {
+    let (base, off, is_ptr) = field_target(f, ctx)?;
+    if is_ptr {
+        Ok(Stmt::Store(Expr::Var(base), off * 2, val))
+    } else {
+        Ok(Stmt::Assign(base + off, val))
+    }
+}
+
+/// Lower a method call: the `wrapping_*` value ops, or `obj.m(a, b)` →
+/// `Type::m(&obj, a, b)` (`self` passed as a leading pointer).
+fn lower_method_call(m: &syn::ExprMethodCall, ctx: &mut Ctx) -> Result<(Expr, Width), String> {
+    let method = m.method.to_string();
+    if let "wrapping_add" | "wrapping_sub" | "wrapping_mul" = method.as_str() {
+        let op = match method.as_str() {
+            "wrapping_add" => BinOp::Add,
+            "wrapping_sub" => BinOp::Sub,
+            _ => BinOp::Mul,
+        };
+        let (recv, rw) = lower_expr(&m.receiver, ctx)?;
+        let arg = m.args.first().ok_or("wrapping_* needs an argument")?;
+        let (re, _) = lower_expr(arg, ctx)?;
+        return Ok((Expr::Bin(op, Box::new(recv), Box::new(re), rw), rw));
+    }
+    let recv = path_ident(&m.receiver)?;
+    let (base, sname, is_ptr) =
+        ctx.vars.receiver(&recv).ok_or_else(|| format!("method receiver {recv} is not a struct"))?;
+    let self_ptr = if is_ptr { Expr::Var(base) } else { Expr::AddrOf(base) };
+    let mut args = vec![self_ptr];
+    for a in &m.args {
+        args.push(lower_expr(a, ctx)?.0);
+    }
+    if args.len() > 3 {
+        return Err("method receiver + args exceed 3 registers".into());
+    }
+    Ok((Expr::Call(format!("{sname}::{method}"), args), Width::Word))
+}
+
+/// The simple name of an `impl` target type (`impl Foo` → `Foo`).
+fn type_name(t: &syn::Type) -> Result<String, String> {
+    if let syn::Type::Path(p) = t {
+        if let Some(id) = p.path.get_ident() {
+            return Ok(id.to_string());
+        }
+    }
+    Err(format!("unsupported impl type: {t:?}"))
 }
 
 /// `Enum::Variant` (a 2-segment path) → its integer value, if known.
