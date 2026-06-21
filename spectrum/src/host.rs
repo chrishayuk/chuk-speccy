@@ -9,7 +9,8 @@
 //! (e.g. the PyO3 bridge that forwards to a Python callable).
 
 use crate::memory::Memory;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use z80::Regs;
 
 /// What a handler sees during a trap: the live register file plus scoped memory
@@ -135,5 +136,94 @@ pub fn math_traps() -> FnTable {
         c.ok();
         0
     });
+    t
+}
+
+// Chatbot trap ids (`docs/04-spectrum-native-chat-spec.md`); see also the
+// Python `chat.py` host (the LLM-backed path).
+pub const CHAT_BEGIN: u8 = 0x30;
+pub const CHAT_POLL: u8 = 0x31;
+pub const CHAT_CANCEL: u8 = 0x32;
+pub const CHAT_RESET: u8 = 0x33;
+
+// Reply event codes returned by CHAT_POLL in `A`.
+const EV_NONE: u8 = 0;
+const EV_TEXT: u8 = 1;
+const EV_DONE: u8 = 2;
+
+/// A reply turned into a queue of teletype events the Z80 drains via CHAT_POLL.
+#[derive(Default)]
+struct ChatState {
+    history: Vec<String>,
+    queue: VecDeque<(u8, Vec<u8>)>,
+}
+
+impl ChatState {
+    fn begin(&mut self, prompt: &str) {
+        self.history.push(prompt.to_string());
+        // Stub responder — echoes the prompt. Swap in a real backend host-side
+        // (the Python `chat.py` does chuk-llm).
+        let reply = to_spectrum(&format!("You said: {prompt}"));
+        for chunk in reply.chunks(16) {
+            self.queue.push_back((EV_TEXT, chunk.to_vec()));
+        }
+        self.queue.push_back((EV_DONE, Vec::new()));
+    }
+
+    fn poll(&mut self) -> (u8, Vec<u8>) {
+        self.queue.pop_front().unwrap_or((EV_NONE, Vec::new()))
+    }
+}
+
+/// Clamp to the printable Spectrum charset (ASCII 32..126).
+fn to_spectrum(s: &str) -> Vec<u8> {
+    s.bytes().map(|b| if (32..=126).contains(&b) { b } else { b'?' }).collect()
+}
+
+/// The chatbot host syscalls (`CHAT_*`, id range `0x30–0x3F`) with a built-in
+/// echo responder — the native counterpart of `chat.py`, so the Z80 terminal can
+/// be driven without a Python layer. `CHAT_BEGIN`: `HL`→input, `B`=len.
+/// `CHAT_POLL`: `HL`→buffer, `B`=cap → `A`=event (0 none/1 text/2 done), `BC`=len.
+pub fn chat_traps() -> FnTable {
+    let state = Arc::new(Mutex::new(ChatState::default()));
+    let mut t = FnTable::new();
+
+    let s = state.clone();
+    t.on(CHAT_BEGIN, move |c| {
+        let (addr, n) = (c.regs.hl(), c.regs.bc() >> 8);
+        let prompt = String::from_utf8_lossy(&c.read(addr, n)).to_string();
+        s.lock().unwrap().begin(&prompt);
+        c.ok();
+        0
+    });
+
+    let s = state.clone();
+    t.on(CHAT_POLL, move |c| {
+        let (addr, cap) = (c.regs.hl(), (c.regs.bc() >> 8) as usize);
+        let (code, mut payload) = s.lock().unwrap().poll();
+        payload.truncate(cap);
+        c.write(addr, &payload);
+        c.regs.a = code;
+        c.regs.set_bc(payload.len() as u16);
+        c.ok();
+        0
+    });
+
+    let s = state.clone();
+    t.on(CHAT_CANCEL, move |c| {
+        s.lock().unwrap().queue.clear();
+        c.ok();
+        0
+    });
+
+    let s = state;
+    t.on(CHAT_RESET, move |c| {
+        let mut st = s.lock().unwrap();
+        st.history.clear();
+        st.queue.clear();
+        c.ok();
+        0
+    });
+
     t
 }

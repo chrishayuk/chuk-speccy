@@ -108,12 +108,16 @@ over one shared `Supervisor`.
 - [ ] **L3** showpiece: one app calling an MCP server through a trap.
 
 ### C. Spectrum-native chatbot / agent (spec 04)
-- [x] **`CHAT_*` host protocol + event queue** (`chat.py`): `CHAT_BEGIN`/`POLL`/
-  `CANCEL`/`RESET` over the trap ABI, a `ChatSession` that queues the reply as
-  teletype events, pluggable responder (stub echo now). Tested end-to-end via the
-  trap. *(Z80 terminal app + chuk-llm backend still to come.)*
-- [ ] Host `run_chat` over `chuk-llm` + `chuk-tool-processor`; `speccy()` ASCII sanitiser + 32-col system prompt.
-- [ ] Z80 terminal: input line, custom colour-by-event print, `PRINT_FIFO` teletype drain + beeper, UDG spinner.
+- [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
+  Python `chat.py` (`ChatSession`, pluggable responder, optional `llm_responder`
+  for chuk-llm) and native Rust `spectrum::host::chat_traps()`. `CHAT_BEGIN`/`POLL`/
+  `CANCEL`/`RESET`; reply streamed as teletype events. Tested end-to-end.
+- [x] **Z80 terminal (demo)** — `spectrum --example chat_terminal`: a hand-assembled
+  Z80 loop does `CHAT_BEGIN` then drains `CHAT_POLL`, printing the reply via the ROM
+  (`RST $10`). Proves the two-clock loop end to end (screen shows the host's reply).
+- [ ] Real chat backend: wire `chuk-llm` into the responder (hook is in place).
+- [ ] Full Z80 terminal: keyboard **input line**, colour-by-event print, `PRINT_FIFO`
+  teletype + beeper, UDG spinner (the demo uses a canned prompt + plain print).
 - Prereq: SDK trap ABI (B/L2) and beeper (✓ M6).
 
 ### D. More frontends (spec 05)

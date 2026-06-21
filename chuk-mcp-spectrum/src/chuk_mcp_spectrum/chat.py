@@ -34,6 +34,32 @@ def echo_responder(history: list[tuple[str, str]]) -> str:
     return f"You said: {last}" if last else "Hello!"
 
 
+def llm_responder(
+    model: str = "gpt-4o-mini",
+    system: str = "You are a witty assistant living inside a 1982 ZX Spectrum. "
+    "Reply in plain ASCII, at most 200 characters.",
+) -> Responder:
+    """A responder backed by **chuk-llm**, if installed — otherwise it degrades to
+    the echo stub (so the chatbot never hard-fails on a missing dependency or
+    credentials). Adjust the call to match your chuk-llm version's API.
+
+        session = ChatSession(responder=llm_responder())
+    """
+
+    def respond(history: list[tuple[str, str]]) -> str:
+        try:
+            from chuk_llm import ask_sync  # type: ignore
+        except Exception:
+            return echo_responder(history)  # chuk-llm not available → stub
+        prompt = history[-1][1] if history else ""
+        try:
+            return ask_sync(prompt, model=model, system_prompt=system)
+        except Exception as e:  # network / credentials / API mismatch
+            return f"(llm error: {e})"
+
+    return respond
+
+
 def to_spectrum(s: str) -> bytes:
     """Clamp to the printable Spectrum charset (ASCII 32..126)."""
     return bytes(ord(c) if 32 <= ord(c) <= 126 else ord("?") for c in s)
