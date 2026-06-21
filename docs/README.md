@@ -15,7 +15,8 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 | [04 — Spectrum-Native Chat / Agent](./04-spectrum-native-chat-spec.md) | L3 showpiece: a 32-column chatbot/agent where the Z80 is a dumb terminal and `chuk-llm` + `chuk-tool-processor` + MCP servers do the thinking. Two decoupled clocks + a typed-event poll. |
 | [05 — Frontends & Display Pipeline](./05-frontends-display-spec.md) | Multi-head (desktop/web/TUI/MCP) over one core, and the shared theme + filter pipeline (palette remap / duotone ramp / effect chain). One `DisplayConfig`, every head. |
 | [06 — Roles, Sessions & Autonomy](./06-roles-autonomy-spec.md) | Admin vs agent capability tiers, implicit per-session machines, and the autonomy plane (always-on recording, snapshot timeline, reaping) — agents as pure consumers. |
-| [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8) and what's next (MCP, SDK, chatbot, frontends, accuracy tail). |
+| [07 — Rust → Z80 Compiler](./07-rust-z80-compiler-spec.md) | `rustz80` (planned): a restricted Rust dialect that's *also real Rust*, compiled to a pure `.tap` via `syn` + own IR/codegen + a micro-runtime. One source, both compilers — imperative Rust spans the fidelity dial. |
+| [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8) and what's next (MCP, SDK, chatbot, frontends, compiler, accuracy tail). |
 
 ## Implementation status
 

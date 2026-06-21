@@ -1,12 +1,14 @@
 # chuk-speccy — Roadmap
 
 Single source of truth for what's built and what's next. The design is split
-across six specs ([README index](./README.md)); this tracks delivery against them.
+across seven specs ([README index](./README.md)); this tracks delivery against them.
 
 **Status:** the **emulator core is feature-complete (M0–M8)** — a cycle-accurate,
-ZEXALL-clean 48K Spectrum with two heads over one themeable display pipeline. The
-remaining work is the *layers on top*: MCP server, SDK, chatbot showpiece, extra
-frontends, and the accuracy long tail.
+ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
+plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
+the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
+(Snake). Remaining: a `rustz80` compiler, extra frontends, the RL env, and the
+accuracy long tail.
 
 ---
 
@@ -46,11 +48,22 @@ theme is a thin consumer of those; adding one is zero core change.
 - **Native window (`speccy-gui`, winit + softbuffer):** pixel-perfect 256×192, aspect-correct + letterboxed, real key up/down, cpal sound with **audio-driven frame pacing** (emulation refills the ring to ~3 frames, so it tracks the real-time audio clock instead of the jittery video refresh — no underrun, stable beeper pitch). A real app shell with **native menus** (muda): a *Machine* menu (Save/Load Snapshot via native file dialogs, Reset), a *View* menu / F11 / the macOS green button toggle **full screen** at runtime (any display), and an *Audio* menu switches the **output device live** (e.g. an AirPlay/TV speaker when projecting). Accepts a **game title** (fetched from World of Spectrum) as well as a file.
 
 ### Test inventory
-- `z80-tests`: 32 unit + ZEX harness (`run_zex`, CP/M BDOS trap).
-- `spectrum`: 6 unit (incl. contention, beeper, `.sna` round-trip, `.tap` trap) + 4 ROM-backed (`boots_to_copyright`, `types_basic_and_evaluates`, `title_music_makes_sound`, `tap_loads_and_autoruns_basic`).
-- `display`: 4 unit (theme/effect/border).
-- All warning-clean. ROM-backed tests gated behind `SPECTRUM_ROM` / `SPECTRUM_GAME` env (ROMs gitignored under `testroms/`).
-- Diagnostics: `spectrum --example audiodiag` reports the beeper's dominant pitch per window (contention on vs off). Finding: contention has negligible effect on beeper pitch; the toggle stays as an A/B aid, not a fix.
+- `z80-tests`: 32 unit + ZEX harness (`run_zex`, CP/M BDOS trap) + a disassembler
+  suite (golden per family, all-opcode/all-prefix fuzz, CPU length cross-check).
+- `spectrum`: unit tests for contention, beeper, `.sna` round-trip, `.tap` trap,
+  recording, the real-time tape engine (TAP/TZX pulse encodings + EAR state),
+  `disassemble`, and the host-trap ABI (`FnTable` mul16, math, unknown-id carry,
+  NOP-without-host); ROM-backed: `boots_to_copyright`, `types_basic_and_evaluates`,
+  `title_music_makes_sound`, `tap_loads_and_autoruns_basic`, `chat_terminal_round_trip`.
+- `display`: theme/effect/border. `wos`: matching/encoding + a network fetch (ignored).
+- `speccy-sdk`: screen-interleave + tile/attr + input-edge units; ROM-backed Snake
+  render + 600-frame long-run.
+- `chuk-mcp-spectrum` (Python): surface split, autonomy, record-with-audio, rewind,
+  disassemble, host-trap ABI + guard, the `CHAT_*` protocol, and a WoS search/load.
+- All warning-/clippy-clean. ROM-backed tests gated behind `SPECTRUM_ROM` /
+  `SPECTRUM_GAME` env (ROMs gitignored under `testroms/`); network tests `#[ignore]`.
+- Diagnostics: `spectrum --example audiodiag` reports the beeper's dominant pitch
+  (contention on vs off; finding: negligible effect — the toggle is an A/B aid).
 
 ---
 
@@ -100,7 +113,9 @@ over one shared `Supervisor`.
   `Frame` rasterises 1-bit pixels + attrs into the interleaved 6912-byte screen;
   `Input` reads the matrix via the trap; the ROM font drives `text`. **First light:
   Snake** — `speccy-gui <rom> snake` (also a headless render + long-run test).
-  Composes with every head/MCP/recording for free. *(z80-native backend = the dial, later.)*
+  Composes with every head/MCP/recording for free. This is the **host-composite**
+  backend of the fidelity dial; the **pure-`.tap`** backend is the `rustz80`
+  compiler (**B2**), and a z80-native blitter backend is a later option.
 - [ ] **L0** toolchain: one-command source → `.tap` → run-in-emulator; PNG→Spectrum asset pipeline.
 - [ ] **L1** framework over z88dk (sprites clash-aware + mono, tilemap, input, beeper SFX, fixed-point, RNG).
 - [x] **L2** trap ABI — `ED FE` (`HOSTCALL`, id in `A`) → defaulted `Bus::host_trap`
@@ -113,6 +128,28 @@ over one shared `Supervisor`.
   math + a Python chat handler share one dispatcher (`register_host_dispatcher(cb,
   with_math=True)` / `install_math_traps`).
 - [ ] **L3** showpiece: one app calling an MCP server through a trap.
+
+### B2. `rustz80` — restricted Rust → Z80 compiler (spec 07) — **planned**
+The pure-`.tap` backend of the SDK dial: author a game in **imperative Rust** and
+compile it to a real Spectrum binary — no C, no external toolchain. A compiler for
+a restricted Rust dialect that is *also real Rust*, so the **same source compiles
+under rustc (host, fast iteration) and under `rustz80` (pure)**. That upgrades the
+dial: imperative Rust now spans it, and the subset boundary *is* the 1982-budget /
+2026-capability line (reach for an LLM/host physics and it won't compile pure).
+The largest, riskiest component — and **escapable** (the host-Rust SDK + z88dk
+still ship games if it stalls). Key decisions that keep it solo-sized:
+- [ ] **`syn` frontend + own IR + own Z80 codegen** — *not* an LLVM backend, *not*
+  real `core` (`#![no_std]`, no `alloc`; a ~200-line Z80 micro-runtime for
+  mul/div/shift/memcpy). Sidesteps the `compiler_builtins` 169 GB trap.
+- [ ] **Lean on rustc** for types + borrowck (`cargo check` is the gate) — so this
+  is a Rust *backend* for a subset, not a from-scratch compiler.
+- [ ] **Differential testing on our own emulator** as the oracle: compile each test
+  both ways, run N frames, assert traces match. Reuses three pieces already owned —
+  the `z80` **encode tables**, the **disassembler** (codegen debugger), and the
+  **emulator** (oracle).
+- [ ] Codegen: `HL`/`DE`/`A` + a RAM scratch "register file"; correct-then-peephole.
+  Inline-asm / eDSL escape hatch for hot loops. Stages 0→5 (sprite-move →
+  **Snake on real hardware** → peephole → shared `impl Game` → generics → MIR).
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
@@ -158,13 +195,17 @@ Deliberately deferred; affects timing-precise demos, not games.
 ## Suggested order
 
 ```
-core M0–M8 ✓ ──▶ A. MCP server ──▶ E. RL env (free re-skin)
+core M0–M8 ✓ ──▶ A. MCP server ✓ ──▶ E. RL env (free re-skin)
                       │
-                      └──▶ B. SDK (L0→L2) ──▶ C. chatbot (L3 showpiece)
-   D. frontends (WASM / shaders / streamed)  ── parallel, any time
-   Later. accuracy tail                       ── parallel, as desired
+                      └──▶ B. SDK ✓ (trap ABI + host-composite SDK) ──▶ C. chatbot ✓
+                                  │
+                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── the big, escapable bet
+   D. frontends (WASM / shaders / streamed)        ── parallel, any time
+   Later. accuracy tail (real-time .tzx ✓ done)    ── parallel, as desired
 ```
 
 The honest through-line (from the specs): everything is downstream of a Z80 core
-you trust — which now passes ZEXALL — so the build order is core → MCP → SDK/chat,
-with frontends and the accuracy tail as independent parallel tracks.
+you trust — which passes ZEXALL — so the build order was core → MCP → SDK/chat,
+all now built. What's left divides into the **escapable big bet** (`rustz80`, B2 —
+imperative Rust to a pure `.tap`) and **independent parallel tracks** (frontends,
+RL env, the accuracy tail). Nothing else depends on the compiler; it's pure upside.
