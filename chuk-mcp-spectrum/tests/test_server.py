@@ -25,7 +25,7 @@ def test_two_surfaces_are_split():
 
     agent = names(server.build_agent())
     admin = names(server.build_admin())
-    assert "screenshot" in agent and "press_keys" in agent
+    assert "screenshot" in agent and "press_keys" in agent and "disassemble" in agent
     # agent is policy-free: no lifecycle / pokes / recording / library loading
     assert not any(x in agent for x in ("create_machine", "write_memory", "stop_recording", "destroy_session", "load_game"))
     assert len(agent) < len(admin)
@@ -52,6 +52,17 @@ def test_screenshot_is_png(sup):
     sup.session("s3")
     shot = server._screenshot("s3")
     assert shot.mimeType == "image/png" and len(shot.data) > 0
+
+
+def test_disassemble(sup):
+    sid = "s3d"
+    sup.session(sid)
+    # Poke a tiny program into RAM and disassemble it back.
+    sup.machine(sid).write_memory(0x8000, b"\x21\x00\x40\x76")  # LD HL,$4000 ; HALT
+    out = server._disassemble(sid, 0x8000, 2)
+    assert out["lines"][0]["text"] == "LD HL,$4000"
+    assert out["lines"][0]["bytes"] == "210040"
+    assert out["lines"][1]["text"] == "HALT"
 
 
 def test_auto_snapshot_cadence(sup):

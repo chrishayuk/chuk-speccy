@@ -58,6 +58,13 @@ def _screen_text(sid: str) -> str:
     return SUPERVISOR.machine(sid).screen_text()
 
 
+def _disassemble(sid: str, addr: int, count: int) -> dict:
+    lines = SUPERVISOR.machine(sid).disassemble(addr, count)
+    return {
+        "lines": [{"addr": ln["addr"], "bytes": bytes(ln["bytes"]).hex(), "text": ln["text"]} for ln in lines]
+    }
+
+
 def _press(sid: str, keys: list[str], frames: int) -> dict:
     SUPERVISOR.machine(sid).press(keys, frames)
     SUPERVISOR.note_activity(sid)
@@ -145,6 +152,10 @@ def register_agent_tools(mcp: ChukMCPServer) -> None:
     def read_memory(addr: int, length: int = 16) -> dict:
         return _read_memory(_sid(), addr, length)
 
+    @mcp.tool(read_only_hint=True, description="Disassemble `count` Z80 instructions from `addr`.")
+    def disassemble(addr: int, count: int = 16) -> dict:
+        return _disassemble(_sid(), addr, count)
+
     @mcp.tool(description="Hold keys (chars, or 'enter'/'space'/'caps'/'sym') for `frames`, then release.")
     def press_keys(keys: list[str], frames: int = 2) -> dict:
         return _press(_sid(), keys, frames)
@@ -178,6 +189,10 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
     @mcp.tool(read_only_hint=True, description="Read memory of any session.")
     def admin_read_memory(session_id: str, addr: int, length: int = 16) -> dict:
         return _read_memory(session_id, addr, length)
+
+    @mcp.tool(read_only_hint=True, description="Disassemble any session.")
+    def admin_disassemble(session_id: str, addr: int, count: int = 16) -> dict:
+        return _disassemble(session_id, addr, count)
 
     @mcp.tool(description="Run frames on any session.")
     def admin_run_frames(session_id: str, n: int = 1) -> dict:

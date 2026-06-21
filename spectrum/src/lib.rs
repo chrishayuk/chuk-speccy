@@ -91,6 +91,15 @@ pub struct Spectrum {
     rec_indexed: Vec<u8>,
 }
 
+/// One disassembled instruction: its address, the raw bytes it spans, and the
+/// mnemonic. Returned by [`Spectrum::disassemble`].
+#[derive(Debug, Clone)]
+pub struct DisasmLine {
+    pub addr: u16,
+    pub bytes: Vec<u8>,
+    pub text: String,
+}
+
 impl Spectrum {
     /// Build a 48K machine. `rom` should be the 16K system ROM image; pass an
     /// empty slice to start with a blank ROM (useful for unit tests).
@@ -223,6 +232,21 @@ impl Spectrum {
         for (i, &b) in data.iter().enumerate() {
             self.board.mem.write(addr.wrapping_add(i as u16), b);
         }
+    }
+
+    /// Disassemble `count` instructions from live memory starting at `addr`.
+    /// Each line carries its address, raw bytes, and mnemonic; the next line
+    /// begins at `addr + bytes.len()`.
+    pub fn disassemble(&self, addr: u16, count: u16) -> Vec<DisasmLine> {
+        let mut out = Vec::with_capacity(count as usize);
+        let mut pc = addr;
+        for _ in 0..count {
+            let d = z80::disassemble(pc, |a| self.board.mem.read(a));
+            let bytes = (0..d.len).map(|i| self.board.mem.read(pc.wrapping_add(i as u16))).collect();
+            out.push(DisasmLine { addr: pc, bytes, text: d.text });
+            pc = pc.wrapping_add(d.len as u16);
+        }
+        out
     }
 
     // --- snapshots -----------------------------------------------------------
@@ -545,6 +569,19 @@ mod tests {
         // Stopped: further frames aren't captured.
         spec.run_frame();
         assert_eq!(spec.recording_count(), 0);
+    }
+
+    #[test]
+    fn disassembles_from_memory() {
+        let mut spec = Spectrum::new_48k(&[]);
+        // LD HL,$4000 ; INC HL ; LD A,(HL) ; HALT
+        spec.write_memory(0x8000, &[0x21, 0x00, 0x40, 0x23, 0x7E, 0x76]);
+        let lines = spec.disassemble(0x8000, 4);
+        let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(texts, ["LD HL,$4000", "INC HL", "LD A,(HL)", "HALT"]);
+        assert_eq!(lines[0].addr, 0x8000);
+        assert_eq!(lines[0].bytes, vec![0x21, 0x00, 0x40]);
+        assert_eq!(lines[1].addr, 0x8003, "next line follows the previous length");
     }
 
     #[test]

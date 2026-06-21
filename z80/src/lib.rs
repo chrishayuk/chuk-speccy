@@ -10,11 +10,17 @@
 #![no_std]
 #![allow(dead_code)]
 
+// The disassembler builds owned `String`s; `alloc` is provided by every consumer
+// (all are `std`). The CPU and decoder themselves stay allocation-free.
+extern crate alloc;
+
 pub mod alu;
 pub mod bus;
 pub mod cpu;
 pub mod decode;
+pub mod disasm;
 pub mod flags;
 
 pub use bus::Bus;
 pub use cpu::{Cpu, Index, Regs, StopReason};
+pub use disasm::{disassemble, Disasm};

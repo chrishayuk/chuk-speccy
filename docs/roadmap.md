@@ -74,7 +74,12 @@ restructured into the agent/admin two-endpoint model — see **A2**.
   are reported as needing real-time tape loading (see the accuracy tail). The
   `speccy-library` bin headlessly verifies a set of classics in one command.
 - [ ] `set_display(preset)` — expose the `display` crate themes so an agent can re-theme + screenshot.
-- [ ] `disassemble` / `trace` / breakpoints (need a disassembler in the core first).
+- [x] **Disassembler** — `z80::disassemble` (a pure read-only mirror of the
+  decoder: prefixes, `(IX+d)`, DDCB, ED block ops + undocumented slots; absolute
+  JR/DJNZ targets). Surfaced as `Spectrum::disassemble`, `zxspec_py`, and the MCP
+  `disassemble` tool (agent + admin). Tested by golden + all-opcode fuzz + a CPU
+  length cross-check.
+- [ ] `trace` / breakpoints (`StopReason::Breakpoint` already exists in the core).
 - [ ] Decision to lock: native `serialize_full()`/`deserialize_full()` for exact RL/debugger reset fidelity (vs lossy `.sna`/`.z80`). See [MCP spec §10](./02-mcp-server-layer-spec.md#10-open-decision-pyo3-boundary).
 
 ### A2. Roles & autonomy (spec 06) — **built** (on `chuk-mcp-server`)

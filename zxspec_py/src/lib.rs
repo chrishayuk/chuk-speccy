@@ -150,6 +150,23 @@ impl Machine {
         PyBytes::new_bound(py, &self.spec.read_memory(addr, len))
     }
 
+    /// Disassemble `count` instructions from `addr`. Returns a list of
+    /// `{addr, bytes, text}` dicts (the next instruction is at `addr + len(bytes)`).
+    #[pyo3(signature = (addr, count=16))]
+    fn disassemble<'py>(&self, py: Python<'py>, addr: u16, count: u16) -> Vec<Bound<'py, PyDict>> {
+        self.spec
+            .disassemble(addr, count)
+            .into_iter()
+            .map(|l| {
+                let d = PyDict::new_bound(py);
+                d.set_item("addr", l.addr).unwrap();
+                d.set_item("bytes", PyBytes::new_bound(py, &l.bytes)).unwrap();
+                d.set_item("text", l.text).unwrap();
+                d
+            })
+            .collect()
+    }
+
     /// Decoded display as RGBA bytes (256×192×4, no border).
     fn screen_rgba<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new_bound(py, &self.spec.screen_rgba())
