@@ -8,6 +8,7 @@
 pub mod host;
 pub mod keyboard;
 pub mod memory;
+pub mod sdk;
 pub mod snapshot;
 pub mod tape;
 pub mod ula;
@@ -910,6 +911,39 @@ mod tests {
         assert!(
             text.lines().next().unwrap_or("").contains("42"),
             "expected 6*7=42 printed at the top, got:\n{text}"
+        );
+    }
+
+    /// The interactive Z80 chat terminal: type a line, ENTER, and the host's
+    /// reply is teletyped back onto the screen.
+    ///   SPECTRUM_ROM="$PWD/testroms/48.rom" cargo test -p spectrum -- --ignored chat_terminal
+    #[test]
+    #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+    fn chat_terminal_round_trip() {
+        let path = std::env::var("SPECTRUM_ROM").expect("set SPECTRUM_ROM");
+        let rom = std::fs::read(&path).expect("read ROM");
+        let mut spec = Spectrum::new_48k(&rom);
+        for _ in 0..250 {
+            spec.run_frame();
+        }
+        spec.set_host_dispatcher(Box::new(host::chat_traps()));
+        spec.write_memory(sdk::CHAT_TERMINAL_ORG, &sdk::CHAT_TERMINAL);
+        spec.cpu.regs.pc = sdk::CHAT_TERMINAL_ORG;
+        for _ in 0..3 {
+            spec.run_frame(); // let the terminal's init run (it sets L-mode) before typing
+        }
+
+        // Type "hi" + ENTER through the keyboard matrix; the terminal reads it
+        // from LAST-K (the ROM ISR scans the matrix each frame).
+        spec.type_text("hi\n");
+        for _ in 0..20 {
+            spec.run_frame();
+        }
+
+        let text = spec.screen_text();
+        assert!(
+            text.contains("You said: HI") || text.contains("You said: hi"),
+            "expected the host reply on screen, got:\n{text}"
         );
     }
 }
