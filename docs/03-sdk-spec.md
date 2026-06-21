@@ -92,39 +92,40 @@ you own the emulator and the CHUK stack.
 
 ---
 
-## 4. The trap ABI (the distinctive layer)
+## 4. The trap ABI (the distinctive layer) — **built**
 
 This is the same trick as your virtual-expert architecture — intercept execution,
 route to an external implementation — applied to the Z80. The Spectrum program
 hits a magic instruction; the emulator dispatches to a registered host function;
 results come back in registers/memory.
 
-**Trap mechanism.** Use a reserved **`ED`-prefixed opcode** as the syscall
-instruction. The `ED` page has many genuinely-undefined slots that NOP on real
-hardware, which gives a clean property: a hybrid binary run on a *real* Spectrum
-degrades to NOPs rather than executing as some other instruction. Encode the
-syscall id in the following byte (or in `A`):
+**Trap mechanism.** The reserved opcode is **`ED FE`** (`HOSTCALL`, [`z80::TRAP_OP`]).
+It's genuinely undefined on a real Z80 *and* on the ZX Spectrum Next's extended
+ED set — so a hybrid binary on real hardware degrades to a clean NOP rather than
+mis-executing. The **syscall id is in `A`** (not a trailing byte): a lone `ED FE`
+NOPs cleanly, so a stray id can't be mis-decoded, and a binary can probe with
+`HOST_PRESENT` (§6) and fall back at runtime.
 
 ```
-  ED 70 <id>      ; "host syscall <id>"
+  ld a, <id>
+  defb $ED, $FE   ; HOSTCALL
 ```
 
-> Implementation note (ties to the core): the `z80` core's ED decoder treats the
-> undefined ED slots as NOPs today (`docs/01-core-emulator-spec.md` §4). The trap
-> hook is a `Bus` extension — when the ED decoder sees `0x70`, it reads the id
-> byte and calls a `host_call(id, &mut regs)` method, leaving the pure-core build
-> (no host) to NOP exactly as real silicon does.
+> Implementation (ties to the core): `z80`'s ED decoder special-cases `ED FE` and
+> calls a defaulted `Bus::host_trap(&mut regs) -> u32` (extra T-states); all other
+> undefined ED slots still NOP. With no host installed it's a NOP, exactly like
+> real silicon. The disassembler renders it as `HOSTCALL`.
 
-**Calling convention.** Small args in registers (`BC`, `DE`, `HL`); structured
-args via an `IX`/`HL`-pointed parameter block in RAM. Return in `HL`/`A`, error in
-carry. The emulator side is a table dispatch off the `Bus`:
+**Calling convention.** id in `A`; small args in `BC`/`DE`/`HL`; structured args
+via an `IX`/`HL`-pointed RAM parameter block. Return in `HL`/`A`; **carry = error**.
+The `spectrum` side is a registry off the `Bus`:
 
 ```rust
-pub trait HostCalls {
-    fn dispatch(&mut self, id: u8, regs: &mut Regs, mem: &mut Memory) -> bool; // CF
-}
-// in the CPU's ED decoder:
-//   0x70 => { let id = self.fetch(bus); bus.host_call(id, &mut self.regs); }
+// spectrum::host
+pub trait HostCalls: Send { fn dispatch(&mut self, ctx: &mut HostCtx) -> u32; }
+// HostCtx gives ctx.id() (= A), regs, ctx.read/write(addr,..), ctx.ok()/fail().
+// FnTable maps id -> Rust closure (math/asset/tests); a PyO3 PyDispatcher
+// forwards to a Python callable. Install with Machine::set_host_dispatcher.
 ```
 
 **What you expose through it (hybrid mode):**
@@ -142,8 +143,8 @@ host helpers writing into real screen RAM unless you've consciously chosen to
 build a fantasy-console layer.
 
 **The `mode` swap.** In pure builds, each L1 primitive resolves to its Z80
-implementation; in hybrid builds, to an `ED 70 <id>` trap. Same call site. This is
-the fidelity dial made concrete — a build flag, not a code rewrite.
+implementation; in hybrid builds, to an `ED FE` trap. Same call site. This is the
+fidelity dial made concrete — a build flag, not a code rewrite.
 
 ---
 

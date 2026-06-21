@@ -97,6 +97,50 @@ def test_search_and_load_game(sup):
     assert sum(1 for b in idx if b) > 0
 
 
+def test_host_trap_abi():
+    """The ED FE host-trap ABI: dispatch, register/memory access, carry, the
+    liveness guard, and clean NOP without a dispatcher."""
+    import zxspec_py
+
+    m = zxspec_py.Machine(open(ROM, "rb").read())
+    retained = {}
+
+    def on_trap(ctx):
+        retained["ctx"] = ctx  # keep it to test the guard
+        if ctx.a == 0x10:  # mul16
+            ctx.set_hl((ctx.bc * ctx.de) & 0xFFFF)
+            ctx.set_carry(False)
+        else:
+            ctx.set_carry(True)
+
+    m.register_host_dispatcher(on_trap)
+    m.write_memory(0x8000, b"\xED\xFE")
+    for name, val in (("pc", 0x8000), ("a", 0x10), ("bc", 7), ("de", 6)):
+        m.set_register(name, val)
+    m.step(1)
+    assert m.registers()["hl"] == 42
+    assert m.registers()["pc"] == 0x8002
+
+    # A retained ctx raises instead of dereferencing freed state.
+    with pytest.raises(RuntimeError):
+        retained["ctx"].read(0x4000, 1)
+
+    # Unknown id → carry set.
+    m.set_register("pc", 0x8000)
+    m.set_register("a", 0x99)
+    m.set_register("f", 0)
+    m.step(1)
+    assert m.registers()["f"] & 1
+
+    # No dispatcher → ED FE is a clean NOP (the fidelity dial).
+    m.clear_host_dispatcher()
+    m.set_register("pc", 0x8000)
+    m.set_register("hl", 0)
+    m.set_register("a", 0)
+    m.step(1)
+    assert m.registers()["hl"] == 0
+
+
 def test_restore_snapshot_rewinds(sup):
     sid = "s6"
     sup.session(sid)

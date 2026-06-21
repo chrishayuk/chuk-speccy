@@ -337,6 +337,9 @@ impl<F: Fn(u16) -> u8> Dis<F> {
 
     fn ed(&mut self) -> String {
         let op = self.next();
+        if op == crate::TRAP_OP {
+            return "HOSTCALL".to_string();
+        }
         let x = op >> 6;
         let y = (op >> 3) & 7;
         let z = op & 7;

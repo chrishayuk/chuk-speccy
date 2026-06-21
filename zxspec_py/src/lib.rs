@@ -3,6 +3,8 @@
 //! all MCP-shaping (PNG, base64, content blocks) happens in the Python layer
 //! (`docs/02-mcp-server-layer-spec.md`).
 
+mod trap;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -89,6 +91,21 @@ impl Machine {
     /// True while a real-time tape is still playing.
     fn tape_playing(&self) -> bool {
         self.spec.tape_playing()
+    }
+
+    // --- host traps (`ED FE`) -----------------------------------------------
+
+    /// Install a Python callable `cb(ctx)` to answer `ED FE` host traps. `ctx`
+    /// exposes the registers (`a`, `bc`, `hl`, … + setters), `carry`, and
+    /// `read(addr,len)`/`write(addr,bytes)` — valid only during the call. Switch
+    /// on `ctx.a` (the syscall id). Without one, `ED FE` is a NOP.
+    fn register_host_dispatcher(&mut self, cb: Py<PyAny>) {
+        self.spec.set_host_dispatcher(Box::new(trap::PyDispatcher::new(cb)));
+    }
+
+    /// Remove the host dispatcher; `ED FE` reverts to a NOP.
+    fn clear_host_dispatcher(&mut self) {
+        self.spec.clear_host_dispatcher();
     }
 
     // --- execution -----------------------------------------------------------

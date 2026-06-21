@@ -96,7 +96,13 @@ over one shared `Supervisor`.
 ### B. SDK / developer kit (spec 03)
 - [ ] **L0** toolchain: one-command source → `.tap` → run-in-emulator; PNG→Spectrum asset pipeline.
 - [ ] **L1** framework over z88dk (sprites clash-aware + mono, tilemap, input, beeper SFX, fixed-point, RNG).
-- [ ] **L2** trap ABI: the `ED 70 <id>` host syscall + dispatch table, behind a pure/hybrid build flag. (The `z80` ED decoder already NOPs undefined slots — the degrade-on-real-hardware property is in place.)
+- [x] **L2** trap ABI — `ED FE` (`HOSTCALL`, id in `A`) → defaulted `Bus::host_trap`
+  → `spectrum::host` registry (`HostCalls`/`HostCtx`/`FnTable`) → PyO3 bridge
+  (`register_host_dispatcher`, with a liveness-guarded `TrapCtx`). NOP on bare
+  hardware (the fidelity dial), `HOST_PRESENT` probe, disassembles as `HOSTCALL`.
+  Tested in Rust (`FnTable` mul16) and Python (round-trip + guard + both ways).
+  *Next: land the actual `mul16`/`CHAT_*` handlers (id map in [SDK spec §5]).*
+- [ ] **L2 handlers** — `mul16`/`div16` (math), then `CHAT_*` for the chatbot.
 - [ ] **L3** showpiece: one app calling an MCP server through a trap.
 
 ### C. Spectrum-native chatbot / agent (spec 04)

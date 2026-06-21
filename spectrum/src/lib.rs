@@ -5,6 +5,7 @@
 //! [`z80::Bus`], so the borrow checker stays happy and all timing lives in the
 //! ULA (`docs/01-core-emulator-spec.md` §3).
 
+pub mod host;
 pub mod keyboard;
 pub mod memory;
 pub mod snapshot;
@@ -32,6 +33,8 @@ pub struct Board {
     /// A real-time tape signal (turbo/custom loaders); `None` = no tape playing.
     /// Advanced in lockstep with the ULA clock; drives the EAR input bit.
     pub tape_signal: Option<TapeSignal>,
+    /// Optional host-trap dispatcher (`ED FE`); `None` = traps are NOPs.
+    host: Option<Box<dyn host::HostCalls>>,
 }
 
 impl Board {
@@ -93,6 +96,18 @@ impl Bus for Board {
         self.ula.tick(cycles);
         self.advance_tape(cycles);
     }
+
+    fn host_trap(&mut self, regs: &mut z80::Regs) -> u32 {
+        // Split borrow: `host` and `mem` are disjoint fields, so the dispatcher
+        // can read/write memory while it runs.
+        match self.host.as_mut() {
+            Some(h) => {
+                let mut ctx = host::HostCtx::new(regs, &mut self.mem);
+                h.dispatch(&mut ctx)
+            }
+            None => 0,
+        }
+    }
 }
 
 /// A whole 48K Spectrum.
@@ -132,6 +147,7 @@ impl Spectrum {
                 ula: Ula::new(),
                 kb: Keyboard::new(),
                 tape_signal: None,
+                host: None,
             },
             tape: None,
             rec_enabled: false,
@@ -324,6 +340,19 @@ impl Spectrum {
     /// True while a real-time tape is still playing.
     pub fn tape_playing(&self) -> bool {
         self.board.tape_signal.as_ref().is_some_and(|t| t.playing())
+    }
+
+    // --- host traps (`ED FE`) -----------------------------------------------
+
+    /// Install the dispatcher that answers `ED FE` host traps. Without one, the
+    /// opcode is a clean NOP (so a hybrid binary degrades on bare hardware).
+    pub fn set_host_dispatcher(&mut self, d: Box<dyn host::HostCalls>) {
+        self.board.host = Some(d);
+    }
+
+    /// Remove the host dispatcher; `ED FE` reverts to a NOP.
+    pub fn clear_host_dispatcher(&mut self) {
+        self.board.host = None;
     }
 
     /// Service the ROM `LD-BYTES` trap: read the next tape block and inject it.
@@ -619,6 +648,59 @@ mod tests {
         assert_eq!(lines[0].addr, 0x8000);
         assert_eq!(lines[0].bytes, vec![0x21, 0x00, 0x40]);
         assert_eq!(lines[1].addr, 0x8003, "next line follows the previous length");
+    }
+
+    #[test]
+    fn host_trap_dispatches_to_fntable() {
+        use crate::host::{FnTable, HostCtx};
+        let mut spec = Spectrum::new_48k(&[]);
+        let mut table = FnTable::new();
+        // 0x10 = mul16: HL = BC * DE.
+        table.on(0x10, |ctx: &mut HostCtx| {
+            let bc = (ctx.regs.b as u16) << 8 | ctx.regs.c as u16;
+            let de = (ctx.regs.d as u16) << 8 | ctx.regs.e as u16;
+            ctx.regs.set_hl(bc.wrapping_mul(de));
+            ctx.ok();
+            0
+        });
+        spec.set_host_dispatcher(Box::new(table));
+
+        spec.write_memory(0x8000, &[0xED, 0xFE]); // HOSTCALL
+        spec.cpu.regs.pc = 0x8000;
+        spec.cpu.regs.a = 0x10;
+        spec.cpu.regs.set_bc(7);
+        spec.cpu.regs.set_de(6);
+        spec.step();
+
+        assert_eq!(spec.cpu.regs.hl(), 42, "BC*DE written back to HL");
+        assert_eq!(spec.cpu.regs.pc, 0x8002, "two-byte opcode consumed");
+        assert!(!spec.cpu.regs.carry(), "ok() cleared carry");
+    }
+
+    #[test]
+    fn host_trap_unknown_id_sets_carry() {
+        let mut spec = Spectrum::new_48k(&[]);
+        spec.set_host_dispatcher(Box::new(crate::host::FnTable::new()));
+        spec.write_memory(0x8000, &[0xED, 0xFE]);
+        spec.cpu.regs.pc = 0x8000;
+        spec.cpu.regs.a = 0x99; // no handler registered
+        spec.cpu.regs.set_carry(false);
+        spec.step();
+        assert!(spec.cpu.regs.carry(), "unknown id fails with CF=1");
+        assert_eq!(spec.cpu.regs.pc, 0x8002);
+    }
+
+    #[test]
+    fn host_trap_is_nop_without_dispatcher() {
+        // The fidelity dial: with no host, ED FE does nothing (as on real silicon).
+        let mut spec = Spectrum::new_48k(&[]);
+        spec.write_memory(0x8000, &[0xED, 0xFE]);
+        spec.cpu.regs.pc = 0x8000;
+        spec.cpu.regs.set_hl(0);
+        spec.cpu.regs.a = 0x00; // HOST_PRESENT probe
+        spec.step();
+        assert_eq!(spec.cpu.regs.hl(), 0, "HL unchanged → bare hardware");
+        assert_eq!(spec.cpu.regs.pc, 0x8002);
     }
 
     #[test]
