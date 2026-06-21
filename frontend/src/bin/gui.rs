@@ -4,11 +4,12 @@
 //! window, with real key-up/down events driving the keyboard matrix. No terminal
 //! resolution ceiling; this is the crisp way to play.
 //!
-//! Usage: `speccy-gui <48.rom> [game.tap|.sna|.z80 | "game title"] [theme] [scaleN]`
+//! Usage: `speccy-gui <48.rom> [game.tap|.sna|.z80 | "game title"] [theme] [scaleN] [fullscreen]`
 //!   game:   a local `.tap`/`.sna`/`.z80` file, OR a title to fetch from World of
 //!           Spectrum (e.g. `speccy-gui 48.rom "Jet Set Willy"`).
 //!   theme:  authentic | dark | light | terminal | amber | gameboy  (default authentic)
 //!   scaleN: integer pixel zoom, e.g. `scale3` (default: auto-fit a sensible size)
+//!   fullscreen: borderless, screen-filling, on top — for a second display / AirPlay.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use display::{BorderMode, DisplayConfig};
@@ -23,7 +24,7 @@ fn main() {
     let rom_path = match args.next() {
         Some(p) => p,
         None => {
-            eprintln!("usage: speccy-gui <48.rom> [snapshot.sna|.z80] [theme] [scaleN]");
+            eprintln!("usage: speccy-gui <48.rom> [game.tap|.sna|.z80 | \"title\"] [theme] [scaleN] [fullscreen]");
             std::process::exit(2);
         }
     };
@@ -31,10 +32,15 @@ fn main() {
     let mut theme_name = "authentic".to_string();
     let mut media_path: Option<String> = None;
     let mut scale = Scale::FitScreen;
+    let mut fullscreen = false;
     let mut query_parts: Vec<String> = Vec::new();
     for a in args {
         if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") {
             media_path = Some(a);
+        } else if a == "fullscreen" || a == "present" {
+            // Borderless, screen-filling, always-on-top — clean for projecting to
+            // a second display or over AirPlay screen mirroring.
+            fullscreen = true;
         } else if let Some(n) = a.strip_prefix("scale") {
             scale = match n {
                 "1" => Scale::X1,
@@ -117,6 +123,9 @@ fn main() {
     // Size the window from the first rendered frame.
     let probe = display::render(&spec.screen_indexed(), spec.border(), &cfg);
     let (w, h) = (probe.width, probe.height);
+    // Fullscreen fills the screen borderless (aspect preserved, letterboxed) and
+    // floats on top — drag it to the projected/AirPlay display.
+    let scale = if fullscreen { Scale::FitScreen } else { scale };
     let mut window = Window::new(
         &format!("chuk-speccy — {theme_name}"),
         w,
@@ -124,7 +133,9 @@ fn main() {
         WindowOptions {
             scale,
             scale_mode: minifb::ScaleMode::AspectRatioStretch,
-            resize: true,
+            resize: !fullscreen,
+            borderless: fullscreen,
+            topmost: fullscreen,
             ..WindowOptions::default()
         },
     )
