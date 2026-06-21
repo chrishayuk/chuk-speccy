@@ -252,6 +252,61 @@ fn arrays() {
 }
 
 #[test]
+fn structs() {
+    // A struct literal, field reads/writes, and a struct passed across functions
+    // by mutating fields locally — checked against rustc.
+    struct Point {
+        x: u16,
+        y: u16,
+    }
+    fn host() -> u16 {
+        let mut p = Point { x: 3, y: 4 };
+        p.x = p.x + 10;
+        p.y = p.y * 2;
+        p.x * 100 + p.y // 13*100 + 8 = 1308
+    }
+    let src = "
+        struct Point { x: u16, y: u16 }
+        fn run() -> u16 {
+            let mut p = Point { x: 3u16, y: 4u16 };
+            p.x = p.x + 10u16;
+            p.y = p.y * 2u16;
+            p.x * 100u16 + p.y
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
+fn structs_compose_with_functions() {
+    // Pass scalar fields into functions and combine the results.
+    struct V {
+        x: u16,
+        y: u16,
+    }
+    fn area(w: u16, h: u16) -> u16 {
+        w * h
+    }
+    fn host() -> u16 {
+        let a = V { x: 6, y: 7 };
+        let b = V { x: 3, y: 4 };
+        area(a.x, a.y) + area(b.x, b.y) // 42 + 12 = 54
+    }
+    let src = "
+        struct V { x: u16, y: u16 }
+        fn area(w: u16, h: u16) -> u16 { w * h }
+        fn run() -> u16 {
+            let a = V { x: 6u16, y: 7u16 };
+            let b = V { x: 3u16, y: 4u16 };
+            area(a.x, a.y) + area(b.x, b.y)
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
 fn unsupported_is_an_error() {
     // f32 is outside the dialect → a clear compile error (the host-only signal).
     assert!(rustz80::compile_fn("fn f() -> u16 { let x = 1.5f32; 0u16 }").is_err());
