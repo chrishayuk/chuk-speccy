@@ -1,0 +1,16 @@
+# rustz80 (spec 07): a restricted Rust -> Z80 compiler. Stage 0 — syn frontend,
+# own IR, naive Z80 codegen for u16 arithmetic + if/while; differential-tested
+# against rustc on the emulator. Not an LLVM backend, no real `core`.
+[package]
+name = "rustz80"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+# Run the compiled bytes on the real CPU to differential-test against rustc.
+z80 = { path = "../z80" }
