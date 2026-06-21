@@ -134,8 +134,25 @@ fn slot_addr(base: u16, slot: usize) -> u16 {
 }
 
 /// Compile a whole program (functions laid out in order, micro-runtime appended).
-pub fn codegen_program(funcs: &[(String, Func)], org: u16) -> (Vec<u8>, HashMap<String, u16>) {
+///
+/// If `entry` is set, a tiny `DI; CALL entry; EI; RET` trampoline is emitted **at
+/// `org`** so callers can `USR org`. The `DI` matters: the compiler keeps live
+/// values in `DE`/`BC` across instructions, but the Spectrum's interrupt routine
+/// clobbers `BC`/`DE` (its keyboard scan), so an interrupt mid-computation would
+/// corrupt arithmetic. Disabling interrupts for the run avoids that; `EI` restores
+/// them before returning to BASIC.
+pub fn codegen_program(
+    funcs: &[(String, Func)],
+    org: u16,
+    entry: Option<&str>,
+) -> (Vec<u8>, HashMap<String, u16>) {
     let mut a = Asm::new(org);
+    if let Some(e) = entry {
+        a.byte(0xF3); // DI
+        a.call(e); // CALL entry
+        a.byte(0xFB); // EI
+        a.byte(0xC9); // RET
+    }
     let mut base = 0u16;
     for (name, func) in funcs {
         a.define(name);

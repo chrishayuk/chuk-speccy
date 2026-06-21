@@ -14,3 +14,5 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 [dev-dependencies]
 # Run the compiled bytes on the real CPU to differential-test against rustc.
 z80 = { path = "../z80" }
+# Boot a compiled `.tap` on the full machine (ROM-gated end-to-end test).
+spectrum = { path = "../spectrum" }
