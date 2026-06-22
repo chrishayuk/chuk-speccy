@@ -53,6 +53,91 @@ pub fn compile_to_tap(src: &str, entry: &str, name: &str) -> Result<Vec<u8>, Str
     Ok(to_tap(&code, ORG, ORG, name))
 }
 
+/// The pure-target SDK prelude (dialect source), prepended when compiling an
+/// `impl Game`. `Frame`/`Input` method calls lower to these functions; they draw
+/// straight into screen RAM via `poke`/`peek` — the host counterparts live in
+/// `speccy-sdk`. (`Colour` mirrors the SDK's non-bright variants 0..7.)
+const PRELUDE: &str = r#"
+enum Colour { Black, Blue, Red, Magenta, Green, Cyan, Yellow, White }
+fn __px_addr(x: u16, y: u16) -> u16 {
+    16384u16 + (y / 64u16) * 2048u16 + (y % 8u16) * 256u16 + ((y / 8u16) % 8u16) * 32u16 + x / 8u16
+}
+fn __px_mask(x: u16) -> u16 {
+    let m = [128u8, 64u8, 32u8, 16u8, 8u8, 4u8, 2u8, 1u8];
+    m[(x % 8u16) as usize] as u16
+}
+fn __frame_pixel(x: u16, y: u16, on: u16) {
+    let a = __px_addr(x, y);
+    let mask = __px_mask(x);
+    if on == 0u16 {
+        poke(a, peek(a) & (255u16 ^ mask));
+    } else {
+        poke(a, peek(a) | mask);
+    }
+}
+fn __frame_clear(colour: u16) {
+    let mut p = 16384u16;
+    while p < 22528u16 { poke(p, 0u8); p = p + 1u16; }
+    while p < 23296u16 { poke(p, colour as u8); p = p + 1u16; }
+}
+fn __input_held(b: u16) -> u16 { 0u16 }
+"#;
+
+/// Compile an `impl Game for T` to a bootable `.tap`. The *same* source also
+/// compiles under `rustc` against `speccy-sdk` (host) — this is the pure target:
+/// `T`'s state is a zero-initialised global, and a generated frame loop calls
+/// `T::update(&state, …)` each frame, with `Frame`/`Input` calls routed to the
+/// [`PRELUDE`].
+pub fn compile_game(src: &str, name: &str) -> Result<Vec<u8>, String> {
+    let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+    let ty = find_game_impl(&file).ok_or("no `impl Game for T` found")?;
+    let fields = struct_fields(&file, &ty).ok_or_else(|| format!("struct `{ty}` not found"))?;
+    let state_bytes = u8::try_from(fields * 2).map_err(|_| "game state too large".to_string())?;
+
+    let combined = format!("{PRELUDE}\n{src}");
+    let cfile: syn::File = syn::parse_str(&combined).map_err(|e| format!("parse error: {e}"))?;
+    let funcs = lower::lower_program(&cfile)?;
+    let update = format!("{ty}::update");
+    if !funcs.iter().any(|(n, _)| *n == update) {
+        return Err(format!("`{ty}` has no `update` method"));
+    }
+    let code = codegen::codegen_game(&funcs, ORG, &update, state_bytes);
+    Ok(to_tap(&code, ORG, ORG, name))
+}
+
+/// Does the source contain an `impl Game for T` (so [`compile_game`] applies)?
+pub fn has_game(src: &str) -> bool {
+    syn::parse_str::<syn::File>(src).ok().and_then(|f| find_game_impl(&f)).is_some()
+}
+
+fn find_game_impl(file: &syn::File) -> Option<String> {
+    for item in &file.items {
+        if let syn::Item::Impl(imp) = item {
+            if let Some((_, path, _)) = &imp.trait_ {
+                if path.is_ident("Game") {
+                    if let syn::Type::Path(p) = &*imp.self_ty {
+                        return p.path.get_ident().map(|i| i.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn struct_fields(file: &syn::File, name: &str) -> Option<usize> {
+    for item in &file.items {
+        if let syn::Item::Struct(s) = item {
+            if s.ident == name {
+                if let syn::Fields::Named(n) = &s.fields {
+                    return Some(n.named.len());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Compile a single Rust `fn` to Z80 machine code with its entry at [`ORG`]
 /// (result in `HL`, then `RET`). Convenience over [`compile_program`].
 pub fn compile_fn(src: &str) -> Result<Vec<u8>, String> {

@@ -71,6 +71,28 @@ fn main() {
 `samples/snake.rs` is a complete game (body in arrays, `match` steering, draw via
 `poke`/`peek`) — the worked example end to end.
 
+## The dial: one `impl Game`, two compilers
+
+The headline. Write an ordinary [`speccy-sdk`](../speccy-sdk/README.md) `Game` and the
+*same file* compiles **both** ways:
+
+- **`rustc`** (host): a normal `impl Game for T { fn update(&mut self, …) }` — debug it.
+- **`rustz80`**: `speccy-compile` detects the `impl Game`, routes `frame.*`/`input.*`
+  to a **dialect prelude** (`Frame::pixel`/`clear` → screen pokes), lays the game
+  state out as a zero-initialised global, and generates a frame loop
+  (`EI; HALT; DI; CALL update` — interrupts on only for the 50 Hz sync, off during
+  `update`). The output boots on the real ROM.
+
+```bash
+cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/bounce.rs -o bounce.tap
+cargo run --release --bin speccy-gui -- testroms/48.rom bounce.tap
+```
+
+`samples/bounce.rs` is exactly this — and `tests/dial.rs` compiles it under rustc
+*and* rustz80 and boots it, proving the dial. The pure prelude currently covers
+`Frame::clear`/`pixel` (input is stubbed); the game stays in the dialect subset (so:
+fixed state, no `Vec`/`String`).
+
 ## How it works
 
 - **Frontend** (`lower.rs`): `syn::parse_str` → accepted subset → typed IR

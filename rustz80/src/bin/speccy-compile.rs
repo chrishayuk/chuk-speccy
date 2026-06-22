@@ -54,7 +54,14 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let tap = match rustz80::compile_to_tap(&src, &entry, &tape_name) {
+    // An `impl Game` compiles via the SDK-prelude path (frame loop); otherwise the
+    // file needs a no-arg `fn main` entry.
+    let result = if rustz80::has_game(&src) {
+        rustz80::compile_game(&src, &tape_name)
+    } else {
+        rustz80::compile_to_tap(&src, &entry, &tape_name)
+    };
+    let tap = match result {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: {input}: {e}");

@@ -7,8 +7,8 @@ across seven specs ([README index](./README.md)); this tracks delivery against t
 ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
-(Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), and a `.tap` emitter so a compiled dialect game **boots on the real 48K ROM**.
-Remaining: `rustz80` Stage 3b (the Game-trait prelude — full dial ergonomics), extra frontends, the RL env, and the accuracy tail.
+(Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), a `.tap` emitter, and **the dial closed**: one `impl Game` source compiles under rustc (speccy-sdk) **and** rustz80 (a bootable tape that runs on the real ROM).
+Remaining: `rustz80` Stage 2 (codegen peephole/strength-reduce, optional), extra frontends, the RL env, and the accuracy tail.
 
 ---
 
@@ -196,10 +196,13 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   `self.field` (indirect through the receiver pointer), and `obj.m(args)` lowering to
   `T::m(&obj, …)` (`self` as a leading pointer arg; method names mangled `T::m`).
   Differential-tested. The machinery `impl Game` needs.
-- [ ] **Stage 3b.2 (ergonomics)** — recognise the `Game` trait + ship an SDK prelude
-  (`Frame`/`Input` as intrinsics + a generated frame loop) so the *same* `impl Game`
-  file compiles host (rustc) and pure (rustz80), closing the dial fully. (Recursion
-  needs stack frames — Stage 4.)
+- [x] **Stage 3b.2 (the dial, closed)** — `compile_game` recognises `impl Game for T`,
+  routes `Frame`/`Input` methods to a **dialect prelude** (`__frame_pixel`/`__frame_clear`
+  over `poke`/`peek`), and generates a frame-loop entry (`EI; HALT; DI; CALL update` —
+  interrupts on only for the 50 Hz sync, off during `update`). `samples/bounce.rs`
+  compiles **both** under rustc (a `speccy-sdk` `Game`) and rustz80 (a bootable tape);
+  the dial test (`tests/dial.rs`) compiles it both ways and boots it on the real ROM.
+  Also: `use` items skipped, `bool` literals. (Recursion needs stack frames — Stage 4.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -252,7 +255,7 @@ core M0–M8 ✓ ──▶ A. MCP server ✓ ──▶ E. RL env (free re-skin)
                       │
                       └──▶ B. SDK ✓ (trap ABI + host-composite SDK) ──▶ C. chatbot ✓
                                   │
-                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 3 (Snake runs; games boot from .tap on real ROM) ✓; the big, escapable bet
+                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 3 ✓ — the dial closed (one impl Game: host + pure); the big, escapable bet
    D. frontends (WASM / shaders / streamed)        ── parallel, any time
    Later. accuracy tail (real-time .tzx ✓ done)    ── parallel, as desired
 ```
