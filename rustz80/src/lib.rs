@@ -109,10 +109,20 @@ fn __input_held(b: u16) -> u16 {
 /// `T::update(&state, …)` each frame, with `Frame`/`Input` calls routed to the
 /// [`PRELUDE`].
 pub fn compile_game(src: &str, name: &str) -> Result<Vec<u8>, String> {
+    Ok(compile_game_with_symbols(src, name)?.0)
+}
+
+/// One typed source → two artifacts (spec 08): a bootable `.tap` *and* the
+/// [`SymbolMap`] — the bridge that lets an env read the game's typed fields off
+/// the running tape's RAM. The map reflects the exact layout codegen uses, so a
+/// field's emitted address is where it actually lives at runtime.
+pub fn compile_game_with_symbols(src: &str, name: &str) -> Result<(Vec<u8>, SymbolMap), String> {
     let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
     let ty = find_game_impl(&file).ok_or("no `impl Game for T` found")?;
-    let fields = struct_fields(&file, &ty).ok_or_else(|| format!("struct `{ty}` not found"))?;
-    let state_bytes = u8::try_from(fields * 2).map_err(|_| "game state too large".to_string())?;
+    let field_names = struct_field_names(&file, &ty).ok_or_else(|| format!("struct `{ty}` not found"))?;
+    let state_bytes =
+        u8::try_from(field_names.len() * 2).map_err(|_| "game state too large".to_string())?;
+    let symbols = SymbolMap::from_fields(&ty, &field_names);
 
     let combined = format!("{PRELUDE}\n{src}");
     let cfile: syn::File = syn::parse_str(&combined).map_err(|e| format!("parse error: {e}"))?;
@@ -122,7 +132,7 @@ pub fn compile_game(src: &str, name: &str) -> Result<Vec<u8>, String> {
         return Err(format!("`{ty}` has no `update` method"));
     }
     let code = codegen::codegen_game(&funcs, ORG, &update, state_bytes);
-    Ok(to_tap(&code, ORG, ORG, name))
+    Ok((to_tap(&code, ORG, ORG, name), symbols))
 }
 
 /// Does the source contain an `impl Game for T` (so [`compile_game`] applies)?
@@ -145,17 +155,81 @@ fn find_game_impl(file: &syn::File) -> Option<String> {
     None
 }
 
-fn struct_fields(file: &syn::File, name: &str) -> Option<usize> {
+fn struct_field_names(file: &syn::File, name: &str) -> Option<Vec<String>> {
     for item in &file.items {
         if let syn::Item::Struct(s) = item {
             if s.ident == name {
                 if let syn::Fields::Named(n) = &s.fields {
-                    return Some(n.named.len());
+                    return Some(
+                        n.named.iter().map(|f| f.ident.as_ref().unwrap().to_string()).collect(),
+                    );
                 }
             }
         }
     }
     None
+}
+
+/// The RAM location of one game-state field on the running tape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symbol {
+    pub field: String,
+    pub addr: u16,
+    pub width: u8,
+    pub ty: String,
+}
+
+/// The compiler-emitted symbol map (spec 08 §2): the game-state struct's RAM
+/// layout, derived from the same constant field offsets codegen uses. It is the
+/// bridge that carries types across the dial — an env reads a `.tap`'s typed fields
+/// off Z80 RAM via this map, with no hand-written addresses. The full layout is
+/// always emitted (never a curated subset) so an env can reconstruct any `Self`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolMap {
+    /// Where the state struct instance lives in RAM ([`GAME_STATE`]).
+    pub base: u16,
+    /// Total state size in bytes.
+    pub size: u16,
+    pub fields: Vec<Symbol>,
+}
+
+impl SymbolMap {
+    /// Lay out `field_names` (declaration order) the way codegen does today: every
+    /// field is one `u16` slot, so field *i* is at `GAME_STATE + i*2`.
+    fn from_fields(_ty: &str, field_names: &[String]) -> Self {
+        let fields = field_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| Symbol {
+                field: name.clone(),
+                addr: GAME_STATE + (i as u16) * 2,
+                width: 2,
+                ty: "u16".to_string(),
+            })
+            .collect();
+        SymbolMap { base: GAME_STATE, size: (field_names.len() as u16) * 2, fields }
+    }
+
+    /// Address of a named field, if present.
+    pub fn addr_of(&self, field: &str) -> Option<u16> {
+        self.fields.iter().find(|f| f.field == field).map(|f| f.addr)
+    }
+
+    /// Render as a `.sym.toml` sidecar (the artifact written next to the `.tap`).
+    pub fn to_toml(&self) -> String {
+        let mut s = String::from("# emitted by rustz80 from the Game state struct layout — never hand-written\n");
+        s.push_str("[state]\n");
+        s.push_str(&format!("base = 0x{:04X}\n", self.base));
+        s.push_str(&format!("size = {}\n\n", self.size));
+        s.push_str("[fields]\n");
+        for f in &self.fields {
+            s.push_str(&format!(
+                "\"{}\" = {{ addr = 0x{:04X}, width = {}, ty = \"{}\" }}\n",
+                f.field, f.addr, f.width, f.ty
+            ));
+        }
+        s
+    }
 }
 
 /// Compile a single Rust `fn` to Z80 machine code with its entry at [`ORG`]
