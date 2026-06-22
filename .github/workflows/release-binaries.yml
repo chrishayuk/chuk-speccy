@@ -1,0 +1,75 @@
+name: release-binaries
+
+# Build the CLI/GUI binaries for each OS and attach them to a release. Fires
+# automatically when a release is published; also runnable by hand against an
+# existing tag (e.g. to backfill v0.1.0).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build & attach
+        default: v0.1.0
+        required: true
+
+permissions:
+  contents: write # upload release assets
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: linux-x86_64 }
+          - { os: macos-latest, name: macos-arm64 }
+          - { os: windows-latest, name: windows-x86_64 }
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: echo "tag=${{ github.event.inputs.tag || github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      # Only Linux needs explicit dev libs; macOS/Windows use system frameworks.
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libgtk-3-dev libxkbcommon-dev libudev-dev libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release -p frontend -p rustz80
+
+      - name: Package
+        id: pkg
+        shell: bash
+        run: |
+          dir="chuk-speccy-${{ steps.tag.outputs.tag }}-${{ matrix.name }}"
+          mkdir "$dir"
+          ext=""
+          [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
+          for b in speccy-gui speccy speccy-library speccy-gif speccy-compile; do
+            cp "target/release/$b$ext" "$dir/" 2>/dev/null || echo "skip $b"
+          done
+          cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$dir.zip" "$dir" >/dev/null
+            echo "asset=$dir.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar czf "$dir.tar.gz" "$dir"
+            echo "asset=$dir.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.tag.outputs.tag }}" "${{ steps.pkg.outputs.asset }}" --clobber
