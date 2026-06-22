@@ -37,7 +37,10 @@ cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press Q/A/O/P
 ```
 
-You supply a 48K system ROM at `testroms/48.rom` (gitignored — see [Getting Started](./docs/getting-started.md)).
+**Don't want to build?** Grab a prebuilt `speccy-gui` (+ the CLIs) for macOS / Windows
+/ Linux from the [latest release](https://github.com/chrishayuk/chuk-speccy/releases/latest).
+Either way you supply a 48K system ROM at `testroms/48.rom` (gitignored — see
+[Getting Started](./docs/getting-started.md)).
 
 ## Quick start
 

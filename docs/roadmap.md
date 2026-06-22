@@ -283,8 +283,10 @@ everyone else. Cheap relative to their impact.
   richer "search → play → agent takes over → rewind → MP4" clip is a nice follow-up.
 - [x] **`v0.1.0` release** (source) — tagged with notes; GitHub description + topics +
   CI all ✓.
-- [ ] **Prebuilt binaries** (macOS/Windows/Linux `speccy-gui`) via a release CI matrix,
-  so "I just want to play games" needs no Rust toolchain.
+- [x] **Prebuilt binaries** — `.github/workflows/release-binaries.yml` builds
+  `speccy-gui` + the CLIs on macOS/Windows/Linux and attaches per-OS archives on
+  every release (fires on `release: published`; backfilled v0.1.0). No toolchain
+  needed to play.
 - [ ] Player niceties for the GUI: drag-drop ROM/game, a game-search field, recent
   games, key-remap UI, save/load slots.
 
