@@ -50,6 +50,32 @@ Two corollaries that the rest of the spec makes precise:
    struct*, not hand-written against RAM addresses. The bridge that makes this
    true for the pure tape is the compiler-emitted **symbol map (§2)**.
 
+### 0.1 The three contracts (the architecture in one triangle)
+
+The invariant decomposes into three contracts, which is the cleanest way to reason
+about — and divide — the work:
+
+```
+  AUTHOR contract        one subset-clean Rust `impl Game` is the only source.
+        │
+        ▼
+  COMPILER contract      rustz80 emits the .tap AND the .sym.toml from one typed
+        │                layout — the hardware artifact and the env bridge, together.
+        ▼
+  ENVIRONMENT contract   chuk-speccy-env reads host state directly (host build) or tape
+                         RAM via .sym.toml (pure build), then evaluates the *same*
+                         typed observe/reward/done.
+
+         ── all three stand on ──
+  DETERMINISM contract   bit-exact serialize_full reset (already built, spec 02).
+                         Without it "reproducible episode" has nothing underneath it;
+                         the environment contract is its dependent, not its peer.
+```
+
+The symbol map is the join between the compiler and environment contracts, and it is
+the jewel: it is what makes "the env falls out of the types" literally true even on
+hardware where the types don't exist at runtime.
+
 ---
 
 ## 1. The dial discipline — what compiles where
@@ -99,6 +125,62 @@ boundary *is* the 1982-budget / 2026-capability line: if it compiles pure, it wo
 run on a real Spectrum; if it needs a trap, it won't, and the author knows at build
 time.
 
+### 1.1 Two orthogonal axes of "clean" — don't collapse them
+
+A subtlety that's easy to miss: **subset-clean and deterministic are different
+properties, and only one of them is about the tape.**
+
+| Property | Means | Verified by | Needed for |
+|---|---|---|---|
+| **subset-clean** | no host-only construct | `check-pure` (subset lint) | the `.tap` artifact |
+| **deterministic** | reproducible from `(state, seed)` | `check-deterministic` | the env artifact |
+
+A game can be perfectly subset-clean and still nondeterministic — it reads ambient
+`rand` or a wall-clock — and it will run fine host-side, compile to `.tap` fine, and
+be a **broken environment**, because `reset(seed)` won't reproduce the episode.
+`check-pure` does not catch this. So the kit needs *both* lints, and the second is
+cheap to enforce precisely because `Rng` is the **only** sanctioned randomness
+source: the determinism check is "did you touch `SystemTime`, ambient `rand`, or read
+a `static mut`?" That is the real reason `Rng` is a non-optional primitive rather
+than a convenience — it makes determinism checkable by exclusion.
+
+### 1.2 The author loop — fast host iteration, with the dial always visible
+
+Pure-first discipline must not tax fun authoring. The loop keeps host iteration
+instant while continuously reporting both cleanliness axes:
+
+```
+speccy run               fast host-composite loop (Vec/f32/println all fine here)
+speccy check-pure        what blocks the .tap, with ergonomic fixes (below)
+speccy check-determinism what blocks the env (non-Rng randomness, clock, statics)
+speccy build-tap         succeeds only when subset-clean (the dial, enforced)
+speccy env run           runs the same typed source as an episode
+```
+
+Host mode never complains about `Vec` — that's the point of the dial; the rejection
+lives at `check-pure`/`build-tap`, not at `run`.
+
+**The subset is only acceptable if its rejections are ergonomic.** `rustz80` uses
+rustc as the type checker, so a host-only type like `Vec` is *valid Rust* — it is
+`rustz80`'s lowering pass that must reject it, which means the lowering pass is also
+where the helpful message is emitted, mapping each known host-only construct to its
+subset replacement:
+
+```
+error: `Vec<T>` is host-only; it has no pure 48K representation.
+  --> game.rs:14:18
+   |
+14 |     enemies: Vec<Enemy>,
+   |              ^^^^^^^^^^
+   = help: use the fixed-capacity `Entities<T, N>` instead:
+             enemies: Entities<Enemy, 8>,
+   = note: this compiles under both rustc (host) and rustz80 (pure).
+```
+
+A bare "unsupported construct" makes the subset feel like a cage; a mapped fix makes
+it feel like a guide rail. Ship the replacement table (`Vec`→`Entities`, `f32`→`Fx8_8`,
+`format!`→fixed text helpers, `rand`→`Rng`) as part of L1, not as an afterthought.
+
 ---
 
 ## 2. The symbol map — the bridge that carries types across the dial
@@ -130,13 +212,25 @@ size = 46
 "score"     = { addr = 0x8210, width = 2, ty = "u16" }
 "lives"     = { addr = 0x8212, width = 1, ty = "u8" }
 "room_id"   = { addr = 0x8213, width = 1, ty = "u8" }
+# … every remaining field, to the full `size`. Not a curated subset.
 ```
+
+**Rule: emit the full struct layout, always — never a curated subset.** This is the
+load-bearing detail. The pure-side env doesn't read "a few interesting fields"; it
+**reconstructs a whole `Self`** so it can run `reward(&self, prev: &Self)` over it. If
+the map omits any field the env methods transitively touch, the reconstruction is
+incomplete and `reward` silently reads garbage — the worst kind of bug, because it
+only shows up tape-side and looks like a bad reward signal, not a missing field. The
+tempting optimisation is reachability analysis (emit only fields the env reads); on a
+48K machine the state struct is tens of bytes, so trimming it buys nothing and risks
+exactly this class of silent divergence. Emit everything; let the env reconstruct any
+`Self` it needs with no per-method cleverness.
 
 Now the *same* typed annotation serves both modes, with two extraction paths and
 zero archaeology:
 
 - **Host build** → the env calls `game.reward(&prev)` on the live struct directly.
-- **Pure `.tap`** → the env harness reads the referenced fields from tape RAM via
+- **Pure `.tap`** → the env harness reads **all** struct fields from tape RAM via
   the symbol map, materialises a `Self`-shaped view, and runs **the same**
   host-compiled `reward`/`done`/`observe` over it.
 
@@ -190,6 +284,14 @@ Rules:
   rustc-checked, refactor-safe, and carried across the dial by the symbol map. A
   string expression (`"score_delta + exit_bonus"`) throws away the type system and
   re-creates the field-name drift the symbol map just eliminated. Rejected.
+- **Env methods must be pure functions of `(self, prev)`.** This is the soundness
+  condition for the symbol-map bridge. `reward`/`done`/`observe` run *host-side* over
+  a `Self` reconstructed from RAM (§2) — so they can only see struct fields. An author
+  who reads a host global, a `static mut`, or the clock inside `reward` gets a game
+  that scores correctly in the host build and **diverges on the tape-side env**, where
+  that external state doesn't exist in the reconstruction. State it as a rule and lint
+  it: env methods touch only `self` and `prev`. (The determinism check in §1.1 catches
+  most of this for free, since the forbidden reads are the same set.)
 - **`reset(seed)` is the episode boundary.** It seeds `Rng` and is the
   `deserialize_full` target. Combined with the `Scene` stack (§4), an env can reset
   straight into the `Play` scene and skip the splash.
@@ -463,14 +565,29 @@ a primitive you haven't watched close.
 ```
 1. PROVE THE SEAM (an afternoon, falsifies the whole thesis)
    Snake, one typed source → host build + pure .tap + env,
-   with rustz80 emitting CrystalCavern.sym.toml.
-   Uses the three subset-clean primitives (Entities, Fx8_8, Rng).
-   Success test: `score` field round-trips typed-annotation → emitted addr →
-   env reads it off the running tape. If yes, architecture is real.
+   with rustz80 emitting Snake.sym.toml.
+
+   Snake's critical path is Entities + Rng + reset + symbol map — NOT Fx8_8.
+   Fixed-point is proven separately by the velocity samples (bounce/move); don't
+   bundle it into this milestone or you widen the proof for no reason.
+
+   Brutally small order:
+     a. add Entities<T, N>          (replaces Vec in a subset-clean Snake)
+     b. add Rng                     (state-seeded; the determinism primitive)
+     c. add reset(seed) to Game
+     d. rewrite Snake off Vec/format! → subset-clean
+     e. rustz80 emits a minimal full-layout .sym.toml
+     f. one env test: read `score` from tape RAM via .sym.toml  ← the riskiest bit
+     g. add reward(prev) + done()
+     h. run Snake three ways: host game · pure .tap · env episode
+
+   Success test: `score` round-trips typed-field → emitted addr → env reads it off
+   the running tape. If yes, the architecture is real. Step (e) is the only piece
+   that doesn't exist yet — prove it before anything above it is built.
 
 2. THE KIT (L1 + L0), dial-honest
    subset-clean Sprite/TileMap/Scene/Hud/SoundBank + the clash-report CLI +
-   bake-to-const assets. Dirty-cell engine as the dial canary.
+   bake-to-const assets. Dirty-cell engine as the dial canary. Fx8_8 lands here.
 
 3. CHEAP, DIAL-NEUTRAL WINS (parallel, build as plain CLIs first)
    constraints-as-resources; `speccy env audit` (the reward-hack detector).
@@ -509,6 +626,12 @@ separable difficulty axes are the product.
   declarative glue, not a round-trip format; logic lives in types.
 - **A hand-written `memory_map.toml` for authored games** — the compiler emits the
   symbol map; hand maps survive only for found commercial games.
+- **A curated symbol map** — emit the *full* struct layout; a trimmed map invites
+  silent tape-side reconstruction bugs (§2).
+- **Env methods that read host state** — `reward`/`done`/`observe` must be pure
+  functions of `(self, prev)`, or they diverge between the host and tape envs (§3).
+- **A single `check-pure` treated as the env guarantee** — subset-clean and
+  deterministic are different axes; you need both lints (§1.1).
 - **Runtime tools on the authoring plane** — episodes/benchmarks belong to
   `chuk-mcp-spectrum`.
 - **"Nice generated audio" in host-composite** — schedule real port-`0xFE` edges, or
