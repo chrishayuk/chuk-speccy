@@ -201,8 +201,10 @@ class Supervisor:
             self.take_snapshot(s)
 
     def take_snapshot(self, s: Session) -> int:
-        sna = bytes(s.machine.save_snapshot("sna"))
-        s.snapshots.append((s.frames_run, sna))
+        # Bit-exact full state, so rewinding is a true timeline branch (not the
+        # lossy `.sna` approximation) — the precondition for snapshot-tree rollouts.
+        blob = bytes(s.machine.serialize_full())
+        s.snapshots.append((s.frames_run, blob))
         s.last_snapshot_frame = s.frames_run
         if len(s.snapshots) > self.config.max_snapshots:
             s.snapshots.pop(0)

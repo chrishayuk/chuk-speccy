@@ -65,6 +65,19 @@ impl Machine {
         }
     }
 
+    /// Serialize the **complete** machine state to a bit-exact blob — unlike
+    /// `.sna`/`.z80`, restoring it reproduces execution exactly. This is the
+    /// reset primitive for RL/agent use: `serialize_full` snapshots, then
+    /// `deserialize_full` resets with zero variance (a true timeline branch).
+    fn serialize_full<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new_bound(py, &self.spec.serialize_full())
+    }
+
+    /// Restore a [`serialize_full`] blob (bit-exact reset).
+    fn deserialize_full(&mut self, data: &[u8]) -> PyResult<()> {
+        self.spec.deserialize_full(data).map_err(PyValueError::new_err)
+    }
+
     /// Insert a `.tap` and type `LOAD ""` to start the ROM fast-loader.
     fn autoload_tape(&mut self, data: &[u8]) -> PyResult<()> {
         self.spec
