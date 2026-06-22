@@ -8,7 +8,12 @@ ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonom
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
 (Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), a `.tap` emitter, and **the dial closed**: one `impl Game` source compiles under rustc (speccy-sdk) **and** rustz80 (a bootable tape that runs on the real ROM).
-Remaining: `rustz80` Stage 2 (codegen peephole/strength-reduce, optional), extra frontends, the RL env, and the accuracy tail.
+Plus **bit-exact `serialize_full` reset** (the RL gate), surfaced through PyO3 + MCP.
+Headline next: the **agent-environment layer** (a Gym-style `SpectrumEnv` + per-game
+wrappers + benchmarks + agent examples) — the thing that turns this from a toolbox
+into a deterministic agent research lab. Then, in parallel: distribution (a demo +
+release/binaries), extra frontends (WASM), `rustz80` Stage 2 (optional), and the
+accuracy tail (128K/AY).
 
 ---
 
@@ -237,19 +242,66 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
 - [ ] Effect chain as GPU shaders (`scanlines` → `crt` preset) in the window head.
 - [ ] Web / streamed head (WebSocket framebuffer) for shared/agent sessions.
 
-### E. RL environment (specs 02 §8 / 03 §7)
-Now standing on **bit-exact reset** (`serialize_full`, above) — the precondition the
-whole multi-rate measurement rests on (reset injects no variance into the result).
-- [ ] `chuk-rl-env` `SpectrumEnv` re-skin: `deserialize_full` = reset, `run_frames` =
-  step, `read_memory`/screen = obs/reward, the `serialize_full` snapshot tree = MCTS
-  rollouts. Surface `serialize_full`/`deserialize_full` through PyO3 + the MCP admin
-  surface first.
+### E. Agent environments — the research-product layer (specs 02 §8 / 03 §7)
+**The headline next track.** This is the difference between "a cool emulator with
+tools" and "a deterministic agent research lab". The ingredients are all built — a
+deterministic `Machine`, screenshots, registers, memory, frame-step, and now
+**bit-exact `serialize_full` reset** surfaced through PyO3 + the MCP
+`checkpoint`/`restore_checkpoint` tools (above). What's missing is the layer that
+turns *"an agent can press keys"* into *"an agent can learn"*: games wrapped as
+environments with defined observations, actions, rewards, and resets.
+- [ ] **`SpectrumEnv` (Gym-style)** in a `speccy-env` package: `reset()` =
+  `deserialize_full` a snapshot; `step(actions)` = press keys + `run_frames`;
+  `obs` = pixels / screen-text / RAM features / mixed; `done`/`reward` per task; the
+  `serialize_full` snapshot tree = MCTS rollouts. Bit-exact reset ⇒ reproducible
+  episodes (no reset jitter contaminating the measurement).
+- [ ] **Per-game wrappers** — `SnakeEnv` (the SDK/`rustz80` game, fully controlled),
+  `DaleyThompsonEnv` (the **SOMA B1⊥B2 demonstrator**: the tap-rhythm fatal axis is
+  native and orthogonal to the slow pacing axis), `ManicMinerEnv`, `CustomRustGameEnv`.
+  Each defines observation, action set, reward (score-delta / survival / progress via
+  a memory probe), `done` (death / level / timeout), and reset.
+- [ ] **Memory maps** — per-game `memory_map.md` (score/lives/player-x addresses) so
+  RAM is a clean structured obs + reward signal, not only pixels. (Vision obs for
+  generality + demos; memory taps for cheap, clean reward — decide per game.)
+- [ ] **Agent examples** (`examples/agents/`) — random, scripted, **memory-probe**,
+  vision-LLM, replay-episode. The memory-probe agent is where Spectrum research gets
+  interesting; the replay-episode one shows the deterministic-branch story.
+- [ ] **Benchmark suite** (`benchmarks/`) — repeatable tasks + a score table
+  (random / heuristic / LLM / vision baselines) + an episode recorder, so the
+  research angle is concrete numbers, not a claim.
+- [ ] **Environment-authoring template** — scaffold a Spectrum-native task
+  (`game.rs` via `speccy-sdk`/`rustz80` + `rewards.rs` + `memory_map.md` + `env.py`).
+  This is the payoff of the SDK + the one-`impl Game`-two-compilers dial: build
+  *controlled* tasks designed for agents, not only wrap chaotic commercial games.
+
+### F. Reach — distribution & demo
+Right now it's compelling to *developers*; these make it usable by, and legible to,
+everyone else. Cheap relative to their impact.
+- [ ] **Top-of-README demo** — a GIF/short video: search "Jet Set Willy" → loads from
+  WoS → play → an agent takes over → rewind a checkpoint → the MP4 appears. Communicates
+  the whole project in ~20 seconds.
+- [ ] **`v0.1` release + prebuilt binaries** (macOS/Windows/Linux `speccy-gui`) so
+  "I just want to play games" doesn't require a Rust toolchain. (GitHub description +
+  topics ✓; CI ✓.)
+- [ ] Player niceties for the GUI: drag-drop ROM/game, a game-search field, recent
+  games, key-remap UI, save/load slots.
+
+### Positioning (honest)
+Not the strongest *emulator* in the ecosystem, and not trying to be: **RustZX** is the
+more mature 48K/128K player, **z88dk** the more complete Z80 dev kit, **ZX84** the
+nearest MCP/browser cousin. The distinctive lane is the **integrated, deterministic
+agent lab**: play → drive programmatically → record/replay episodes → inspect machine
+state → *build new Spectrum-native research environments in Rust*. The combination
+(deterministic core + GUI/TUI + WoS loading + MCP agent/admin + bit-exact
+checkpoints + MP4 + PyO3 + native SDK + Rust→Z80 compiler) is the innovation, not any
+one piece. Pitch on agent-lab integration, not emulator breadth.
 
 ---
 
 ## Later — accuracy long tail (optional deep end)
 
-Deliberately deferred; affects timing-precise demos, not games.
+Deliberately deferred — **below the agent-environment layer (E)** in priority, since
+it affects timing-precise demos, not games or agent tasks.
 - [ ] I/O-port contention (the 4-case ULA/high-byte timing model).
 - [ ] Floating-bus reads.
 - [ ] Per-T-state / per-scanline video (mid-frame writes → multicolour demos).
@@ -265,17 +317,21 @@ Deliberately deferred; affects timing-precise demos, not games.
 ## Suggested order
 
 ```
-core M0–M8 ✓ ──▶ A. MCP server ✓ ──▶ E. RL env (free re-skin)
-                      │
-                      └──▶ B. SDK ✓ (trap ABI + host-composite SDK) ──▶ C. chatbot ✓
-                                  │
-                                  └──▶ B2. rustz80 compiler (pure-.tap dial) ── Stage 3 ✓ — the dial closed (one impl Game: host + pure); the big, escapable bet
-   D. frontends (WASM / shaders / streamed)        ── parallel, any time
-   Later. accuracy tail (real-time .tzx ✓ done)    ── parallel, as desired
+core M0–M8 ✓ ─▶ A. MCP server ✓ ─▶ E. AGENT ENVIRONMENTS ◀── the headline next
+                    │                  bit-exact reset ✓ → Gym env, per-game wrappers,
+                    │                  benchmarks, agent examples, authoring template
+                    └─▶ B. SDK ✓ ─▶ C. chatbot ✓
+                            │
+                            └─▶ B2. rustz80 ✓ — dial closed (one impl Game: host + pure)
+   D. frontends (WASM / shaders / streamed)    ── parallel, any time
+   F. reach (demo GIF / release / binaries)    ── parallel, cheap, high-leverage
+   Later. accuracy tail (128K/AY, …)           ── below E in priority
 ```
 
-The honest through-line (from the specs): everything is downstream of a Z80 core
-you trust — which passes ZEXALL — so the build order was core → MCP → SDK/chat,
-all now built. What's left divides into the **escapable big bet** (`rustz80`, B2 —
-imperative Rust to a pure `.tap`) and **independent parallel tracks** (frontends,
-RL env, the accuracy tail). Nothing else depends on the compiler; it's pure upside.
+The honest through-line: everything is downstream of a Z80 core you trust (passes
+ZEXALL), so the spine was core → MCP → SDK/chat → `rustz80` — **all built**, and the
+`serialize_full` reset gate is now closed. So the single highest-value next move is
+**E — the agent-environment layer** (turn the built ingredients into a Gym-style env
++ game wrappers + benchmarks), which is what makes this a research *product* rather
+than a toolbox. Everything else is independent and parallel: more frontends (D),
+reach (F — a demo + release), and the accuracy tail (128K/AY), all below E.
