@@ -47,6 +47,8 @@ pub enum Expr {
     Trunc(Box<Expr>),
     /// Read a byte from a raw address: `peek(addr)` (intrinsic).
     Peek(Box<Expr>),
+    /// Read a byte from an I/O port: `inport(port)` (intrinsic, e.g. the keyboard).
+    InPort(Box<Expr>),
     /// Absolute address of a local slot (`&local`) — for passing `&self`.
     AddrOf(usize),
     /// Read a `u16` at `*(ptr + byte_offset)` — field access through a pointer

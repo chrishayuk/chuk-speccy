@@ -23,16 +23,25 @@ impl Game for Bounce {
     fn update(&mut self, _input: &Input, frame: &mut Frame) {
         if self.started == 0u8 {
             frame.clear(Colour::Black);
-            self.x = 100u8;
-            self.y = 80u8;
+            self.x = 120u8;
+            self.y = 88u8;
             self.started = 1u8;
         }
 
-        frame.pixel(self.x, self.y, false); // erase the old position
+        // Erase the 6x6 blob at the old position.
+        let mut r = 0u8;
+        while r < 6u8 {
+            let mut c = 0u8;
+            while c < 6u8 {
+                frame.pixel(self.x + c, self.y + r, false);
+                c = c + 1u8;
+            }
+            r = r + 1u8;
+        }
 
         if self.dx == 0u8 {
             self.x = self.x + 1u8;
-            if self.x >= 250u8 {
+            if self.x >= 240u8 {
                 self.dx = 1u8;
             }
         } else {
@@ -41,10 +50,9 @@ impl Game for Bounce {
                 self.dx = 0u8;
             }
         }
-
         if self.dy == 0u8 {
             self.y = self.y + 1u8;
-            if self.y >= 180u8 {
+            if self.y >= 178u8 {
                 self.dy = 1u8;
             }
         } else {
@@ -54,6 +62,15 @@ impl Game for Bounce {
             }
         }
 
-        frame.pixel(self.x, self.y, true); // draw the new position
+        // Draw the blob at the new position.
+        let mut r2 = 0u8;
+        while r2 < 6u8 {
+            let mut c2 = 0u8;
+            while c2 < 6u8 {
+                frame.pixel(self.x + c2, self.y + r2, true);
+                c2 = c2 + 1u8;
+            }
+            r2 = r2 + 1u8;
+        }
     }
 }

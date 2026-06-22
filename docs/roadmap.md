@@ -202,7 +202,7 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   interrupts on only for the 50 Hz sync, off during `update`). `samples/bounce.rs`
   compiles **both** under rustc (a `speccy-sdk` `Game`) and rustz80 (a bootable tape);
   the dial test (`tests/dial.rs`) compiles it both ways and boots it on the real ROM.
-  Also: `use` items skipped, `bool` literals. (Recursion needs stack frames — Stage 4.)
+  Also: `inport` intrinsic, explicit enum discriminants, `bool` literals, bool-expression conditions, `use` skipped. `samples/move.rs` is playable (keys move a blob). (Recursion needs stack frames — Stage 4.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
