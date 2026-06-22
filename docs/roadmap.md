@@ -277,12 +277,14 @@ environments with defined observations, actions, rewards, and resets.
 ### F. Reach — distribution & demo
 Right now it's compelling to *developers*; these make it usable by, and legible to,
 everyone else. Cheap relative to their impact.
-- [ ] **Top-of-README demo** — a GIF/short video: search "Jet Set Willy" → loads from
-  WoS → play → an agent takes over → rewind a checkpoint → the MP4 appears. Communicates
-  the whole project in ~20 seconds.
-- [ ] **`v0.1` release + prebuilt binaries** (macOS/Windows/Linux `speccy-gui`) so
-  "I just want to play games" doesn't require a Rust toolchain. (GitHub description +
-  topics ✓; CI ✓.)
+- [x] **Top-of-README demo GIF** — the dialect Snake (compiled by `rustz80`) running,
+  in `docs/assets/demo.gif`. Rendered headless by **`display::gif`** + the reusable
+  **`speccy-gif`** CLI (`speccy-compile snake.rs | speccy-gif`) — no capture tool. A
+  richer "search → play → agent takes over → rewind → MP4" clip is a nice follow-up.
+- [x] **`v0.1.0` release** (source) — tagged with notes; GitHub description + topics +
+  CI all ✓.
+- [ ] **Prebuilt binaries** (macOS/Windows/Linux `speccy-gui`) via a release CI matrix,
+  so "I just want to play games" needs no Rust toolchain.
 - [ ] Player niceties for the GUI: drag-drop ROM/game, a game-search field, recent
   games, key-remap UI, save/load slots.
 
