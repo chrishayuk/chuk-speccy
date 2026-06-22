@@ -247,10 +247,24 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
         SUPERVISOR.machine(session_id).autoload_tape(_decode(data_b64, path))
         return {"ok": True}
 
-    @mcp.tool(description="Manual checkpoint: save a session's state as base64 .sna.")
+    @mcp.tool(description="Manual checkpoint: save a session's state as base64 .sna (portable, lossy).")
     def save_snapshot(session_id: str) -> dict:
         data = bytes(SUPERVISOR.machine(session_id).save_snapshot("sna"))
         return {"data_b64": base64.b64encode(data).decode(), "bytes": len(data)}
+
+    @mcp.tool(
+        read_only_hint=True,
+        description="Bit-exact full-state checkpoint (base64). Unlike .sna, restoring it "
+        "reproduces execution exactly — the deterministic reset / RL-rollout primitive.",
+    )
+    def checkpoint(session_id: str) -> dict:
+        data = bytes(SUPERVISOR.machine(session_id).serialize_full())
+        return {"data_b64": base64.b64encode(data).decode(), "bytes": len(data)}
+
+    @mcp.tool(destructive_hint=True, description="Restore a bit-exact `checkpoint` (base64) into a session.")
+    def restore_checkpoint(session_id: str, data_b64: str) -> dict:
+        SUPERVISOR.machine(session_id).deserialize_full(base64.b64decode(data_b64))
+        return {"ok": True}
 
     @mcp.tool(destructive_hint=True, description="Poke bytes (base64) into a session's memory.")
     def write_memory(session_id: str, addr: int, data_b64: str) -> dict:
@@ -279,8 +293,8 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
         s = SUPERVISOR.get(session_id)
         if not s or not (0 <= index < len(s.snapshots)):
             return {"ok": False, "error": "no such snapshot"}
-        _, sna = s.snapshots[index]
-        s.machine.load_snapshot("sna", sna)
+        _, blob = s.snapshots[index]
+        s.machine.deserialize_full(blob)  # bit-exact rewind
         return {"ok": True, "restored_index": index}
 
     # Recording control + download.
