@@ -13,6 +13,16 @@ writing games.
   only the ROM-backed integration tests and the GUI need it.
 - macOS / Linux / Windows. Audio + the native window use `cpal` / `winit`.
 
+**Fastest path (no clone):** install from crates.io —
+```bash
+cargo install speccy        # player + tools: speccy-gui, speccy, speccy-library, speccy-gif
+cargo install rustz80       # the Rust → Z80 compiler (speccy-compile)
+```
+— or grab a prebuilt binary for your OS from the
+[latest release](https://github.com/chrishayuk/chuk-speccy/releases/latest). You
+still supply the ROM. The commands below use `cargo run` so they work whether you
+installed the binaries or are building from a clone:
+
 ```bash
 git clone <repo> && cd chuk-speccy
 cargo build --workspace

@@ -305,6 +305,12 @@ everyone else. Cheap relative to their impact.
   `speccy-gui` + the CLIs on macOS/Windows/Linux and attaches per-OS archives on
   every release (fires on `release: published`; backfilled v0.1.0). No toolchain
   needed to play.
+- [x] **Published to crates.io** (v0.1.0) — `cargo install speccy` / `cargo install
+  rustz80`; libraries as `chuk-speccy-{z80,spectrum,display,wos,sdk}`
+  (`cargo add chuk-speccy-spectrum`). A manual `publish-crates.yml` (dependency-ordered,
+  token-gated) ships future versions.
+- [ ] **PyPI** — publish `zxspec_py` (maturin) + `chuk-mcp-spectrum` so the Python
+  side is `pip install`-able too.
 - [ ] Player niceties for the GUI: drag-drop ROM/game, a game-search field, recent
   games, key-remap UI, save/load slots.
 

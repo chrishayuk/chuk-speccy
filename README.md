@@ -1,6 +1,8 @@
 # chuk-speccy
 
 [![CI](https://github.com/chrishayuk/chuk-speccy/actions/workflows/ci.yml/badge.svg)](https://github.com/chrishayuk/chuk-speccy/actions/workflows/ci.yml)
+&nbsp;[![crates.io](https://img.shields.io/crates/v/speccy.svg?label=speccy)](https://crates.io/crates/speccy)
+&nbsp;[![crates.io](https://img.shields.io/crates/v/rustz80.svg?label=rustz80)](https://crates.io/crates/rustz80)
 &nbsp;License: MIT OR Apache-2.0
 
 **A deterministic ZX Spectrum you can play, let agents drive, and compile Rust
@@ -37,15 +39,17 @@ cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press Q/A/O/P
 ```
 
-**Get it three ways** — (1) a prebuilt `speccy-gui` + CLIs for macOS / Windows / Linux
+**Get it four ways** — (1) a prebuilt `speccy-gui` + CLIs for macOS / Windows / Linux
 from the [latest release](https://github.com/chrishayuk/chuk-speccy/releases/latest);
-(2) via Cargo straight from git —
+(2) from **crates.io**:
 ```bash
-cargo install --git https://github.com/chrishayuk/chuk-speccy speccy     # speccy, speccy-gui, speccy-library, speccy-gif
-cargo install --git https://github.com/chrishayuk/chuk-speccy rustz80    # speccy-compile
+cargo install speccy        # the player + tools: speccy, speccy-gui, speccy-library, speccy-gif
+cargo install rustz80       # the Rust → Z80 compiler (speccy-compile)
+cargo add chuk-speccy-spectrum   # or build on the library crates directly
 ```
-(once published to crates.io: `cargo install speccy`);
-(3) clone + `cargo run` (below). Either way you supply a 48K system ROM at
+(3) via Cargo straight from git for HEAD —
+`cargo install --git https://github.com/chrishayuk/chuk-speccy speccy`; or
+(4) clone + `cargo run` (below). Either way you supply a 48K system ROM at
 `testroms/48.rom` (gitignored — see [Getting Started](./docs/getting-started.md)).
 
 ## Quick start
@@ -134,6 +138,11 @@ Any dialect `.rs` with a no-arg `fn main()` compiles the same way (the autoloade
 | [`rustz80`](./rustz80) | Restricted Rust → Z80 compiler (`syn` frontend, own IR/codegen, mul/div micro-runtime) + `speccy-compile` (`.rs` → bootable `.tap`). |
 | [`zxspec_py`](./zxspec_py) | PyO3 binding exposing the core to Python (maturin). |
 | [`chuk-mcp-spectrum`](./chuk-mcp-spectrum) | The MCP server (two endpoints + autonomy plane). |
+
+Published on **crates.io** (v0.1.0): the libraries as `chuk-speccy-z80` / `-spectrum`
+/ `-display` / `-wos` / `-sdk` (import names stay short — `use spectrum`), and the
+binaries as **`speccy`** (the `frontend` bins) and **`rustz80`**. `zxspec_py` → PyPI
+is pending; `chuk-mcp-spectrum` is the Python MCP server.
 
 ## Status & design
 
