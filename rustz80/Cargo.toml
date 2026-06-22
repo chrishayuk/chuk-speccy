@@ -3,6 +3,7 @@
 # against rustc on the emulator. Not an LLVM backend, no real `core`.
 [package]
 name = "rustz80"
+description = "A restricted Rust -> Z80 compiler: the dialect is also real Rust; emits a bootable .tap."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -13,8 +14,8 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 
 [dev-dependencies]
 # Run the compiled bytes on the real CPU to differential-test against rustc.
-z80 = { path = "../z80" }
+z80 = { package = "chuk-speccy-z80", version = "0.1.0", path = "../z80" }
 # Boot a compiled `.tap` on the full machine (ROM-gated end-to-end test).
-spectrum = { path = "../spectrum" }
+spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
 # The host side of the dial: the same `impl Game` compiled under rustc.
-speccy-sdk = { path = "../speccy-sdk" }
+speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }

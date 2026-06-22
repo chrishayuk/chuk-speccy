@@ -41,9 +41,10 @@ cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press 
 from the [latest release](https://github.com/chrishayuk/chuk-speccy/releases/latest);
 (2) via Cargo straight from git —
 ```bash
-cargo install --git https://github.com/chrishayuk/chuk-speccy frontend   # speccy, speccy-gui, speccy-library, speccy-gif
+cargo install --git https://github.com/chrishayuk/chuk-speccy speccy     # speccy, speccy-gui, speccy-library, speccy-gif
 cargo install --git https://github.com/chrishayuk/chuk-speccy rustz80    # speccy-compile
 ```
+(once published to crates.io: `cargo install speccy`);
 (3) clone + `cargo run` (below). Either way you supply a 48K system ROM at
 `testroms/48.rom` (gitignored — see [Getting Started](./docs/getting-started.md)).
 
