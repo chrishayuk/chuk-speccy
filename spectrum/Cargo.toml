@@ -1,10 +1,13 @@
 [package]
-name = "spectrum"
+name = "chuk-speccy-spectrum"
 description = "The 48K Spectrum machine: memory, ULA, contention, ports — over the z80 core."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "spectrum"
+
 [dependencies]
-z80 = { path = "../z80" }
+z80 = { package = "chuk-speccy-z80", version = "0.1.0", path = "../z80" }

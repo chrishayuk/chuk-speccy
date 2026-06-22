@@ -1,5 +1,5 @@
 [package]
-name = "frontend"
+name = "speccy"
 description = "Heads over the spectrum core. For now: a themed terminal (TUI) head via the display pipeline."
 edition.workspace = true
 version.workspace = true
@@ -23,12 +23,12 @@ name = "speccy-gif"
 path = "src/bin/gif.rs"
 
 [dependencies]
-spectrum = { path = "../spectrum" }
-display = { path = "../display" }
+spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
+display = { package = "chuk-speccy-display", version = "0.1.0", path = "../display" }
 # World of Spectrum search + download, so a game can be named instead of a file.
-wos = { path = "../wos" }
+wos = { package = "chuk-speccy-wos", version = "0.1.0", path = "../wos" }
 # Native Rust game SDK (the `snake` demo mode).
-speccy-sdk = { path = "../speccy-sdk" }
+speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }
 # Native pixel-perfect window head (the desktop head from spec 05): winit window
 # + a CPU framebuffer (softbuffer), with native menus (muda) for a real app shell
 # — runtime fullscreen + audio-device switching, multi-display, macOS green button.

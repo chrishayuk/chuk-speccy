@@ -1,0 +1,32 @@
+name: publish-crates
+
+# Publish the library + CLI crates to crates.io, in dependency order. Manual on
+# purpose (publishing is permanent) — run it after bumping versions, with a
+# `CARGO_REGISTRY_TOKEN` repo secret set. `cargo publish` waits for each crate to
+# propagate before the next dependent one.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # `chuk-speccy-spectrum`/`speccy` verify-build the ULA + GUI heads.
+      - name: system deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libgtk-3-dev libxkbcommon-dev libudev-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - name: publish (dependency order)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          for p in chuk-speccy-z80 chuk-speccy-display chuk-speccy-wos \
+                   chuk-speccy-spectrum chuk-speccy-sdk rustz80 speccy; do
+            echo "::group::publish $p"
+            cargo publish -p "$p"
+            echo "::endgroup::"
+          done

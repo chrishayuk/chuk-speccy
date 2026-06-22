@@ -8,7 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-z80 = { path = "../z80" }
+z80 = { package = "chuk-speccy-z80", path = "../z80" }
 
 # TODO(M0): add a JSON dep (serde_json) and the SingleStepTests harness once
 # building online; ZEXDOC/ZEXALL runner lands alongside it.

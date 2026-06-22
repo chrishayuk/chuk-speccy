@@ -3,11 +3,15 @@
 # on the emulator crates; it returns bytes for the caller to load. Used by the
 # `frontend` CLI and (via `zxspec_py`) the MCP server, so there's one fetcher.
 [package]
-name = "wos"
+name = "chuk-speccy-wos"
+description = "World of Spectrum search + download (ZXInfo API)."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lib]
+name = "wos"
 
 [dependencies]
 ureq = "2"

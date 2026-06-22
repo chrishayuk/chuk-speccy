@@ -1,5 +1,5 @@
 [package]
-name = "display"
+name = "chuk-speccy-display"
 description = "Presentation pipeline: indexed framebuffer -> theme -> effects -> RGBA. Standalone, no emulator deps."
 edition.workspace = true
 version.workspace = true
@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
+name = "display"
 
 [dependencies]
 # Animated-GIF encoding for indexed framebuffers (pure Rust, no system deps).

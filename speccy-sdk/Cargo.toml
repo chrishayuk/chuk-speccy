@@ -2,11 +2,15 @@
 # over the ED FE trap ABI (docs/03 §host-composite). The Z80 guest is a ~11-byte
 # frame pump; all logic + rendering is host Rust. Depends only on the core.
 [package]
-name = "speccy-sdk"
+name = "chuk-speccy-sdk"
+description = "Native Rust game SDK for the Spectrum: write Game::update, run over the trap ABI."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "speccy_sdk"
+
 [dependencies]
-spectrum = { path = "../spectrum" }
+spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
