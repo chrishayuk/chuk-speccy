@@ -253,14 +253,15 @@ struct and any artifact. The deterministic core + bit-exact reset are the founda
 already in place; this turns them into a research *product*. Sequenced (§10) so the
 dial is never multiplied before it's watched close:
 
-- [ ] **1 · Prove the seam** (the headline, an afternoon, falsifies the thesis) —
-  Snake as one typed source → host build + pure `.tap` + env, with **`rustz80`
-  emitting a symbol map** (`.sym.toml`: each struct field → RAM addr/width/type, from
-  the Stage-1c constant offsets). Success test: a `score` field round-trips
-  typed-annotation → emitted addr → env reads it off the running tape. Needs three
-  subset-clean primitives in `chuk-speccy-sdk`: `Entities<T, N>` (fixed-cap vec),
-  `Fx8_8` (fixed-point), `Rng` (state-seeded). *(Dial-discipline gap to close first:
-  the showcase `speccy-sdk/src/demo.rs` Snake uses `Vec`/`format!` → host-only.)*
+- [~] **1 · Prove the seam** (the headline) — *bridge proven; pure Snake pending.*
+  The minimal seam is closed: a typed `score` field round-trips (Rust decl → emitted
+  addr → read off the running tape, see below). Done since: `chuk-speccy-sdk` ships
+  the subset-clean primitives **`Entities<T, N>`** (fixed-cap vec) and **`Rng`**
+  (state-seeded, deterministic), the **demo Snake is off `Vec`/`format!`** (uses
+  `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
+  Snake that compiles **pure** as one source — blocked on `rustz80` features
+  (generics for `Entities`, **array struct fields**, tuples, `loop`); `Fx8_8` lands
+  with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;
@@ -272,9 +273,10 @@ dial is never multiplied before it's watched close:
   **Supersedes hand-written memory maps for *authored* games** (a hand `memory_map.toml`
   survives only for *found* commercial titles); the `env_report` trap becomes an
   optional fast-path.
-- [ ] **Widened `Game` trait** (default impls, so existing games still compile):
-  `observe() -> Obs`, `reward(&self, prev: &Self) -> i16` (typed — **no string DSL**),
-  `done()`, `reset(seed)`. Writing a game *is* writing its env.
+- [x] **Widened `Game` trait** — `observe() -> Obs`, `reward(&self, prev: &Self) -> i16`
+  (typed — **no string DSL**), `done()`, `reset(seed)`, all with defaults so every
+  existing game compiles unchanged. The demo Snake overrides `reward` (score delta) /
+  `done` (death) / `reset` (seed). Writing a game *is* writing its env.
 - [ ] **`chuk-speccy-env`** — the Gym surface (`reset` = `deserialize_full`, `step` =
   keys + `run_frames`, obs = pixels / typed features; the snapshot tree = MCTS
   rollouts) + agent examples (random, scripted, **memory-probe**, vision-LLM, replay)

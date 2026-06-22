@@ -63,9 +63,197 @@ pub fn boot(rom: &[u8], game: impl Game + Send + 'static) -> Spectrum {
 
 // --- author API -------------------------------------------------------------
 
+/// What an agent observes each step (spec 08 §3). `Screen` = the framebuffer;
+/// typed-feature observations come later (read host-side, or off tape RAM via the
+/// compiler-emitted symbol map).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Obs {
+    Screen,
+}
+
 /// A game: pure logic + rendering, called once per 50 Hz frame.
+///
+/// The **env surface** — `observe`/`reward`/`done`/`reset` — has defaults so every
+/// existing game compiles unchanged; override to instrument for agents (spec 08
+/// §3). `reward`/`done`/`observe` must be **pure functions of `(self, prev)`**:
+/// they run env-side (host, or over a `Self` reconstructed from tape RAM via the
+/// symbol map), never inside the pure tape.
 pub trait Game {
     fn update(&mut self, input: &Input, frame: &mut Frame);
+
+    /// What to observe this step. Default: the screen.
+    fn observe(&self) -> Obs {
+        Obs::Screen
+    }
+
+    /// Reward for the transition `prev -> self`. Default: none.
+    fn reward(&self, prev: &Self) -> i16
+    where
+        Self: Sized,
+    {
+        let _ = prev;
+        0
+    }
+
+    /// Has the episode terminated? Default: never.
+    fn done(&self) -> bool {
+        false
+    }
+
+    /// Start a fresh episode from `seed` (the episode boundary; seeds the [`Rng`]).
+    /// Defaults to `Self::default()` so games that derive `Default` need not
+    /// implement it — override to actually use the seed.
+    fn reset(seed: u64) -> Self
+    where
+        Self: Sized + Default,
+    {
+        let _ = seed;
+        Self::default()
+    }
+}
+
+/// A grid point (cell or pixel coordinate) — a small, `Copy` element type for
+/// [`Entities`] and grid games.
+#[derive(Copy, Clone, PartialEq, Eq, Default, Debug)]
+pub struct Cell {
+    pub x: u8,
+    pub y: u8,
+}
+
+impl Cell {
+    pub fn new(x: u8, y: u8) -> Self {
+        Cell { x, y }
+    }
+}
+
+/// A small deterministic PRNG — **seed it from game state, never the clock** (spec
+/// 08 §1: the determinism contract, as a type). xorshift32; seeding the env from a
+/// known value makes every episode reproducible.
+#[derive(Copy, Clone)]
+pub struct Rng {
+    state: u32,
+}
+
+impl Default for Rng {
+    fn default() -> Self {
+        Rng::seed(0)
+    }
+}
+
+impl Rng {
+    /// Seed the generator. Zero is mapped to a fixed non-zero constant (xorshift
+    /// must never have a zero state).
+    pub fn seed(seed: u32) -> Self {
+        Rng { state: if seed == 0 { 0x9E37_79B9 } else { seed } }
+    }
+
+    /// Next 32-bit value.
+    pub fn next_u32(&mut self) -> u32 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.state = x;
+        x
+    }
+
+    /// A value in `[0, n)` (`n` must be non-zero).
+    pub fn below(&mut self, n: u32) -> u32 {
+        self.next_u32() % n
+    }
+}
+
+/// A fixed-capacity, allocation-free vec — the subset-clean replacement for `Vec`
+/// (spec 08 §1). Holds up to `N` `T`s inline; `push`/`insert_front` past capacity
+/// are dropped and report `false`. `T: Copy + Default`.
+#[derive(Copy, Clone)]
+pub struct Entities<T: Copy + Default, const N: usize> {
+    items: [T; N],
+    len: usize,
+}
+
+impl<T: Copy + Default, const N: usize> Default for Entities<T, N> {
+    fn default() -> Self {
+        Entities { items: [T::default(); N], len: 0 }
+    }
+}
+
+impl<T: Copy + Default, const N: usize> Entities<T, N> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    pub fn capacity(&self) -> usize {
+        N
+    }
+    pub fn clear(&mut self) {
+        self.len = 0;
+    }
+    pub fn as_slice(&self) -> &[T] {
+        &self.items[..self.len]
+    }
+    pub fn get(&self, i: usize) -> Option<T> {
+        if i < self.len {
+            Some(self.items[i])
+        } else {
+            None
+        }
+    }
+    /// Append to the back. Returns `false` if full.
+    pub fn push(&mut self, v: T) -> bool {
+        if self.len < N {
+            self.items[self.len] = v;
+            self.len += 1;
+            true
+        } else {
+            false
+        }
+    }
+    /// Remove and return the back element.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.len > 0 {
+            self.len -= 1;
+            Some(self.items[self.len])
+        } else {
+            None
+        }
+    }
+    /// Insert at the front, shifting the rest right (drops the last if full).
+    pub fn insert_front(&mut self, v: T) -> bool {
+        if N == 0 {
+            return false;
+        }
+        let top = self.len.min(N - 1);
+        let mut i = top;
+        while i > 0 {
+            self.items[i] = self.items[i - 1];
+            i -= 1;
+        }
+        self.items[0] = v;
+        self.len = (self.len + 1).min(N);
+        true
+    }
+    pub fn iter(&self) -> core::slice::Iter<'_, T> {
+        self.as_slice().iter()
+    }
+    pub fn contains(&self, v: &T) -> bool
+    where
+        T: PartialEq,
+    {
+        self.as_slice().contains(v)
+    }
+}
+
+impl<T: Copy + Default, const N: usize> core::ops::Index<usize> for Entities<T, N> {
+    type Output = T;
+    fn index(&self, i: usize) -> &T {
+        &self.items[i]
+    }
 }
 
 /// Logical buttons (keyboard or joystick, pre-mapped). Bit values double as a
@@ -236,6 +424,24 @@ impl Frame {
             self.attrs[cy as usize * 32 + col] = Attr::new(self.ink, self.paper, false).0;
         }
     }
+
+    /// Print `n` as decimal at cell `(cx, cy)` — a no-alloc HUD number (no
+    /// `format!`/heap, so it suits the subset-clean discipline).
+    pub fn text_u16(&mut self, cx: u8, cy: u8, mut n: u16) {
+        let mut buf = [0u8; 5];
+        let mut i = buf.len();
+        loop {
+            i -= 1;
+            buf[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+            if n == 0 {
+                break;
+            }
+        }
+        if let Ok(s) = core::str::from_utf8(&buf[i..]) {
+            self.text(cx, cy, s);
+        }
+    }
 }
 
 /// Pixel byte index + bit mask for `(x, y)` in the interleaved screen layout.
@@ -347,5 +553,39 @@ mod tests {
         assert!(down.held(Button::Fire) && down.pressed(Button::Fire));
         let still = Input { cur: Button::Fire as u8, prev: Button::Fire as u8 };
         assert!(still.held(Button::Fire) && !still.pressed(Button::Fire));
+    }
+
+    #[test]
+    fn rng_is_deterministic_and_seedable() {
+        let mut a = Rng::seed(12345);
+        let mut b = Rng::seed(12345);
+        let seq_a: Vec<u32> = (0..8).map(|_| a.next_u32()).collect();
+        let seq_b: Vec<u32> = (0..8).map(|_| b.next_u32()).collect();
+        assert_eq!(seq_a, seq_b, "same seed → same sequence");
+        let mut c = Rng::seed(54321);
+        assert_ne!(c.next_u32(), seq_a[0], "different seed → different stream");
+        let mut d = Rng::seed(7);
+        for _ in 0..100 {
+            assert!(d.below(6) < 6, "below(n) stays in range");
+        }
+    }
+
+    #[test]
+    fn entities_is_a_fixed_capacity_vec() {
+        let mut e: Entities<u16, 4> = Entities::new();
+        assert!(e.is_empty() && e.capacity() == 4);
+        assert!(e.push(10) && e.push(20) && e.push(30));
+        assert_eq!(e.len(), 3);
+        assert_eq!(e[0], 10);
+        assert!(e.contains(&20) && !e.contains(&99));
+        assert_eq!(e.pop(), Some(30));
+
+        // insert_front shifts right; over-capacity drops the last.
+        e.insert_front(5); // [5, 10, 20]
+        assert_eq!(e[0], 5);
+        assert_eq!(e.as_slice(), &[5, 10, 20]);
+        assert!(e.push(40)); // [5,10,20,40] full
+        assert!(!e.push(50), "push past capacity reports false");
+        assert_eq!(e.len(), 4);
     }
 }
