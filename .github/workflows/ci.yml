@@ -17,7 +17,7 @@ jobs:
       # The native window head pulls in cpal (ALSA), winit (xkbcommon) and rfd
       # (GTK/glib) — install their dev libraries so the whole workspace builds.
       - name: system deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libgtk-3-dev libxkbcommon-dev libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libgtk-3-dev libxkbcommon-dev libudev-dev libxdo-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
