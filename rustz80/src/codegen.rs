@@ -163,6 +163,59 @@ pub fn codegen_program(
     a.finish()
 }
 
+/// Where a `Game`'s single global state instance lives (well above the per-function
+/// scratch at `SCRATCH`); the entry zeroes it and passes its address as `self`.
+pub const GAME_STATE: u16 = 0xB000;
+
+/// Compile a `Game` program: a generated frame-loop entry at `org` + the functions.
+/// The entry zeroes `state_bytes` of state, then each frame does
+/// `EI; HALT; DI; CALL update(&state, 0, 0)` — interrupts on only for the `HALT`
+/// frame-sync, off during `update` (so its arithmetic isn't corrupted).
+pub fn codegen_game(funcs: &[(String, Func)], org: u16, update: &str, state_bytes: u8) -> Vec<u8> {
+    let mut a = Asm::new(org);
+    a.byte(0xF3); // DI
+    // Zero the global state (memset via LD (HL),0 + LDIR).
+    if state_bytes >= 2 {
+        a.byte(0x21);
+        a.word(GAME_STATE); // LD HL, STATE
+        a.byte(0x36);
+        a.byte(0x00); // LD (HL), 0
+        a.byte(0x11);
+        a.word(GAME_STATE + 1); // LD DE, STATE+1
+        a.byte(0x01);
+        a.word(state_bytes as u16 - 1); // LD BC, n-1
+        a.byte(0xED);
+        a.byte(0xB0); // LDIR
+    } else if state_bytes == 1 {
+        a.byte(0x21);
+        a.word(GAME_STATE);
+        a.byte(0x36);
+        a.byte(0x00);
+    }
+    let loop_l = a.label();
+    a.place(loop_l);
+    a.byte(0xFB); // EI
+    a.byte(0x76); // HALT     (wait for the 50 Hz frame interrupt)
+    a.byte(0xF3); // DI
+    a.byte(0x21);
+    a.word(GAME_STATE); // LD HL, &state   (self)
+    a.byte(0x11);
+    a.word(0); // LD DE, 0   (input handle, unused)
+    a.byte(0x01);
+    a.word(0); // LD BC, 0   (frame handle, unused)
+    a.call(update); // CALL T::update
+    a.jump(0xC3, loop_l); // JP loop
+
+    let mut base = 0u16;
+    for (name, func) in funcs {
+        a.define(name);
+        a.base = base;
+        emit_func(&mut a, func);
+        base += func.n_locals as u16;
+    }
+    a.finish().0
+}
+
 fn emit_func(a: &mut Asm, f: &Func) {
     // Prologue: copy parameters from the convention registers into their slots.
     for i in 0..f.params {

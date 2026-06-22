@@ -28,6 +28,8 @@ struct VarInfo {
     sty: Option<String>,
     ty: Width,    // scalar value type, or array element type
     is_ptr: bool, // a pointer to a struct (e.g. `self`) vs a by-value struct local
+    /// A prelude handle type (`"Frame"`/`"Input"`) — methods route to intrinsics.
+    handle: Option<String>,
 }
 
 /// Name → variable info. Flat scoping; arrays use one 2-byte slot per element.
@@ -40,7 +42,7 @@ struct Vars {
 impl Vars {
     fn declare(&mut self, name: &str, size: usize, sty: Option<String>, ty: Width) -> usize {
         let base = self.next;
-        self.map.insert(name.to_string(), VarInfo { base, sty, ty, is_ptr: false });
+        self.map.insert(name.to_string(), VarInfo { base, sty, ty, is_ptr: false, handle: None });
         self.next += size;
         base
     }
@@ -49,10 +51,23 @@ impl Vars {
         let base = self.next;
         self.map.insert(
             name.to_string(),
-            VarInfo { base, sty: Some(sty.to_string()), ty: Width::Word, is_ptr: true },
+            VarInfo { base, sty: Some(sty.to_string()), ty: Width::Word, is_ptr: true, handle: None },
         );
         self.next += 1;
         base
+    }
+    /// Declare a prelude-handle param (`frame: &mut Frame`, `input: &Input`).
+    fn declare_handle(&mut self, name: &str, handle: &str) -> usize {
+        let base = self.next;
+        self.map.insert(
+            name.to_string(),
+            VarInfo { base, sty: None, ty: Width::Word, is_ptr: false, handle: Some(handle.to_string()) },
+        );
+        self.next += 1;
+        base
+    }
+    fn handle_of(&self, name: &str) -> Option<String> {
+        self.map.get(name).and_then(|v| v.handle.clone())
     }
     fn base(&mut self, name: &str) -> usize {
         match self.map.get(name) {
@@ -93,6 +108,7 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
                 }
             }
             syn::Item::Struct(_) | syn::Item::Enum(_) => {} // already collected
+            syn::Item::Use(_) => {} // host-only imports — rustz80 has its own prelude
             other => return Err(format!("only `fn`/`struct`/`enum`/`impl` items are supported: {other:?}")),
         }
     }
@@ -175,7 +191,11 @@ fn lower_inputs(inputs: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Com
                 ctx.vars.declare_ptr("self", sty);
             }
             syn::FnArg::Typed(pt) => {
-                ctx.vars.declare(&pat_ident(&pt.pat)?, 1, None, ty_of_type(&pt.ty));
+                let name = pat_ident(&pt.pat)?;
+                match handle_type(&pt.ty) {
+                    Some(h) => ctx.vars.declare_handle(&name, &h),
+                    None => ctx.vars.declare(&name, 1, None, ty_of_type(&pt.ty)),
+                };
             }
         }
         params += 1;
@@ -387,13 +407,14 @@ fn lower_cond(expr: &syn::Expr, ctx: &mut Ctx) -> Result<Cond, String> {
 /// Lower an expression, returning its IR and inferred width (`u8`/`u16`).
 fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> {
     match expr {
-        syn::Expr::Lit(l) => {
-            let syn::Lit::Int(i) = &l.lit else {
-                return Err("only integer literals are supported".into());
-            };
-            let w = if i.suffix() == "u8" { Width::Byte } else { Width::Word };
-            Ok((Expr::Lit(i.base10_parse::<u16>().map_err(|e| e.to_string())?), w))
-        }
+        syn::Expr::Lit(l) => match &l.lit {
+            syn::Lit::Int(i) => {
+                let w = if i.suffix() == "u8" { Width::Byte } else { Width::Word };
+                Ok((Expr::Lit(i.base10_parse::<u16>().map_err(|e| e.to_string())?), w))
+            }
+            syn::Lit::Bool(b) => Ok((Expr::Lit(b.value as u16), Width::Byte)),
+            other => Err(format!("unsupported literal: {other:?}")),
+        },
         syn::Expr::Path(p) => match resolve_enum_path(&p.path, ctx.enums) {
             Some(v) => Ok((Expr::Lit(v), Width::Word)),
             None => {
@@ -514,6 +535,10 @@ fn lower_method_call(m: &syn::ExprMethodCall, ctx: &mut Ctx) -> Result<(Expr, Wi
         return Ok((Expr::Bin(op, Box::new(recv), Box::new(re), rw), rw));
     }
     let recv = path_ident(&m.receiver)?;
+    // Prelude handles (`frame`/`input`): route methods to intrinsic prelude fns.
+    if let Some(handle) = ctx.vars.handle_of(&recv) {
+        return lower_prelude_call(&handle, &method, &m.args, ctx);
+    }
     let (base, sname, is_ptr) =
         ctx.vars.receiver(&recv).ok_or_else(|| format!("method receiver {recv} is not a struct"))?;
     let self_ptr = if is_ptr { Expr::Var(base) } else { Expr::AddrOf(base) };
@@ -525,6 +550,40 @@ fn lower_method_call(m: &syn::ExprMethodCall, ctx: &mut Ctx) -> Result<(Expr, Wi
         return Err("method receiver + args exceed 3 registers".into());
     }
     Ok((Expr::Call(format!("{sname}::{method}"), args), Width::Word))
+}
+
+/// A prelude handle type (`&mut Frame` → `"Frame"`, `&Input` → `"Input"`).
+fn handle_type(t: &syn::Type) -> Option<String> {
+    let inner = match t {
+        syn::Type::Reference(r) => &*r.elem,
+        other => other,
+    };
+    if let syn::Type::Path(p) = inner {
+        if let Some(id) = p.path.get_ident() {
+            let s = id.to_string();
+            if s == "Frame" || s == "Input" {
+                return Some(s);
+            }
+        }
+    }
+    None
+}
+
+/// Route `frame.*` / `input.*` method calls to the dialect prelude functions.
+fn lower_prelude_call(
+    handle: &str,
+    method: &str,
+    args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
+    ctx: &mut Ctx,
+) -> Result<(Expr, Width), String> {
+    let name = match (handle, method) {
+        ("Frame", "pixel") => "__frame_pixel",
+        ("Frame", "clear") => "__frame_clear",
+        ("Input", "held") | ("Input", "pressed") => "__input_held",
+        _ => return Err(format!("prelude method {handle}::{method} is not supported yet")),
+    };
+    let lowered = args.iter().map(|a| Ok(lower_expr(a, ctx)?.0)).collect::<Result<_, String>>()?;
+    Ok((Expr::Call(name.to_string(), lowered), Width::Word))
 }
 
 /// The simple name of an `impl` target type (`impl Foo` → `Foo`).

@@ -16,3 +16,5 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 z80 = { path = "../z80" }
 # Boot a compiled `.tap` on the full machine (ROM-gated end-to-end test).
 spectrum = { path = "../spectrum" }
+# The host side of the dial: the same `impl Game` compiled under rustc.
+speccy-sdk = { path = "../speccy-sdk" }
