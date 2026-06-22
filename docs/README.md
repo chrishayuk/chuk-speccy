@@ -43,6 +43,11 @@ cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.t
 cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 ```
 
+Or install from **crates.io** (v0.1.0): `cargo install speccy` (player + tools),
+`cargo install rustz80` (the compiler), `cargo add chuk-speccy-spectrum` to build on
+the core. Prebuilt binaries for macOS/Windows/Linux are on the
+[latest release](https://github.com/chrishayuk/chuk-speccy/releases/latest).
+
 New here? Start with **[Getting Started](./getting-started.md)**. The MCP server
 (search/load games, drive + record sessions) lives in
 [`../chuk-mcp-spectrum`](../chuk-mcp-spectrum/README.md).
