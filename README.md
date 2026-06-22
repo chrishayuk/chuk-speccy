@@ -141,7 +141,7 @@ The emulator core is feature-complete (M0–M8). On top of it: the MCP server +
 autonomy plane, a World-of-Spectrum game library, a disassembler, the `ED FE` trap
 ABI, a Spectrum-native chatbot, a native Rust game SDK, and the **`rustz80`**
 compiler (write Rust → boot it on a real Spectrum). What's built and what's next is
-tracked in the **[roadmap](./docs/roadmap.md)**; the design is split across seven
+tracked in the **[roadmap](./docs/roadmap.md)**; the design is split across eight
 specs indexed in **[docs/](./docs/README.md)**.
 
 ## Build & test

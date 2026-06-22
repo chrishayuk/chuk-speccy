@@ -16,6 +16,7 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 | [05 — Frontends & Display Pipeline](./05-frontends-display-spec.md) | Multi-head (desktop/web/TUI/MCP) over one core, and the shared theme + filter pipeline (palette remap / duotone ramp / effect chain). One `DisplayConfig`, every head. |
 | [06 — Roles, Sessions & Autonomy](./06-roles-autonomy-spec.md) | Admin vs agent capability tiers, implicit per-session machines, and the autonomy plane (always-on recording, snapshot timeline, reaping) — agents as pure consumers. |
 | [07 — Rust → Z80 Compiler](./07-rust-z80-compiler-spec.md) | `rustz80` (**built**): a restricted Rust dialect that's *also real Rust*, compiled to a bootable `.tap` via `syn` + own IR/codegen + a micro-runtime. One source, both compilers — a dialect Snake boots on the real ROM. See the [`rustz80` README](../rustz80/README.md). |
+| [08 — Speccy Kit: the Authoring Plane](./08-speccy-kit-authoring-plane-spec.md) | The synthesis on top of the closed dial: **one typed source → three artifacts** (host build · pure `.tap` · agent env), bridged by a compiler-emitted **symbol map**. Pins the kit (L1), assets (L0), the typed env surface, the two MCP planes, and the sequencing (prove the seam on Snake first). |
 | [Getting Started](./getting-started.md) | **Start here** — install, supply a ROM, run a game, write one in Rust, drive it over MCP. |
 | [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8 + the layers) and what's next (Game-trait prelude, frontends, RL env, accuracy tail). |
 

@@ -1,19 +1,20 @@
 # chuk-speccy — Roadmap
 
 Single source of truth for what's built and what's next. The design is split
-across seven specs ([README index](./README.md)); this tracks delivery against them.
+across eight specs ([README index](./README.md)); this tracks delivery against them.
 
 **Status:** the **emulator core is feature-complete (M0–M8)** — a cycle-accurate,
 ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
 (Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), a `.tap` emitter, and **the dial closed**: one `impl Game` source compiles under rustc (speccy-sdk) **and** rustz80 (a bootable tape that runs on the real ROM).
-Plus **bit-exact `serialize_full` reset** (the RL gate), surfaced through PyO3 + MCP.
-Headline next: the **agent-environment layer** (a Gym-style `SpectrumEnv` + per-game
-wrappers + benchmarks + agent examples) — the thing that turns this from a toolbox
-into a deterministic agent research lab. Then, in parallel: distribution (a demo +
-release/binaries), extra frontends (WASM), `rustz80` Stage 2 (optional), and the
-accuracy tail (128K/AY).
+Plus **bit-exact `serialize_full` reset** (the RL gate), surfaced through PyO3 + MCP,
+and the crates published (`chuk-speccy-*` libs, `speccy`/`rustz80` CLIs). Headline
+next: the **authoring plane** ([spec 08](./08-speccy-kit-authoring-plane-spec.md)) —
+*one typed source → three artifacts* (host build · pure `.tap` · agent env), bridged
+by a compiler-emitted symbol map. First move: **prove the seam on Snake**. Then, in
+parallel: extra frontends (WASM), `rustz80` Stage 2 (optional), and the accuracy tail
+(128K/AY).
 
 ---
 
@@ -242,37 +243,54 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
 - [ ] Effect chain as GPU shaders (`scanlines` → `crt` preset) in the window head.
 - [ ] Web / streamed head (WebSocket framebuffer) for shared/agent sessions.
 
-### E. Agent environments — the research-product layer (specs 02 §8 / 03 §7)
-**The headline next track.** This is the difference between "a cool emulator with
-tools" and "a deterministic agent research lab". The ingredients are all built — a
-deterministic `Machine`, screenshots, registers, memory, frame-step, and now
-**bit-exact `serialize_full` reset** surfaced through PyO3 + the MCP
-`checkpoint`/`restore_checkpoint` tools (above). What's missing is the layer that
-turns *"an agent can press keys"* into *"an agent can learn"*: games wrapped as
-environments with defined observations, actions, rewards, and resets.
-- [ ] **`SpectrumEnv` (Gym-style)** in a `speccy-env` package: `reset()` =
-  `deserialize_full` a snapshot; `step(actions)` = press keys + `run_frames`;
-  `obs` = pixels / screen-text / RAM features / mixed; `done`/`reward` per task; the
-  `serialize_full` snapshot tree = MCTS rollouts. Bit-exact reset ⇒ reproducible
-  episodes (no reset jitter contaminating the measurement).
-- [ ] **Per-game wrappers** — `SnakeEnv` (the SDK/`rustz80` game, fully controlled),
-  `DaleyThompsonEnv` (the **SOMA B1⊥B2 demonstrator**: the tap-rhythm fatal axis is
-  native and orthogonal to the slow pacing axis), `ManicMinerEnv`, `CustomRustGameEnv`.
-  Each defines observation, action set, reward (score-delta / survival / progress via
-  a memory probe), `done` (death / level / timeout), and reset.
-- [ ] **Memory maps** — per-game `memory_map.md` (score/lives/player-x addresses) so
-  RAM is a clean structured obs + reward signal, not only pixels. (Vision obs for
-  generality + demos; memory taps for cheap, clean reward — decide per game.)
-- [ ] **Agent examples** (`examples/agents/`) — random, scripted, **memory-probe**,
-  vision-LLM, replay-episode. The memory-probe agent is where Spectrum research gets
-  interesting; the replay-episode one shows the deterministic-branch story.
-- [ ] **Benchmark suite** (`benchmarks/`) — repeatable tasks + a score table
-  (random / heuristic / LLM / vision baselines) + an episode recorder, so the
-  research angle is concrete numbers, not a claim.
-- [ ] **Environment-authoring template** — scaffold a Spectrum-native task
-  (`game.rs` via `speccy-sdk`/`rustz80` + `rewards.rs` + `memory_map.md` + `env.py`).
-  This is the payoff of the SDK + the one-`impl Game`-two-compilers dial: build
-  *controlled* tasks designed for agents, not only wrap chaotic commercial games.
+### E. The authoring plane — one source, three artifacts (spec 08)
+**The headline next track**, and the synthesis of B (SDK), B2 (`rustz80`), and the
+agent-env layer. The invariant of
+[spec 08](./08-speccy-kit-authoring-plane-spec.md): **one typed Rust `impl Game` is
+the single source of truth → three artifacts fall out with no retrofit — a host
+build, a pure `.tap`, and an agent environment.** Nothing is allowed between the
+struct and any artifact. The deterministic core + bit-exact reset are the foundation
+already in place; this turns them into a research *product*. Sequenced (§10) so the
+dial is never multiplied before it's watched close:
+
+- [ ] **1 · Prove the seam** (the headline, an afternoon, falsifies the thesis) —
+  Snake as one typed source → host build + pure `.tap` + env, with **`rustz80`
+  emitting a symbol map** (`.sym.toml`: each struct field → RAM addr/width/type, from
+  the Stage-1c constant offsets). Success test: a `score` field round-trips
+  typed-annotation → emitted addr → env reads it off the running tape. Needs three
+  subset-clean primitives in `chuk-speccy-sdk`: `Entities<T, N>` (fixed-cap vec),
+  `Fx8_8` (fixed-point), `Rng` (state-seeded). *(Dial-discipline gap to close first:
+  the showcase `speccy-sdk/src/demo.rs` Snake uses `Vec`/`format!` → host-only.)*
+- [ ] **The symbol map — the bridge.** reward/done/observe stay ordinary rustc-checked
+  Rust: run on the live struct host-side, and over a `.sym.toml`-materialised view
+  tape-side. **Supersedes hand-written memory maps for *authored* games** (a hand
+  `memory_map.toml` survives only for *found* commercial titles), and supersedes spec
+  03 §7's `env_report` trap as the default path.
+- [ ] **Widened `Game` trait** (default impls, so existing games still compile):
+  `observe() -> Obs`, `reward(&self, prev: &Self) -> i16` (typed — **no string DSL**),
+  `done()`, `reset(seed)`. Writing a game *is* writing its env.
+- [ ] **`chuk-speccy-env`** — the Gym surface (`reset` = `deserialize_full`, `step` =
+  keys + `run_frames`, obs = pixels / typed features; the snapshot tree = MCTS
+  rollouts) + agent examples (random, scripted, **memory-probe**, vision-LLM, replay)
+  + a benchmark score table. `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
+- [ ] **2 · The kit (L1 + L0)** — `chuk-speccy-game` (subset-clean Sprite/TileMap/
+  Scene/Hud/SoundBank; sprites *name* the colour-clash; a dirty-cell engine as the
+  **dial canary**) + `chuk-speccy-assets` (PNG/Tiled/tracker → `const`; the
+  **colour-clash report** is the cheap demo-magnet). Sound = const data, two players,
+  both emitting real port-`0xFE` edges (never "nice generated audio").
+- [ ] **3 · Vertical slice** — `speccy new maze --template agent_maze`: splash ·
+  tilemap · sprites · beeper SFX · HUD · RNG · typed probes · reward · env · random +
+  scripted agents · host run · `.tap` · MP4.
+- [ ] **The agentability report** — static analysis over typed reward + the symbol
+  map + short rollouts; the **reward-hackability detector** is the research headline
+  (possible only because reward is typed, not a DSL).
+- [ ] **4 · The authoring studio (LAST)** — `chuk-mcp-speccy-kit`: intent-level tools
+  (`add_actor`, `build_assets`, `compile_tap`, `wire_reward`), with **"compiles pure"
+  as a security property** (agent-authored games must pass `rustz80` unless an
+  escape-hatch trap is whitelisted). Authoring *emits*; the runtime plane
+  (`chuk-mcp-spectrum`) *runs*. Templates are cognitive axes (gridworld / runner /
+  maze / rhythm / shooter / puzzle) → a **deterministic task factory** that happens to
+  express tasks as real Spectrum games.
 
 ### F. Reach — distribution & demo
 Right now it's compelling to *developers*; these make it usable by, and legible to,
@@ -321,21 +339,25 @@ it affects timing-precise demos, not games or agent tasks.
 ## Suggested order
 
 ```
-core M0–M8 ✓ ─▶ A. MCP server ✓ ─▶ E. AGENT ENVIRONMENTS ◀── the headline next
-                    │                  bit-exact reset ✓ → Gym env, per-game wrappers,
-                    │                  benchmarks, agent examples, authoring template
+core M0–M8 ✓ ─▶ A. MCP server ✓ ─▶┐
                     └─▶ B. SDK ✓ ─▶ C. chatbot ✓
-                            │
                             └─▶ B2. rustz80 ✓ — dial closed (one impl Game: host + pure)
+                                        │
+                                        ▼
+        E. AUTHORING PLANE (spec 08) ◀── the headline next
+        one typed source → host build · pure .tap · agent env, bridged by the
+        compiler-emitted symbol map.  Sequence: 1 prove-the-seam (Snake) →
+        2 kit (L1+L0) → 3 vertical slice → 4 authoring studio (LAST).
    D. frontends (WASM / shaders / streamed)    ── parallel, any time
-   F. reach (demo GIF / release / binaries)    ── parallel, cheap, high-leverage
+   F. reach (demo GIF ✓ / release ✓ / binaries ✓ / player niceties) ── parallel
    Later. accuracy tail (128K/AY, …)           ── below E in priority
 ```
 
 The honest through-line: everything is downstream of a Z80 core you trust (passes
-ZEXALL), so the spine was core → MCP → SDK/chat → `rustz80` — **all built**, and the
-`serialize_full` reset gate is now closed. So the single highest-value next move is
-**E — the agent-environment layer** (turn the built ingredients into a Gym-style env
-+ game wrappers + benchmarks), which is what makes this a research *product* rather
-than a toolbox. Everything else is independent and parallel: more frontends (D),
-reach (F — a demo + release), and the accuracy tail (128K/AY), all below E.
+ZEXALL), so the spine — core → MCP → SDK/chat → `rustz80`, plus bit-exact reset and
+published crates — is **built**. The single highest-value next move is **E, the
+authoring plane (spec 08)**: turn the built ingredients into *one typed source → three
+artifacts* with the compiler emitting the symbol map. Don't build the studio first —
+**prove the seam on Snake**, then the kit, then a slice, then the MCP studio last.
+Everything else (frontends D, the rest of reach F, the accuracy tail) is independent
+and parallel, all below E.
