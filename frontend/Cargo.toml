@@ -18,6 +18,10 @@ path = "src/bin/gui.rs"
 name = "speccy-library"
 path = "src/bin/library.rs"
 
+[[bin]]
+name = "speccy-gif"
+path = "src/bin/gif.rs"
+
 [dependencies]
 spectrum = { path = "../spectrum" }
 display = { path = "../display" }

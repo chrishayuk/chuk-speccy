@@ -35,6 +35,18 @@ fn delay() {
 }
 
 fn main() {
+    // Clear the screen: blank the bitmap, set bright-white ink on black paper
+    // (attr 0x47) so the snake stands out over a clean background.
+    let mut p = 16384u16;
+    while p < 22528u16 {
+        poke(p, 0u8);
+        p = p + 1u16;
+    }
+    while p < 23296u16 {
+        poke(p, 71u8);
+        p = p + 1u16;
+    }
+
     let mut bx = [0u16; 8];
     let mut by = [0u16; 8];
 
