@@ -46,7 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release -p frontend -p rustz80
+        run: cargo build --release -p speccy -p rustz80
 
       - name: Package
         id: pkg
