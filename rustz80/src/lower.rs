@@ -11,8 +11,9 @@ use std::collections::HashMap;
 /// every field is one `u16` slot in Stage 1).
 type Structs = HashMap<String, Vec<String>>;
 
-/// C-like enum layouts: name → variant names in order (value = position).
-type Enums = HashMap<String, Vec<String>>;
+/// C-like enum layouts: name → variants as `(name, value)`. Values follow Rust's
+/// rule: an explicit `= N` discriminant, else the previous value + 1 (from 0).
+type Enums = HashMap<String, Vec<(String, u16)>>;
 
 /// Per-function lowering context: locals + the program's struct/enum layouts.
 struct Ctx<'a> {
@@ -88,7 +89,7 @@ impl Vars {
 /// Lower every `fn` in a file to `(name, Func)`, using the file's struct layouts.
 pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
     let structs = collect_structs(file)?;
-    let enums = collect_enums(file);
+    let enums = collect_enums(file)?;
     let mut out = Vec::new();
     for item in &file.items {
         match item {
@@ -134,18 +135,36 @@ fn lower_method(m: &syn::ImplItemFn, self_ty: &str, structs: &Structs, enums: &E
 
 /// Names the compiler handles itself (their host definitions are prelude-only).
 fn is_intrinsic(name: &str) -> bool {
-    matches!(name, "poke" | "peek")
+    matches!(name, "poke" | "peek" | "inport")
 }
 
-fn collect_enums(file: &syn::File) -> Enums {
+fn collect_enums(file: &syn::File) -> Result<Enums, String> {
     let mut m = Enums::new();
     for item in &file.items {
         if let syn::Item::Enum(e) = item {
-            let variants = e.variants.iter().map(|v| v.ident.to_string()).collect();
+            let mut variants = Vec::new();
+            let mut next = 0u16;
+            for v in &e.variants {
+                let value = match &v.discriminant {
+                    Some((_, expr)) => lit_u16(expr)?,
+                    None => next,
+                };
+                variants.push((v.ident.to_string(), value));
+                next = value.wrapping_add(1);
+            }
             m.insert(e.ident.to_string(), variants);
         }
     }
-    m
+    Ok(m)
+}
+
+fn lit_u16(e: &syn::Expr) -> Result<u16, String> {
+    if let syn::Expr::Lit(l) = e {
+        if let syn::Lit::Int(i) = &l.lit {
+            return i.base10_parse::<u16>().map_err(|e| e.to_string());
+        }
+    }
+    Err("enum discriminant must be an integer literal".into())
 }
 
 fn collect_structs(file: &syn::File) -> Result<Structs, String> {
@@ -389,19 +408,30 @@ fn lower_block(b: &syn::Block, ctx: &mut Ctx) -> Result<Vec<Stmt>, String> {
 }
 
 fn lower_cond(expr: &syn::Expr, ctx: &mut Ctx) -> Result<Cond, String> {
-    let syn::Expr::Binary(b) = expr else {
-        return Err(format!("condition must be a comparison, got {expr:?}"));
-    };
-    let cmp = match b.op {
+    // A comparison maps directly; any other bool expression means "is non-zero"
+    // (e.g. `if input.held(Button::Left)`).
+    if let syn::Expr::Binary(b) = expr {
+        if let Some(cmp) = cmp_op(&b.op) {
+            return Ok(Cond { cmp, lhs: lower_expr(&b.left, ctx)?.0, rhs: lower_expr(&b.right, ctx)?.0 });
+        }
+    }
+    if let syn::Expr::Paren(p) = expr {
+        return lower_cond(&p.expr, ctx);
+    }
+    let (e, _) = lower_expr(expr, ctx)?;
+    Ok(Cond { cmp: Cmp::Ne, lhs: e, rhs: Expr::Lit(0) })
+}
+
+fn cmp_op(op: &syn::BinOp) -> Option<Cmp> {
+    Some(match op {
         syn::BinOp::Lt(_) => Cmp::Lt,
         syn::BinOp::Le(_) => Cmp::Le,
         syn::BinOp::Gt(_) => Cmp::Gt,
         syn::BinOp::Ge(_) => Cmp::Ge,
         syn::BinOp::Eq(_) => Cmp::Eq,
         syn::BinOp::Ne(_) => Cmp::Ne,
-        other => return Err(format!("unsupported comparison op: {other:?}")),
-    };
-    Ok(Cond { cmp, lhs: lower_expr(&b.left, ctx)?.0, rhs: lower_expr(&b.right, ctx)?.0 })
+        _ => return None,
+    })
 }
 
 /// Lower an expression, returning its IR and inferred width (`u8`/`u16`).
@@ -453,6 +483,10 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> 
             if name == "peek" {
                 let addr = c.args.first().ok_or("peek(addr) needs an address")?;
                 return Ok((Expr::Peek(Box::new(lower_expr(addr, ctx)?.0)), Width::Byte));
+            }
+            if name == "inport" {
+                let port = c.args.first().ok_or("inport(port) needs a port")?;
+                return Ok((Expr::InPort(Box::new(lower_expr(port, ctx)?.0)), Width::Byte));
             }
             if c.args.len() > 3 {
                 return Err("more than 3 call arguments not supported yet".into());
@@ -603,7 +637,7 @@ fn resolve_enum_path(path: &syn::Path, enums: &Enums) -> Option<u16> {
     }
     let name = path.segments[0].ident.to_string();
     let variant = path.segments[1].ident.to_string();
-    enums.get(&name)?.iter().position(|v| *v == variant).map(|i| i as u16)
+    enums.get(&name)?.iter().find(|(n, _)| *n == variant).map(|(_, v)| *v)
 }
 
 /// A match arm body: a `{ block }` or a single expression-statement.

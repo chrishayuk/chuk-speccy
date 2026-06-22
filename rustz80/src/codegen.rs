@@ -332,6 +332,16 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.byte(0x26); // LD H, 0     -> HL = zero-extended byte
             a.byte(0x00);
         }
+        Expr::InPort(port) => {
+            gen_expr(a, port); // HL = port
+            a.byte(0x44); // LD B,H
+            a.byte(0x4D); // LD C,L   (BC = port)
+            a.byte(0xED);
+            a.byte(0x78); // IN A,(C)
+            a.byte(0x6F); // LD L,A
+            a.byte(0x26); // LD H,0   -> HL = port byte
+            a.byte(0x00);
+        }
         Expr::AddrOf(slot) => {
             a.byte(0x21); // LD HL, &local
             let addr = slot_addr(a.base, *slot);

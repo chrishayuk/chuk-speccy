@@ -40,9 +40,9 @@ Supported today (all differential-tested):
 | Control flow | `if`/`else if`/`else`, `while`, comparison conditions (`< <= > >= == !=`). |
 | Arrays | `let a = [0u16; N];` / `[e0, e1, …]`; `a[i]`, `a[i] = v`. Index with `i as usize`. `[u8; N]` are byte-packed-per-slot with byte load/store. |
 | Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar fields only. |
-| Enums + match | C-like `enum Dir { Up, Down, … }` (variant = its index); `match` on integers/variants with `_`. |
-| Functions | Up to 3 args (passed in `HL`/`DE`/`BC`), result in `HL`; multi-function programs. |
-| Raw memory | `poke(addr, val)` / `peek(addr)` intrinsics — e.g. to write screen RAM at `0x4000`. |
+| Enums + match | `enum Dir { Up = 1, … }` (explicit discriminants or `0,1,2,…`); `match` on integers/variants with `_`. Plus `bool` (`true`/`false`). |
+| Functions + methods | Free fns and `impl T { fn m(&mut self, …) }` — up to 3 args in `HL`/`DE`/`BC`, result in `HL`; `self.field` through the receiver. |
+| Raw I/O | `poke(addr, val)` / `peek(addr)` (memory) and `inport(port)` (I/O ports, e.g. the keyboard at `0xFE`). |
 
 Out of scope (use `rustc`-only host code, or wait for later stages): recursion
 (needs stack frames — Stage 4), references / `&mut` params, `>3` params, slices,
@@ -88,10 +88,17 @@ cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/bounce.rs -o bounce
 cargo run --release --bin speccy-gui -- testroms/48.rom bounce.tap
 ```
 
-`samples/bounce.rs` is exactly this — and `tests/dial.rs` compiles it under rustc
-*and* rustz80 and boots it, proving the dial. The pure prelude currently covers
-`Frame::clear`/`pixel` (input is stubbed); the game stays in the dialect subset (so:
-fixed state, no `Vec`/`String`).
+`samples/bounce.rs` (self-playing) and `samples/move.rs` (**playable** — cursor keys
+or QAOP move a blob) are exactly this; `tests/dial.rs` compiles each under rustc
+*and* rustz80 and boots them, proving the dial. The pure prelude covers
+`Frame::clear`/`pixel` and **real `Input::held`** (keyboard read via the `inport`
+intrinsic, mapped like the SDK). Games stay in the dialect subset (fixed state, no
+`Vec`/`String`).
+
+```bash
+cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
+cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press 5/6/7/8 or Q/A/O/P
+```
 
 ## How it works
 

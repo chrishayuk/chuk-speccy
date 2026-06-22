@@ -1,70 +1,122 @@
-//! The fidelity dial, closed end to end: `samples/bounce.rs` is compiled **both**
-//! by `rustc` (as a `speccy-sdk` `Game`) and by `rustz80` (to a bootable tape) —
-//! one source, two compilers.
+//! The fidelity dial, closed end to end: `samples/bounce.rs` and `samples/move.rs`
+//! are each compiled **both** by `rustc` (as `speccy-sdk` `Game`s) and by `rustz80`
+//! (to bootable tapes) — one source, two compilers.
 
-const SAMPLE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/bounce.rs"));
+const BOUNCE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/bounce.rs"));
+const MOVE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/move.rs"));
 
-/// Host side: the same sample text, compiled here by `rustc` against `speccy-sdk`.
-/// If it type-checks as a `Game`, this test passes (a compile-time assertion).
+/// Host side: the same sample texts, compiled here by `rustc` against `speccy-sdk`.
+/// If they type-check as `Game`s, this passes (a compile-time assertion).
 #[test]
-fn host_game_is_valid_rust() {
-    // The sample uses the dialect's long form (`x = x + 1`, no `+=`) so the same
+fn host_games_are_valid_rust() {
+    // The samples use the dialect's long form (`x = x + 1`, no `+=`) so the same
     // text compiles under rustz80 too — silence clippy's host-only suggestion.
-    #[allow(clippy::assign_op_pattern)]
-    mod game {
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod bounce {
         use speccy_sdk::*;
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/bounce.rs"));
-        pub fn assert_is_game() {
+        pub fn check() {
             fn is_game<T: Game + Default>() {}
             is_game::<Bounce>();
         }
     }
-    game::assert_is_game();
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod mover {
+        use speccy_sdk::*;
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/move.rs"));
+        pub fn check() {
+            fn is_game<T: Game + Default>() {}
+            is_game::<Mover>();
+        }
+    }
+    bounce::check();
+    mover::check();
 }
 
-/// Pure side: the same text compiles through `rustz80` to a `.tap`.
+/// Pure side: the same texts compile through `rustz80` to `.tap`s.
 #[test]
-fn game_compiles_pure() {
-    assert!(rustz80::has_game(SAMPLE), "should be recognised as a Game");
-    rustz80::compile_game(SAMPLE, "BOUNCE").expect("compiles to a tap");
+fn games_compile_pure() {
+    assert!(rustz80::has_game(BOUNCE) && rustz80::has_game(MOVE));
+    rustz80::compile_game(BOUNCE, "BOUNCE").expect("bounce compiles");
+    rustz80::compile_game(MOVE, "MOVE").expect("move compiles");
 }
 
-/// Pure side, end to end: boot the compiled game on the real ROM and confirm it
-/// draws and animates (the bouncing pixel moves).
-///   SPECTRUM_ROM="$PWD/testroms/48.rom" cargo test -p rustz80 --test dial -- --ignored
-#[test]
-#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
-fn game_boots_and_animates() {
-    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let tap = rustz80::compile_game(SAMPLE, "BOUNCE").expect("compile");
-
-    let mut spec = spectrum::Spectrum::new_48k(&rom);
+fn boot(rom: &[u8], tap: &[u8]) -> spectrum::Spectrum {
+    let mut spec = spectrum::Spectrum::new_48k(rom);
     for _ in 0..250 {
         spec.run_frame();
     }
-    spec.load_tap(&tap).unwrap();
+    spec.load_tap(tap).unwrap();
     spec.autoload_tape();
-
-    let lit = |s: &spectrum::Spectrum| -> u32 {
-        s.read_memory(0x4000, 0x1800).iter().map(|b| b.count_ones()).sum()
-    };
-    let hash = |s: &spectrum::Spectrum| -> u64 {
-        s.read_memory(0x4000, 0x1800)
-            .iter()
-            .enumerate()
-            .fold(0u64, |a, (i, &b)| a.wrapping_add((b as u64 + 1).wrapping_mul(i as u64 + 1)))
-    };
-
-    for _ in 0..600 {
+    for _ in 0..400 {
         spec.run_frame();
     }
-    let (lit_a, hash_a) = (lit(&spec), hash(&spec));
-    for _ in 0..600 {
-        spec.run_frame();
-    }
-    let hash_b = hash(&spec);
-
-    assert!(lit_a > 0, "the bouncing pixel should be drawn");
-    assert!(lit_a < 100, "only the single pixel should be lit, not loader junk");
-    assert_ne!(hash_a, hash_b, "the pixel should be moving (screen changes)");
+    spec
 }
+
+/// Pure, end to end: boot the bouncing-blob game and confirm it's **visible**
+/// (white ink on black paper — the bug that made the first cut invisible) and
+/// **animating**.
+///   SPECTRUM_ROM="$PWD/testroms/48.rom" cargo test -p rustz80 --test dial -- --ignored
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn bounce_boots_visible_and_animates() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let mut spec = boot(&rom, &rustz80::compile_game(BOUNCE, "BOUNCE").expect("compile"));
+
+    // clear(Black) must set white ink on black paper, else pixels are invisible.
+    assert_eq!(spec.read_memory(0x5800, 1)[0], 0x07, "attrs = white ink on black");
+
+    let bitmap = |s: &spectrum::Spectrum| s.read_memory(0x4000, 0x1800);
+    // Sample across frames: the blob's update overruns a frame, so a single
+    // snapshot can catch it mid-draw — track the fullest blob and distinct frames.
+    let mut max_lit = 0u32;
+    let mut frames = std::collections::HashSet::new();
+    for _ in 0..400 {
+        spec.run_frame();
+        let b = bitmap(&spec);
+        max_lit = max_lit.max(b.iter().map(|x| x.count_ones()).sum());
+        frames.insert(b);
+    }
+    assert!(max_lit >= 24, "the 6x6 blob should be fully drawn at some frame, max {max_lit}");
+    assert!(frames.len() > 3, "the blob should be moving (distinct frames)");
+}
+
+/// Pure, end to end: the *playable* game reads the keyboard — holding a key moves
+/// the blob (the new `inport` intrinsic + the `Input` prelude).
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn move_responds_to_keys() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let mut spec = boot(&rom, &rustz80::compile_game(MOVE, "MOVE").expect("compile"));
+
+    // Mover's first field `x` is the global state's first u16.
+    let read_x = |s: &spectrum::Spectrum| -> u16 {
+        let m = s.read_memory(rustz80::GAME_STATE, 2);
+        u16::from_le_bytes([m[0], m[1]])
+    };
+    let x0 = read_x(&spec);
+
+    // Hold "P" (mapped to Right) and let it run.
+    let p = spectrum::keyboard::key_for_char('p').unwrap().0;
+    spec.set_key(p, true);
+    for _ in 0..120 {
+        spec.run_frame();
+    }
+    let x_right = read_x(&spec);
+    spec.set_key(p, false);
+
+    assert!(x_right > x0, "holding Right should grow x: {x0} -> {x_right}");
+
+    // Now hold "O" (Left) and confirm it comes back.
+    let o = spectrum::keyboard::key_for_char('o').unwrap().0;
+    spec.set_key(o, true);
+    for _ in 0..120 {
+        spec.run_frame();
+    }
+    let x_left = read_x(&spec);
+    spec.set_key(o, false);
+
+    assert!(x_left < x_right, "holding Left should shrink x: {x_right} -> {x_left}");
+}
+

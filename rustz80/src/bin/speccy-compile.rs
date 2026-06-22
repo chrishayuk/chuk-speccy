@@ -56,7 +56,8 @@ fn main() -> ExitCode {
     };
     // An `impl Game` compiles via the SDK-prelude path (frame loop); otherwise the
     // file needs a no-arg `fn main` entry.
-    let result = if rustz80::has_game(&src) {
+    let is_game = rustz80::has_game(&src);
+    let result = if is_game {
         rustz80::compile_game(&src, &tape_name)
     } else {
         rustz80::compile_to_tap(&src, &entry, &tape_name)
@@ -72,6 +73,7 @@ fn main() -> ExitCode {
         eprintln!("error: cannot write {out_path}: {e}");
         return ExitCode::FAILURE;
     }
-    eprintln!("wrote {out_path} ({} bytes, entry `{entry}`)", tap.len());
+    let how = if is_game { "impl Game".to_string() } else { format!("entry `{entry}`") };
+    eprintln!("wrote {out_path} ({} bytes, {how})", tap.len());
     ExitCode::SUCCESS
 }

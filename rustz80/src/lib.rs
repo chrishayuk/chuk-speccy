@@ -15,6 +15,7 @@ mod ir;
 mod lower;
 mod tap;
 
+pub use codegen::GAME_STATE;
 pub use ir::Func;
 pub use tap::to_tap;
 
@@ -58,7 +59,12 @@ pub fn compile_to_tap(src: &str, entry: &str, name: &str) -> Result<Vec<u8>, Str
 /// straight into screen RAM via `poke`/`peek` — the host counterparts live in
 /// `speccy-sdk`. (`Colour` mirrors the SDK's non-bright variants 0..7.)
 const PRELUDE: &str = r#"
-enum Colour { Black, Blue, Red, Magenta, Green, Cyan, Yellow, White }
+enum Colour {
+    Black = 0, Blue = 1, Red = 2, Magenta = 3, Green = 4, Cyan = 5, Yellow = 6, White = 7,
+    BrightBlue = 9, BrightRed = 10, BrightMagenta = 11, BrightGreen = 12,
+    BrightCyan = 13, BrightYellow = 14, BrightWhite = 15
+}
+enum Button { Up = 1, Down = 2, Left = 4, Right = 8, Fire = 16 }
 fn __px_addr(x: u16, y: u16) -> u16 {
     16384u16 + (y / 64u16) * 2048u16 + (y % 8u16) * 256u16 + ((y / 8u16) % 8u16) * 32u16 + x / 8u16
 }
@@ -76,11 +82,25 @@ fn __frame_pixel(x: u16, y: u16, on: u16) {
     }
 }
 fn __frame_clear(colour: u16) {
+    let attr = colour * 8u16 + 7u16;
     let mut p = 16384u16;
     while p < 22528u16 { poke(p, 0u8); p = p + 1u16; }
-    while p < 23296u16 { poke(p, colour as u8); p = p + 1u16; }
+    while p < 23296u16 { poke(p, attr as u8); p = p + 1u16; }
 }
-fn __input_held(b: u16) -> u16 { 0u16 }
+fn __key(port: u16, bit: u16) -> u16 {
+    let mut r = 0u16;
+    if (inport(port) & bit) == 0u16 { r = 1u16; }
+    r
+}
+fn __input_held(b: u16) -> u16 {
+    let mut h = 0u16;
+    if b == 1u16  { h = __key(61438u16, 8u16)  | __key(64510u16, 1u16); }
+    if b == 2u16  { h = __key(61438u16, 16u16) | __key(64765u16, 1u16); }
+    if b == 4u16  { h = __key(63486u16, 16u16) | __key(57342u16, 2u16); }
+    if b == 8u16  { h = __key(61438u16, 4u16)  | __key(57342u16, 1u16); }
+    if b == 16u16 { h = __key(61438u16, 1u16)  | __key(32766u16, 1u16); }
+    h
+}
 "#;
 
 /// Compile an `impl Game for T` to a bootable `.tap`. The *same* source also
