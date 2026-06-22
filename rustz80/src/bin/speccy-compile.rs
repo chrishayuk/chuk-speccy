@@ -54,24 +54,39 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // An `impl Game` compiles via the SDK-prelude path (frame loop); otherwise the
-    // file needs a no-arg `fn main` entry.
+    // An `impl Game` compiles via the SDK-prelude path (frame loop) and also emits
+    // a `.sym.toml` symbol map (the env bridge); otherwise the file needs a no-arg
+    // `fn main` entry.
     let is_game = rustz80::has_game(&src);
-    let result = if is_game {
-        rustz80::compile_game(&src, &tape_name)
+    let (tap, symbols) = if is_game {
+        match rustz80::compile_game_with_symbols(&src, &tape_name) {
+            Ok((t, s)) => (t, Some(s)),
+            Err(e) => {
+                eprintln!("error: {input}: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
     } else {
-        rustz80::compile_to_tap(&src, &entry, &tape_name)
-    };
-    let tap = match result {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("error: {input}: {e}");
-            return ExitCode::FAILURE;
+        match rustz80::compile_to_tap(&src, &entry, &tape_name) {
+            Ok(t) => (t, None),
+            Err(e) => {
+                eprintln!("error: {input}: {e}");
+                return ExitCode::FAILURE;
+            }
         }
     };
     if let Err(e) = std::fs::write(&out_path, &tap) {
         eprintln!("error: cannot write {out_path}: {e}");
         return ExitCode::FAILURE;
+    }
+    // Sidecar the symbol map next to the tape (`game.tap` → `game.sym.toml`).
+    if let Some(symbols) = &symbols {
+        let sym_path = out_path.strip_suffix(".tap").unwrap_or(&out_path).to_string() + ".sym.toml";
+        if let Err(e) = std::fs::write(&sym_path, symbols.to_toml()) {
+            eprintln!("error: cannot write {sym_path}: {e}");
+            return ExitCode::FAILURE;
+        }
+        eprintln!("wrote {sym_path} ({} fields)", symbols.fields.len());
     }
     let how = if is_game { "impl Game".to_string() } else { format!("entry `{entry}`") };
     eprintln!("wrote {out_path} ({} bytes, {how})", tap.len());

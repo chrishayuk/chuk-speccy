@@ -261,11 +261,17 @@ dial is never multiplied before it's watched close:
   subset-clean primitives in `chuk-speccy-sdk`: `Entities<T, N>` (fixed-cap vec),
   `Fx8_8` (fixed-point), `Rng` (state-seeded). *(Dial-discipline gap to close first:
   the showcase `speccy-sdk/src/demo.rs` Snake uses `Vec`/`format!` → host-only.)*
-- [ ] **The symbol map — the bridge.** reward/done/observe stay ordinary rustc-checked
-  Rust: run on the live struct host-side, and over a `.sym.toml`-materialised view
-  tape-side. **Supersedes hand-written memory maps for *authored* games** (a hand
-  `memory_map.toml` survives only for *found* commercial titles), and supersedes spec
-  03 §7's `env_report` trap as the default path.
+- [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
+  `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
+  `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;
+  `rustz80/tests/seam.rs` proves it on the real ROM — a typed `score` field read off
+  the running tape **via its emitted address**, climbing as the game runs. The bridge
+  exists.
+- [ ] **The symbol map — the env side.** reward/done/observe run on a `Self`
+  *reconstructed from RAM* via the map (the bridge's other half, in `chuk-speccy-env`).
+  **Supersedes hand-written memory maps for *authored* games** (a hand `memory_map.toml`
+  survives only for *found* commercial titles); the `env_report` trap becomes an
+  optional fast-path.
 - [ ] **Widened `Game` trait** (default impls, so existing games still compile):
   `observe() -> Obs`, `reward(&self, prev: &Self) -> i16` (typed — **no string DSL**),
   `done()`, `reset(seed)`. Writing a game *is* writing its env.
