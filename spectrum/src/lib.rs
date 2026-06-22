@@ -9,6 +9,7 @@ pub mod host;
 pub mod keyboard;
 pub mod memory;
 pub mod sdk;
+mod serialize;
 pub mod snapshot;
 pub mod tape;
 pub mod ula;

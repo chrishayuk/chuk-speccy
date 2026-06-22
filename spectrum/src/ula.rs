@@ -84,6 +84,34 @@ pub struct Ula {
 }
 
 impl Ula {
+    /// Append the execution-relevant ULA state to a full-state blob: the frame
+    /// phase, border, beeper, and audio carry. The `contention` table is a constant
+    /// (rebuilt by `new`); the per-frame audio edge/output buffers are transient
+    /// (regenerated each frame) and don't affect future CPU/video state.
+    pub(crate) fn save(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.tstate.to_le_bytes());
+        out.extend_from_slice(&self.frame.to_le_bytes());
+        out.push(self.border);
+        out.push(self.beeper as u8);
+        out.push(self.contention_enabled as u8);
+        out.push(self.audio_enabled as u8);
+        out.extend_from_slice(&self.audio_rate.to_le_bytes());
+        out.extend_from_slice(&self.audio_acc.to_le_bytes());
+        out.push(self.audio_start_level as u8);
+    }
+    /// Restore the ULA state from a blob cursor (inverse of [`save`](Self::save)).
+    pub(crate) fn load(&mut self, c: &mut crate::serialize::Cur) {
+        self.tstate = c.u32();
+        self.frame = c.u32();
+        self.border = c.u8();
+        self.beeper = c.bool();
+        self.contention_enabled = c.bool();
+        self.audio_enabled = c.bool();
+        self.audio_rate = c.u32();
+        self.audio_acc = c.f64();
+        self.audio_start_level = c.bool();
+    }
+
     pub fn new() -> Self {
         Self {
             tstate: 0,

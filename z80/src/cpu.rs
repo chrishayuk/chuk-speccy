@@ -415,15 +415,6 @@ impl Cpu {
     pub(crate) fn flag(&self, m: u8) -> bool {
         self.regs.f & m != 0
     }
-
-    #[inline]
-    pub(crate) fn set_flag(&mut self, m: u8, on: bool) {
-        if on {
-            self.regs.f |= m;
-        } else {
-            self.regs.f &= !m;
-        }
-    }
 }
 
 /// Standard reset/power-on register state for a Z80 (PC=0, SP/AF/regs = 0xFFFF

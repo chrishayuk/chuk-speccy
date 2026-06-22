@@ -2,13 +2,12 @@
 //! is. All memory and all timing live behind the [`Bus`] trait (see
 //! `docs/01-core-emulator-spec.md` §3).
 //!
-//! Scaffold status: the register file, flag tables, Bus boundary, and the
-//! X/Y/Z/P/Q decode skeleton are in place. The opcode bodies are stubs marked
-//! `TODO` — fill them in per milestones M1/M2. `dead_code` is allowed crate-wide
-//! while the tables/arrays are still being wired up; remove it once the decoder
-//! references them all.
+//! Status: the full documented **and** undocumented instruction set is
+//! implemented and **ZEXALL/ZEXDOC-clean** — including MEMPTR/WZ, XF/YF, the
+//! SCF/CCF Q-quirk, IXH/IXL, and DDCB. Decode is table-driven via the X/Y/Z/P/Q
+//! split (`decode.rs`); flags come from precomputed tables (`flags.rs`); a
+//! read-only disassembler mirrors the decoder (`disasm.rs`).
 #![no_std]
-#![allow(dead_code)]
 
 // The disassembler builds owned `String`s; `alloc` is provided by every consumer
 // (all are `std`). The CPU and decoder themselves stay allocation-free.
