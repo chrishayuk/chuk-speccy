@@ -1,12 +1,37 @@
 # chuk-speccy
 
-A cycle-accurate, **ZEXALL-clean** 48K ZX Spectrum emulator in Rust — with a
-native window, a themed terminal head, a **World of Spectrum** game fetcher, and
-an **MCP server** so LLMs / scripts / RL loops can drive and record the machine.
+[![CI](https://github.com/chrishayuk/chuk-speccy/actions/workflows/ci.yml/badge.svg)](https://github.com/chrishayuk/chuk-speccy/actions/workflows/ci.yml)
+&nbsp;License: MIT OR Apache-2.0
 
-The core is a pure, deterministic, headless `Machine`; everything else is a thin
-consumer of it. Dependency arrow: `frontend → spectrum → z80` (the `z80` crate
-never knows what a Spectrum is).
+**A deterministic ZX Spectrum you can play, let agents drive, and compile Rust
+games for.** Underneath is a cycle-accurate, **ZEXALL-clean** 48K emulator in Rust;
+the point is what sits on top — an agent-controllable, bit-exact-reproducible *game
+lab*. The core is a pure, deterministic, headless `Machine`; everything else is a
+thin consumer of it (`frontend → spectrum → z80`; the `z80` crate never knows what
+a Spectrum is).
+
+## Three things you can do
+
+**1 — Play Spectrum games.** Pixel-perfect + sound, fetched live from World of
+Spectrum (or a local file), themes, fullscreen.
+```bash
+cargo run --release --bin speccy-gui -- testroms/48.rom "Jet Set Willy"
+```
+
+**2 — Let an AI agent observe and drive one.** The [MCP server](./chuk-mcp-spectrum/README.md)
+exposes the machine over two endpoints (a small *agent* surface — screenshot, keys,
+frame-step, memory — and a full *admin* surface), with **bit-exact checkpoints** and
+a rewindable timeline. Records every session to MP4. That makes the Spectrum a
+controlled, reproducible agent/RL environment, not just nostalgiaware.
+
+**3 — Write a game in Rust and boot it.** The same `.rs` runs under `rustc` (host,
+for debugging) *and* compiles **pure** to a real tape via [`rustz80`](./rustz80/README.md).
+```bash
+cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
+cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press Q/A/O/P
+```
+
+You supply a 48K system ROM at `testroms/48.rom` (gitignored — see [Getting Started](./docs/getting-started.md)).
 
 ## Quick start
 
