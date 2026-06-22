@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Lint every target (lib, bins, tests, examples) — warnings fail the build.
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # The non-gated suite. ROM-backed and network tests are `#[ignore]` (they
+      # need SPECTRUM_ROM / the network), so they're skipped here by design.
+      - name: test
+        run: cargo test --workspace

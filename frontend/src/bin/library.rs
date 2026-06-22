@@ -61,7 +61,13 @@ fn main() {
                     spec.run_frame();
                 }
                 let fill = fill_percent(&spec.screen_indexed());
-                let verdict = if fill >= 1 { "OK" } else { "BLANK?" };
+                let verdict = if fill >= 1 {
+                    "OK"
+                } else if model_128k(&game.format, &game.data) {
+                    "128K title — needs the 128K model (unsupported)"
+                } else {
+                    "BLANK?"
+                };
                 if fill >= 1 {
                     ok += 1;
                 }
@@ -81,6 +87,32 @@ fn main() {
         }
     }
     println!("\n{ok}/{} produced a non-blank screen", titles.len());
+}
+
+/// Heuristic: does this image require the 128K model (not yet emulated, so it
+/// boots into 48K and renders blank)? A `.z80` v2/v3 carries a hardware byte; a
+/// 128K `.sna` is larger than the fixed 48K size. `.tap`/`.tzx` don't encode it.
+fn model_128k(fmt: &str, data: &[u8]) -> bool {
+    match fmt {
+        "z80" => z80_is_128k(data),
+        "sna" => data.len() > 49179, // a 48K .sna is exactly 49179 bytes
+        _ => false,
+    }
+}
+
+fn z80_is_128k(d: &[u8]) -> bool {
+    if d.len() < 35 {
+        return false;
+    }
+    let ext_len = u16::from_le_bytes([d[30], d[31]]);
+    if ext_len == 0 {
+        return false; // v1 header — always 48K
+    }
+    let hw = d[34];
+    match ext_len {
+        23 => hw >= 3, // v2: 3 = 128K, 4 = 128K+IF1
+        _ => hw >= 4,  // v3: 4 = 128K, 5 = 128K+IF1, 6 = 128K+MGT, …
+    }
 }
 
 /// Load a game by format (`.tap` boots + trap-loads; `.tzx` loads real-time via
@@ -122,5 +154,27 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..n - 1])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::z80_is_128k;
+
+    fn z80(ext_len: u16, hw: u8) -> Vec<u8> {
+        let mut d = vec![0u8; 40];
+        d[30..32].copy_from_slice(&ext_len.to_le_bytes());
+        d[34] = hw;
+        d
+    }
+
+    #[test]
+    fn detects_128k_z80() {
+        assert!(!z80_is_128k(&z80(0, 9))); // v1 header → always 48K
+        assert!(!z80_is_128k(&z80(23, 0))); // v2, 48K
+        assert!(z80_is_128k(&z80(23, 3))); // v2, 128K
+        assert!(!z80_is_128k(&z80(54, 0))); // v3, 48K
+        assert!(z80_is_128k(&z80(54, 4))); // v3, 128K
+        assert!(!z80_is_128k(&[0u8; 10])); // too short
     }
 }
