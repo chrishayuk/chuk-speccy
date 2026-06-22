@@ -52,9 +52,11 @@ theme is a thin consumer of those; adding one is zero core change.
   suite (golden per family, all-opcode/all-prefix fuzz, CPU length cross-check).
 - `spectrum`: unit tests for contention, beeper, `.sna` round-trip, `.tap` trap,
   recording, the real-time tape engine (TAP/TZX pulse encodings + EAR state),
-  `disassemble`, and the host-trap ABI (`FnTable` mul16, math, unknown-id carry,
-  NOP-without-host); ROM-backed: `boots_to_copyright`, `types_basic_and_evaluates`,
-  `title_music_makes_sound`, `tap_loads_and_autoruns_basic`, `chat_terminal_round_trip`.
+  `disassemble`, the host-trap ABI (`FnTable` mul16, math, unknown-id carry,
+  NOP-without-host), and `deserialize_full` garbage-rejection; ROM-backed:
+  `boots_to_copyright`, `types_basic_and_evaluates`, `title_music_makes_sound`,
+  `tap_loads_and_autoruns_basic`, `chat_terminal_round_trip`, and
+  `serialize_full_is_bit_exact` (restored machine evolves identically for 300 frames).
 - `display`: theme/effect/border. `wos`: matching/encoding + a network fetch (ignored).
 - `speccy-sdk`: screen-interleave + tile/attr + input-edge units; ROM-backed Snake
   render + 600-frame long-run.
@@ -93,7 +95,14 @@ restructured into the agent/admin two-endpoint model — see **A2**.
   `disassemble` tool (agent + admin). Tested by golden + all-opcode fuzz + a CPU
   length cross-check.
 - [ ] `trace` / breakpoints (`StopReason::Breakpoint` already exists in the core).
-- [ ] Decision to lock: native `serialize_full()`/`deserialize_full()` for exact RL/debugger reset fidelity (vs lossy `.sna`/`.z80`). See [MCP spec §10](./02-mcp-server-layer-spec.md#10-open-decision-pyo3-boundary).
+- [x] **Bit-exact `serialize_full()`/`deserialize_full()`** (was the open decision in
+  [MCP spec §10](./02-mcp-server-layer-spec.md#10-open-decision-pyo3-boundary)) —
+  captures *everything* that affects execution (CPU incl. `wz`/`q`/`q_prev`/`iff`/
+  `im`/`ei_pending`/`halted`, full 48K RAM, ULA frame phase + border + beeper/audio
+  carry, keyboard matrix + EAR); ROM and the contention table are constants, host/
+  recording are runtime. ROM-gated test proves a restored machine evolves
+  **bit-for-bit identically for 300 frames**. This is the precondition for the RL
+  env (E): reset is now a non-source-of-variance. (Next: surface it through PyO3/MCP.)
 
 ### A2. Roles & autonomy (spec 06) — **built** (on `chuk-mcp-server`)
 Rebuilt the MCP layer on `chuk-mcp-server` (pydantic-native): **two endpoints**
@@ -229,7 +238,12 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
 - [ ] Web / streamed head (WebSocket framebuffer) for shared/agent sessions.
 
 ### E. RL environment (specs 02 §8 / 03 §7)
-- [ ] `chuk-rl-env` `SpectrumEnv` re-skin: snapshot = reset, `run_frames` = step, `read_memory`/screen = obs/reward, `save_snapshot` tree = MCTS rollouts.
+Now standing on **bit-exact reset** (`serialize_full`, above) — the precondition the
+whole multi-rate measurement rests on (reset injects no variance into the result).
+- [ ] `chuk-rl-env` `SpectrumEnv` re-skin: `deserialize_full` = reset, `run_frames` =
+  step, `read_memory`/screen = obs/reward, the `serialize_full` snapshot tree = MCTS
+  rollouts. Surface `serialize_full`/`deserialize_full` through PyO3 + the MCP admin
+  surface first.
 
 ---
 

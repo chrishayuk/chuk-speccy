@@ -233,14 +233,19 @@ program headlessly, every tool above is a thin wrapper. Suggested insertion:
 
 ---
 
-## 10. Open decision (PyO3 boundary)
+## 10. Resolved: bit-exact full-state snapshots
 
-One thing worth deciding before pinning the boundary: should
-`save_snapshot`/`load_snapshot` round-trip the **full** machine state (T-state
-position within the frame, ULA flash counter, contention phase) rather than just
-the `.z80` format's register+RAM? For a debugger and for RL reset-fidelity you
-want the complete internal state, not the lossy on-disk format.
+Decided and **built** (`spectrum::Spectrum::serialize_full`/`deserialize_full`):
+a native pair alongside the `.sna`/`.z80` loaders that round-trips the **full**
+machine state — every CPU register including MEMPTR/`wz`, the `q`/`q_prev` latch,
+`iff1`/`iff2`, `im`, `halted`, `ei_pending`; the full 48K RAM; the ULA frame phase
+(`tstate`/`frame`), border, beeper level + audio carry; and the keyboard matrix +
+EAR bit. ROM and the contention table are constants (rebuilt by `new_48k`); the
+host-trap dispatcher and recording buffers are runtime concerns, so neither is
+stored. A ROM-gated test (`serialize_full_is_bit_exact`) confirms a restored
+machine evolves **bit-for-bit identically for 300 frames**.
 
-Recommendation: add a native `serialize_full()`/`deserialize_full()` pair
-alongside the `.sna`/`.z80` loaders. Cheap to do, and it's what makes a snapshot a
-true timeline branch rather than an approximate one.
+This is what makes a snapshot a true timeline branch rather than an approximate
+one — the precondition for RL reset-fidelity and the snapshot-tree-as-MCTS story.
+Remaining: surface the pair through the PyO3 boundary and the admin MCP surface
+(thin wrappers over the native methods).

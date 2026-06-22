@@ -110,3 +110,16 @@ specs indexed in **[docs/](./docs/README.md)**.
 cargo test --workspace            # Rust core + heads
 cargo test -p wos -- --ignored    # network-gated World of Spectrum fetch
 ```
+
+## License
+
+Dual-licensed under either [MIT](./LICENSE-MIT) or [Apache-2.0](./LICENSE-APACHE),
+at your option.
+
+## A note on ROMs and games
+
+The 48K **system ROM is not included** — you supply your own (`testroms/48.rom`,
+gitignored). The optional World-of-Spectrum fetcher downloads game binaries by
+title for **personal and research use**; those games remain the property of their
+respective rights holders. This project ships no game binaries and takes no
+position on the copyright status of anything you choose to load into it.

@@ -70,6 +70,21 @@ pub struct Keyboard {
 }
 
 impl Keyboard {
+    /// Append the matrix + EAR bit to a full-state blob.
+    pub(crate) fn save(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.rows);
+        out.push(self.ear as u8);
+    }
+    /// Restore the matrix + EAR bit from a blob cursor.
+    pub(crate) fn load(&mut self, c: &mut crate::serialize::Cur) {
+        for r in &mut self.rows {
+            *r = c.u8();
+        }
+        self.ear = c.bool();
+    }
+}
+
+impl Keyboard {
     pub fn new() -> Self {
         // All keys released => low 5 bits high.
         Self {
