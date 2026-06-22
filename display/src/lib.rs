@@ -4,6 +4,8 @@
 //! reuses. Standalone — depends on neither `z80` nor `spectrum`. A new theme is a
 //! row in a table; a new effect is a stage in the chain; the core never changes.
 
+pub mod gif;
+
 /// The 16 logical Spectrum colours (0–7 normal, 8–15 bright) as authentic RGB.
 /// Bright-off primaries use 0xD7; bright-on use 0xFF; black is black either way.
 pub const AUTHENTIC: [[u8; 3]; 16] = [

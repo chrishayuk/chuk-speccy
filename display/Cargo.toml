@@ -7,3 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
+
+[dependencies]
+# Animated-GIF encoding for indexed framebuffers (pure Rust, no system deps).
+gif = "0.13"

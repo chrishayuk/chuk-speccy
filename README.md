@@ -10,6 +10,12 @@ lab*. The core is a pure, deterministic, headless `Machine`; everything else is 
 thin consumer of it (`frontend → spectrum → z80`; the `z80` crate never knows what
 a Spectrum is).
 
+![Snake, written in the rustz80 dialect, compiled to Z80 and running on the emulator](docs/assets/demo.gif)
+
+*Snake — written in restricted Rust, compiled to Z80 by [`rustz80`](./rustz80/README.md),
+booting on the emulator. The GIF was rendered headless by `speccy-gif` (no capture
+tool): `speccy-compile snake.rs → speccy-gif → demo.gif`.*
+
 ## Three things you can do
 
 **1 — Play Spectrum games.** Pixel-perfect + sound, fetched live from World of
