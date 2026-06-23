@@ -1,0 +1,274 @@
+//! Agent environments over the deterministic core (`docs/08-speccy-kit-authoring-plane-spec.md`).
+//!
+//! This is the **env side of the bridge** (spec 08 §2–§3). The compiler emits a
+//! symbol map (`.sym.toml`) describing where each game-state field lives in RAM.
+//! Here we read those fields off a *running `.tap`* into a [`StateView`],
+//! reconstruct a host `Self` from it ([`FromState`]), and run the **same**
+//! host-compiled `reward`/`done`/`observe` ([`speccy_sdk::Game`]) over it — so the
+//! environment "falls out of the types" even though the types don't exist on real
+//! hardware. Reset is bit-exact (`serialize_full`/`deserialize_full`), so episodes
+//! are reproducible.
+//!
+//! ```ignore
+//! let (tap, map) = rustz80::compile_game_with_symbols(src, "GAME")?;
+//! let map = speccy_env::SymbolMap::from_toml(&map.to_toml())?;
+//! let mut env = speccy_env::SpectrumEnv::new(&rom, &tap, map, 450);
+//! let step = env.step_game::<MyGame>(&['o'], 4);   // hold O for 4 frames
+//! // step.reward / step.done / step.obs — computed host-side from tape RAM
+//! ```
+
+use spectrum::keyboard::{self, KeyPos};
+use spectrum::Spectrum;
+
+pub use speccy_sdk::Obs;
+
+/// One field's RAM location, mirroring the compiler's `.sym.toml` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Field {
+    pub name: String,
+    pub addr: u16,
+    pub width: u8,
+    pub ty: String,
+}
+
+/// The game-state layout read from a `.sym.toml` sidecar — the env's view of where
+/// the typed fields live (spec 08 §2). Parsed, never hand-written.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SymbolMap {
+    pub base: u16,
+    pub size: u16,
+    pub fields: Vec<Field>,
+}
+
+fn parse_int(s: &str) -> Result<u16, String> {
+    let s = s.trim();
+    let v = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u16::from_str_radix(hex, 16)
+    } else {
+        s.parse::<u16>()
+    };
+    v.map_err(|_| format!("bad integer {s:?}"))
+}
+
+impl SymbolMap {
+    /// Parse a `.sym.toml` sidecar (the artifact `rustz80` emits next to the tape).
+    /// Deliberately tolerant of our own fixed format rather than a full TOML parser.
+    pub fn from_toml(src: &str) -> Result<SymbolMap, String> {
+        let mut map = SymbolMap::default();
+        let mut section = "";
+        for line in src.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some(name) = line.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+                section = match name {
+                    "state" => "state",
+                    "fields" => "fields",
+                    _ => "",
+                };
+                continue;
+            }
+            match section {
+                "state" => {
+                    if let Some(v) = kv(line, "base") {
+                        map.base = parse_int(v)?;
+                    } else if let Some(v) = kv(line, "size") {
+                        map.size = parse_int(v)?;
+                    }
+                }
+                "fields" => map.fields.push(parse_field(line)?),
+                _ => {}
+            }
+        }
+        Ok(map)
+    }
+
+    /// Address of a named field, if present.
+    pub fn addr_of(&self, name: &str) -> Option<u16> {
+        self.fields.iter().find(|f| f.name == name).map(|f| f.addr)
+    }
+}
+
+/// Split a `key = value` line; returns the value if the key matches.
+fn kv<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let (k, v) = line.split_once('=')?;
+    (k.trim() == key).then(|| v.trim())
+}
+
+/// Parse `"name" = { addr = 0x.., width = N, ty = ".." }`.
+fn parse_field(line: &str) -> Result<Field, String> {
+    let name = line.split('"').nth(1).ok_or_else(|| format!("no field name in {line:?}"))?.to_string();
+    let inner = line
+        .split_once('{')
+        .and_then(|(_, r)| r.split_once('}'))
+        .map(|(b, _)| b)
+        .ok_or_else(|| format!("no {{ }} body in {line:?}"))?;
+    let (mut addr, mut width, mut ty) = (0u16, 2u8, "u16".to_string());
+    for part in inner.split(',') {
+        if let Some((k, v)) = part.split_once('=') {
+            match k.trim() {
+                "addr" => addr = parse_int(v)?,
+                "width" => width = parse_int(v)? as u8,
+                "ty" => ty = v.trim().trim_matches('"').to_string(),
+                _ => {}
+            }
+        }
+    }
+    Ok(Field { name, addr, width, ty })
+}
+
+/// A snapshot of the game's typed fields, read from RAM via the [`SymbolMap`].
+/// The full layout is always present (spec 08 §2), so any `Self` can be rebuilt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateView {
+    values: Vec<(String, u16)>,
+}
+
+impl StateView {
+    /// Read a field as `u16` (little-endian); `0` if the field is unknown.
+    pub fn u16(&self, name: &str) -> u16 {
+        self.values.iter().find(|(n, _)| n == name).map(|(_, v)| *v).unwrap_or(0)
+    }
+    /// Read a field as `u8` (the low byte of its slot).
+    pub fn u8(&self, name: &str) -> u8 {
+        self.u16(name) as u8
+    }
+    /// Read a field as `bool` (non-zero).
+    pub fn bool(&self, name: &str) -> bool {
+        self.u16(name) != 0
+    }
+}
+
+/// Reconstruct a host game value from a [`StateView`] read off tape RAM — the
+/// other half of the dial's bridge. Implement it next to your `Game` so the env
+/// can run the *same* host `reward`/`done`/`observe` over a running pure tape.
+pub trait FromState {
+    fn from_state(s: &StateView) -> Self;
+}
+
+/// The transition returned by [`SpectrumEnv::step_game`].
+#[derive(Debug, Clone)]
+pub struct Transition {
+    pub obs: Obs,
+    pub reward: i16,
+    pub done: bool,
+}
+
+/// A Gym-style environment wrapping a running `.tap` on the deterministic core.
+/// `reset` is bit-exact (a post-warmup `serialize_full` snapshot), so episodes
+/// reproduce; `step` presses keys + advances frames; reward/done/observe are read
+/// off RAM via the symbol map and computed host-side.
+pub struct SpectrumEnv {
+    spec: Spectrum,
+    map: SymbolMap,
+    snapshot: Vec<u8>,
+}
+
+impl SpectrumEnv {
+    /// Boot the ROM, load `tap`, warm up `warmup` frames past the tape load into
+    /// the game loop, then snapshot that point as the reset state.
+    pub fn new(rom: &[u8], tap: &[u8], map: SymbolMap, warmup: usize) -> Self {
+        let mut spec = Spectrum::new_48k(rom);
+        for _ in 0..250 {
+            spec.run_frame(); // boot to the K cursor
+        }
+        let _ = spec.load_tap(tap);
+        spec.autoload_tape();
+        for _ in 0..warmup {
+            spec.run_frame(); // load + auto-run into the frame loop
+        }
+        let snapshot = spec.serialize_full();
+        SpectrumEnv { spec, map, snapshot }
+    }
+
+    /// Reset to the warmup snapshot — bit-exact, so the next episode is identical
+    /// given the same actions.
+    pub fn reset(&mut self) {
+        self.spec.deserialize_full(&self.snapshot).expect("own snapshot deserializes");
+    }
+
+    /// The current typed state, read off RAM via the symbol map.
+    pub fn view(&self) -> StateView {
+        let values = self
+            .map
+            .fields
+            .iter()
+            .map(|f| {
+                let bytes = self.spec.read_memory(f.addr, f.width.max(1) as u16);
+                let v = bytes.first().copied().unwrap_or(0) as u16
+                    | (*bytes.get(1).unwrap_or(&0) as u16) << 8;
+                (f.name.clone(), if f.width <= 1 { v & 0xFF } else { v })
+            })
+            .collect();
+        StateView { values }
+    }
+
+    /// Reconstruct a host game value from the current RAM state.
+    pub fn reconstruct<G: FromState>(&self) -> G {
+        G::from_state(&self.view())
+    }
+
+    /// The indexed (palette-index) framebuffer — the pixel observation.
+    pub fn frame_indexed(&self) -> Vec<u8> {
+        self.spec.screen_indexed()
+    }
+
+    /// Hold `keys` (by character) down for `frames` frames, then release.
+    pub fn hold(&mut self, keys: &[char], frames: usize) {
+        let positions: Vec<KeyPos> =
+            keys.iter().filter_map(|&c| keyboard::key_for_char(c).map(|(p, _, _)| p)).collect();
+        for &p in &positions {
+            self.spec.set_key(p, true);
+        }
+        for _ in 0..frames {
+            self.spec.run_frame();
+        }
+        for &p in &positions {
+            self.spec.set_key(p, false);
+        }
+    }
+
+    /// One agent step: reconstruct `prev`, hold `keys` for `frames`, reconstruct
+    /// `cur`, then evaluate the host game's `observe`/`reward`/`done` over the live
+    /// tape state (spec 08 §3 — the same code that runs in the host build).
+    pub fn step_game<G: speccy_sdk::Game + FromState>(
+        &mut self,
+        keys: &[char],
+        frames: usize,
+    ) -> Transition {
+        let prev: G = self.reconstruct();
+        self.hold(keys, frames);
+        let cur: G = self.reconstruct();
+        Transition { obs: cur.observe(), reward: cur.reward(&prev), done: cur.done() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"
+# emitted by rustz80
+[state]
+base = 0xB000
+size = 4
+
+[fields]
+"score" = { addr = 0xB000, width = 2, ty = "u16" }
+"started" = { addr = 0xB002, width = 1, ty = "u8" }
+"#;
+
+    #[test]
+    fn parses_sym_toml() {
+        let m = SymbolMap::from_toml(SAMPLE).expect("parse");
+        assert_eq!(m.base, 0xB000);
+        assert_eq!(m.size, 4);
+        assert_eq!(m.fields.len(), 2);
+        assert_eq!(m.addr_of("score"), Some(0xB000));
+        assert_eq!(m.addr_of("started"), Some(0xB002));
+        assert_eq!(m.fields[1].width, 1);
+        assert_eq!(m.fields[0].ty, "u16");
+        assert_eq!(m.addr_of("nope"), None);
+    }
+}
