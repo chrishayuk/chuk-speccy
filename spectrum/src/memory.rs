@@ -48,10 +48,4 @@ impl Memory {
     pub fn ram(&self) -> &[u8] {
         &self.ram
     }
-
-    /// Mutable RAM access, for snapshot loaders.
-    #[inline]
-    pub fn ram_mut(&mut self) -> &mut [u8] {
-        &mut self.ram
-    }
 }

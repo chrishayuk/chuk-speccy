@@ -406,16 +406,15 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
   belongs near `spectrum`. *(Deferred.)*
 
 ### H4. Core layering hygiene (`z80`/`spectrum`)
-- [ ] `StopReason` lives in `z80` but is a run-loop concept it never produces → move to
-  `spectrum`.
-- [ ] App/SDK artifacts in the core: `sdk.rs`'s hand-assembled `CHAT_TERMINAL` + the chat
+- [x] `StopReason` moved from `z80` (a run-loop concept it never produces) to `spectrum`.
+- [x] Tightened `z80` module visibility (`alu`/`decode`/`flags` → `pub(crate)`); dropped
+  dead `Memory::ram_mut`; `tape_trap` uses `wrapping_sub`; fixed the duplicated
+  `screen_indexed` doc.
+- [ ] App/SDK artifacts in the core: `sdk.rs`'s `CHAT_TERMINAL` + the chat
   dispatcher/`ChatState` in `host.rs` → move to the SDK/app layer; keep only the generic
-  trap machinery (`HostCalls`/`FnTable`/`HostCtx`/`math_traps`).
-- [ ] Tighten `z80` module visibility (`alu`/`decode` → `pub(crate)`); drop dead
-  `Memory::ram_mut`.
-- [ ] Harden: `Cur::take` bounds, `tape_trap` `wrapping_sub`, factor the thrice-repeated
-  `.tap` block-framing parser, fix the duplicated `screen_indexed` doc.
-- [ ] Tests: the `.z80` v2/v3 page loader + RLE `decompress_z80` are untested.
+  trap machinery. *(Deferred — larger.)*
+- [ ] `Cur::take` bounds-hardening; factor the thrice-repeated `.tap` block parser;
+  `.z80` v2/v3 page loader + RLE `decompress_z80` tests. *(Deferred.)*
 
 ### H5. `rustz80` code quality
 - [ ] Error UX (the "ergonomic rejection" feature, spec 08 §1.5): replace

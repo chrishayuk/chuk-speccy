@@ -18,7 +18,21 @@ use keyboard::{KeyPos, Keyboard};
 use memory::Memory;
 use tape::{Tape, TapeSignal};
 use ula::Ula;
-use z80::{Bus, Cpu, StopReason};
+use z80::{Bus, Cpu};
+
+/// Why a run loop stopped (the machine/run-loop concept; the CPU core stays
+/// agnostic). Mirrors the MCP layer's `StopReason` (`docs/02` §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopReason {
+    /// Ran the requested quantum (instruction/frame count) to completion.
+    Completed,
+    /// Hit a breakpoint at the given address.
+    Breakpoint(u16),
+    /// Executed HALT and is waiting for an interrupt.
+    Halt,
+    /// Exhausted a T-state budget.
+    Budget,
+}
 
 /// T-states in one 48K PAL frame (one `/INT` cycle).
 pub const TSTATES_PER_FRAME: u32 = 69888;
@@ -445,7 +459,7 @@ impl Spectrum {
             }
         }
         self.cpu.regs.ix = ix.wrapping_add(count as u16);
-        self.cpu.regs.set_de(de - count as u16);
+        self.cpu.regs.set_de(de.wrapping_sub(count as u16));
         // Success only if we satisfied the full requested length.
         self.tape_return(count == de as usize);
     }

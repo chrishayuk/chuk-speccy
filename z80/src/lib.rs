@@ -13,15 +13,15 @@
 // (all are `std`). The CPU and decoder themselves stay allocation-free.
 extern crate alloc;
 
-pub mod alu;
+pub(crate) mod alu;
 pub mod bus;
 pub mod cpu;
-pub mod decode;
+pub(crate) mod decode;
 pub mod disasm;
-pub mod flags;
+pub(crate) mod flags;
 
 pub use bus::Bus;
-pub use cpu::{Cpu, Index, Regs, StopReason};
+pub use cpu::{Cpu, Index, Regs};
 pub use disasm::{disassemble, Disasm};
 
 /// The reserved host-trap opcode: `ED FE` (`HOSTCALL`). Genuinely undefined on a
