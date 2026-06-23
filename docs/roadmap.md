@@ -424,11 +424,11 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
 - [ ] Split `lower.rs` (940 lines) into submodules; collapse the read/store + block
   duplicate pairs.
 
-### H6. `speccy-env`
-- [ ] `StateView::u16` silently returns 0 for unknown fields (against spec 08 §2's own
-  thesis) → `Option`/assert. `view()` ignores `count` so **array fields aren't
-  reconstructed** — add typed array reconstruction. Replace the fragile hand-rolled TOML
-  parser when `SymbolMap` is unified (H1).
+### H6. `speccy-env` — **done**
+- [x] `StateView::u16` now **panics** on an unknown field (a `FromState` typo —
+  spec 08 §2's "silent missing field is the worst bug"); `try_u16` is the lenient
+  variant. `view()` reconstructs **all `count` elements** of array fields; `array(name)`
+  reads them. (The TOML parser was unified into the SDK in H1.)
 
 ### H7. Python (`zxspec_py` / `chuk-mcp-spectrum`)
 - [ ] **Supervisor concurrency**: viewer + agent + admin share a non-thread-safe
