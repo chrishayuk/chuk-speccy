@@ -218,6 +218,16 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   compiles **both** under rustc (a `speccy-sdk` `Game`) and rustz80 (a bootable tape);
   the dial test (`tests/dial.rs`) compiles it both ways and boots it on the real ROM.
   Also: `inport` intrinsic, explicit enum discriminants, `bool` literals, bool-expression conditions, `use` skipped. `samples/move.rs` is playable (keys move a blob). (Recursion needs stack frames — Stage 4.)
+- [x] **Stage 3c (bounded control flow)** — `for` over integer ranges (`a..b` / `a..=b`,
+  `for _ in`, variable bounds evaluated once), `loop`, `break`, `continue`, and early
+  `return`. Lowering desugars `for` to a counted loop whose induction step *is* the
+  `continue` target (so `continue` advances, not spins); codegen gains a loop-label
+  stack (`break`→exit, `continue`→step/cond) and a per-function epilogue label for
+  `return`. `break`/`continue` outside a loop, `break <value>`, and labels are clean
+  rejections. Differential-tested (`for`/inclusive/nested/array-index, `loop`+`break`,
+  `while`/`for`+`continue`, `loop`+`return` rejection-sampling). The dialect
+  `samples/snake.rs` is rewritten on `for`/`loop` and still boots + animates on the
+  real ROM. (Closes the `loop`/`for` blocker for the pure-Snake seam.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -259,9 +269,9 @@ dial is never multiplied before it's watched close:
   the subset-clean primitives **`Entities<T, N>`** (fixed-cap vec) and **`Rng`**
   (state-seeded, deterministic), the **demo Snake is off `Vec`/`format!`** (uses
   `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
-  Snake that compiles **pure** as one source — blocked on `rustz80` features
-  (generics for `Entities`, **array struct fields**, tuples, `loop`); `Fx8_8` lands
-  with the kit, not here.
+  Snake that compiles **pure** as one source — blocked on the remaining `rustz80`
+  features (**generics** for `Entities`, **tuples**; array struct fields ✓, `for`/`loop`
+  ✓); `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;

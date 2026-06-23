@@ -97,6 +97,27 @@ pub enum Stmt {
     If(Cond, Vec<Stmt>, Vec<Stmt>),
     /// `while cond { body }`.
     While(Cond, Vec<Stmt>),
+    /// `loop { body }` — an unconditional loop, exited via [`Stmt::Break`] or
+    /// [`Stmt::Return`].
+    Loop(Vec<Stmt>),
+    /// `for var in start..end { body }`. The loop variable's slot is initialised to
+    /// `start` *before* this node; `end` is the bound, pre-evaluated into a temp slot
+    /// (Rust evaluates a range bound once) and compared each iteration. `inclusive`
+    /// selects `<=` over `<`. The induction step (`var += 1`, masked to `width`) runs
+    /// at the `continue` target, after the body.
+    ForRange {
+        var: usize,
+        end: Expr,
+        inclusive: bool,
+        width: Width,
+        body: Vec<Stmt>,
+    },
+    /// `break` — jump past the innermost enclosing loop.
+    Break,
+    /// `continue` — jump to the innermost enclosing loop's step/condition.
+    Continue,
+    /// `return` — leave the optional value in `HL` and jump to the function epilogue.
+    Return(Option<Expr>),
 }
 
 /// A lowered function. Parameters occupy local slots `0..params` (loaded from

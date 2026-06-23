@@ -56,6 +56,12 @@ struct Asm {
     /// locals occupy a disjoint scratch region (correct for non-recursive calls;
     /// real stack frames are a later stage).
     base: u16,
+    /// Enclosing loops as `(continue target, break target)` labels — the innermost
+    /// is last. `continue`/`break` jump to the top entry's targets.
+    loop_stack: Vec<(usize, usize)>,
+    /// The current function's epilogue label — `return` jumps here (the value is
+    /// already in `HL`).
+    func_end: Option<usize>,
 }
 
 impl Asm {
@@ -70,6 +76,8 @@ impl Asm {
             needs_mul: false,
             needs_div: false,
             base: 0,
+            loop_stack: Vec::new(),
+            func_end: None,
         }
     }
     fn here(&self) -> u16 {
@@ -244,12 +252,18 @@ fn emit_func(a: &mut Asm, f: &Func) {
             _ => unreachable!(),
         }
     }
+    // The epilogue label — `return` jumps here. The body and tail fall through to
+    // it; an early `return` skips the tail (its value is already in `HL`).
+    let end = a.label();
+    a.func_end = Some(end);
     for s in &f.body {
         gen_stmt(a, s);
     }
     if let Some(e) = &f.ret {
         gen_expr(a, e);
     }
+    a.place(end);
+    a.func_end = None;
     a.byte(0xC9); // RET
 }
 
@@ -507,11 +521,82 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             let end = a.label();
             a.place(top);
             gen_cond_skip(a, cond, end);
+            // `continue` re-checks the condition (top); `break` exits (end).
+            a.loop_stack.push((top, end));
             for s in body {
                 gen_stmt(a, s);
             }
+            a.loop_stack.pop();
             a.jump(0xC3, top);
             a.place(end);
+        }
+        Stmt::Loop(body) => {
+            let top = a.label();
+            let end = a.label();
+            a.place(top);
+            a.loop_stack.push((top, end)); // continue -> top, break -> end
+            for s in body {
+                gen_stmt(a, s);
+            }
+            a.loop_stack.pop();
+            a.jump(0xC3, top);
+            a.place(end);
+        }
+        Stmt::ForRange {
+            var,
+            end,
+            inclusive,
+            width,
+            body,
+        } => {
+            let top = a.label();
+            let cont = a.label();
+            let brk = a.label();
+            a.place(top);
+            // Skip to `brk` once the bound is reached (`var < end`, or `<=`).
+            let cond = Cond {
+                cmp: if *inclusive { Cmp::Le } else { Cmp::Lt },
+                lhs: Expr::Var(*var),
+                rhs: end.clone(),
+            };
+            gen_cond_skip(a, &cond, brk);
+            // `continue` lands on the step (`cont`); `break` exits (`brk`).
+            a.loop_stack.push((cont, brk));
+            for s in body {
+                gen_stmt(a, s);
+            }
+            a.loop_stack.pop();
+            a.place(cont);
+            // Induction step: `var = var + 1` (masked to the loop var's width).
+            gen_stmt(
+                a,
+                &Stmt::Assign(
+                    *var,
+                    Expr::Bin(
+                        BinOp::Add,
+                        Box::new(Expr::Var(*var)),
+                        Box::new(Expr::Lit(1)),
+                        *width,
+                    ),
+                ),
+            );
+            a.jump(0xC3, top);
+            a.place(brk);
+        }
+        Stmt::Break => {
+            let (_, brk) = *a.loop_stack.last().expect("`break` outside a loop");
+            a.jump(0xC3, brk);
+        }
+        Stmt::Continue => {
+            let (cont, _) = *a.loop_stack.last().expect("`continue` outside a loop");
+            a.jump(0xC3, cont);
+        }
+        Stmt::Return(val) => {
+            if let Some(e) = val {
+                gen_expr(a, e); // result in HL
+            }
+            let end = a.func_end.expect("`return` outside a function");
+            a.jump(0xC3, end);
         }
     }
 }

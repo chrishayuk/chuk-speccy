@@ -5,7 +5,8 @@
 //     cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 //
 // The snake (8 chunky 8x8 segments) crawls around the screen, turning every few
-// steps. Tune `while s < 500` for length of play and `while d < 5000` for speed.
+// steps. Tune `while s < 600` for length of play and the `delay()` bound for speed.
+// Shows the dialect's bounded control flow: `for` range loops and `loop`/`break`.
 
 fn addr_of(x: u16, y: u16) -> u16 {
     16384u16
@@ -19,19 +20,14 @@ fn addr_of(x: u16, y: u16) -> u16 {
 fn fill_cell(cx: u16, cy: u16, v: u16) {
     let x = cx * 8u16;
     let y = cy * 8u16;
-    let mut r = 0u16;
-    while r < 8u16 {
+    for r in 0u16..8u16 {
         poke(addr_of(x, y + r), v as u8);
-        r = r + 1u16;
     }
 }
 
 // A busy-wait so the animation is watchable rather than instant.
 fn delay() {
-    let mut d = 0u16;
-    while d < 4000u16 {
-        d = d + 1u16;
-    }
+    for _ in 0u16..4000u16 {}
 }
 
 fn main() {
@@ -51,17 +47,18 @@ fn main() {
     let mut by = [0u16; 8];
 
     // Initial body: a horizontal run, head at cell (8, 12).
-    let mut i = 0u16;
-    while i < 8u16 {
+    for i in 0u16..8u16 {
         bx[i as usize] = 8u16 - i;
         by[i as usize] = 12u16;
         fill_cell(bx[i as usize], by[i as usize], 255u16);
-        i = i + 1u16;
     }
 
     let mut dir = 0u16; // 0=right 1=down 2=left 3=up
     let mut s = 0u16;
-    while s < 600u16 {
+    loop {
+        if s >= 600u16 {
+            break;
+        }
         // Turn clockwise every 7 steps → the snake traces boxes.
         if (s % 7u16) == 6u16 {
             dir = (dir + 1u16) % 4u16;

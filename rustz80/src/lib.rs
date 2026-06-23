@@ -2,11 +2,11 @@
 //! ([spec 07](../docs/07-rust-z80-compiler-spec.md)).
 //!
 //! Parse a Rust source with [`syn`], lower a bounded subset to a tiny typed IR, and
-//! emit Z80 machine code — `u16`/`u8`, arithmetic, `if`/`while`, comparisons,
-//! arrays, `struct`/`enum`, functions, methods, and `poke`/`peek`/`inport`
-//! intrinsics. The accepted subset is *also real Rust*, so the same source runs
-//! under rustc and compiles here, checked against each other by differential testing
-//! on the emulator (`tests/diff.rs`).
+//! emit Z80 machine code — `u16`/`u8`, arithmetic, `if`/`while`, `for` ranges,
+//! `loop`/`break`/`continue`, early `return`, comparisons, arrays, `struct`/`enum`,
+//! functions, methods, and `poke`/`peek`/`inport` intrinsics. The accepted subset is
+//! *also real Rust*, so the same source runs under rustc and compiles here, checked
+//! against each other by differential testing on the emulator (`tests/diff.rs`).
 //!
 //! This crate knows nothing about "games" or any particular SDK. Method calls on a
 //! *handle* parameter route to free prelude functions via a caller-supplied
