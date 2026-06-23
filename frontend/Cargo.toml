@@ -27,8 +27,9 @@ spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spe
 display = { package = "chuk-speccy-display", version = "0.1.0", path = "../display" }
 # World of Spectrum search + download, so a game can be named instead of a file.
 wos = { package = "chuk-speccy-wos", version = "0.1.0", path = "../wos" }
-# Native Rust game SDK (the `snake` demo mode).
+# Native Rust game SDK (the library) + the demo games that run on it.
 speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }
+speccy-games = { package = "chuk-speccy-games", version = "0.1.0", path = "../speccy-games" }
 # Native pixel-perfect window head (the desktop head from spec 05): winit window
 # + a CPU framebuffer (softbuffer), with native menus (muda) for a real app shell
 # — runtime fullscreen + audio-device switching, multi-display, macOS green button.

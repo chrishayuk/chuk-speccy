@@ -9,11 +9,16 @@ This is the *hybrid* end of the fidelity dial (spec 03): full host power, instan
 iteration. For a **pure** build that runs on real hardware with no host, write the
 same kind of game in the [`rustz80`](../rustz80/README.md) dialect instead.
 
-## Run the demo
+## Run the demos
+
+The demo games live in [`chuk-speccy-games`](../speccy-games) (content built *on*
+this library, not part of it). Run any by name in the native window:
 
 ```bash
-# Snake, the canonical demo (~70 lines of Game), in the native window:
-cargo run --release --bin speccy-gui -- testroms/48.rom snake
+cargo run --release --bin speccy-gui -- testroms/48.rom snake     # a grid Snake
+cargo run --release --bin speccy-gui -- testroms/48.rom keytest   # input visualiser
+cargo run --release --bin speccy-gui -- testroms/48.rom typing    # font / typing test
+cargo run --release --bin speccy-gui -- testroms/48.rom mover     # move a blob (WASD — remapped controls)
 ```
 
 ## Write one
@@ -80,5 +85,6 @@ runs once per frame and its drawing lands in the machine's display. See
 
 ## Tests
 
-`cargo test -p speccy-sdk` covers the screen interleave, tiles/attrs, and input
-edges; a ROM-backed test (`SPECTRUM_ROM=…`) renders and long-runs the demo Snake.
+`cargo test -p chuk-speccy-sdk` covers the screen interleave, tiles/attrs, input
+edges, `Rng`, and `Entities`. The demo games + their ROM-backed render test live in
+[`chuk-speccy-games`](../speccy-games) (`cargo test -p chuk-speccy-games -- --ignored`).

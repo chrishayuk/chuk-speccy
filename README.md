@@ -134,7 +134,8 @@ Any dialect `.rs` with a no-arg `fn main()` compiles the same way (the autoloade
 | [`display`](./display) | Theme + effect pipeline (palette remap / duotone ramp / scanlines). One `DisplayConfig`, every head. |
 | [`frontend`](./frontend) | `speccy` (TUI), `speccy-gui` (native window), `speccy-library` (headless check). |
 | [`wos`](./wos) | World of Spectrum search + download (ZXInfo API), shared by the CLI and MCP. |
-| [`speccy-sdk`](./speccy-sdk) | Native Rust game SDK — write `Game::update`, run on the substrate over the trap ABI (Snake demo). |
+| [`speccy-sdk`](./speccy-sdk) | Native Rust game SDK **(the library)**: `Game`, `Frame`, `Controls`, `Rng`, `Entities` — write `Game::update`, run on the substrate over the trap ABI. |
+| [`speccy-games`](./speccy-games) | Demo games built **on** the SDK (`snake` / `keytest` / `typing` / `mover`) + a name→installer registry. Content, not library. |
 | [`rustz80`](./rustz80) | Restricted Rust → Z80 compiler (`syn` frontend, own IR/codegen, mul/div micro-runtime) + `speccy-compile` (`.rs` → bootable `.tap` + `.sym.toml` symbol map). |
 | [`speccy-env`](./speccy-env) | Agent environments: read typed game state off a running `.tap` via the symbol map, run the host `Game`'s `reward`/`done`/`observe`; bit-exact `reset`. |
 | [`zxspec_py`](./zxspec_py) | PyO3 binding exposing the core to Python (maturin). |

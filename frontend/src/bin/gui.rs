@@ -17,7 +17,7 @@
 //!   audiodev=NAME: start with sound on the output whose name contains NAME.
 //!   audiolist: print the available output audio devices and exit.
 //!   chat: boot the Z80 chat terminal — type a line, ENTER, the host replies.
-//!   snake: a native Rust game (speccy-sdk) running on the substrate.
+//!   snake | keytest | typing | mover: native Rust demos (speccy-games) on the substrate.
 
 use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroU32;
@@ -61,7 +61,7 @@ fn main() {
     let mut init_scale: u32 = 3;
     let mut start_fullscreen = false;
     let mut chat_mode = false;
-    let mut snake_mode = false;
+    let mut demo_mode: Option<String> = None;
     let mut audio_device: Option<String> = None;
     let mut query_parts: Vec<String> = Vec::new();
     for a in args {
@@ -70,8 +70,8 @@ fn main() {
             return;
         } else if a == "chat" {
             chat_mode = true;
-        } else if a == "snake" {
-            snake_mode = true;
+        } else if speccy_games::is_demo(&a) {
+            demo_mode = Some(a);
         } else if let Some(name) = a.strip_prefix("audiodev=") {
             audio_device = Some(name.to_string());
         } else if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") {
@@ -108,15 +108,15 @@ fn main() {
         spec.write_memory(spectrum::sdk::CHAT_TERMINAL_ORG, &spectrum::sdk::CHAT_TERMINAL);
         spec.cpu.regs.pc = spectrum::sdk::CHAT_TERMINAL_ORG;
         eprintln!("chat mode: type a line and press ENTER (echo responder)");
-    } else if snake_mode {
-        // A native Rust game over the trap ABI (speccy-sdk): the Z80 is a frame
-        // pump; Snake's logic + rendering are host Rust.
+    } else if let Some(name) = demo_mode.as_deref() {
+        // A native Rust game/demo over the trap ABI (speccy-sdk): the Z80 is a frame
+        // pump; the demo's logic + rendering are host Rust.
         for _ in 0..250 {
             spec.run_frame();
         }
-        speccy_sdk::install(&mut spec, speccy_sdk::demo::Snake::new());
+        speccy_games::install(&mut spec, name); // registry picks the game + its controls
         speccy_sdk::load_runtime(&mut spec);
-        eprintln!("snake: steer with cursor keys / QAOP / 7568; FIRE (0/space) restarts");
+        eprintln!("{name}: native Rust demo (speccy-games) — close the window to quit");
     } else if let Some(p) = &media_path {
         let data = std::fs::read(p).unwrap_or_else(|e| {
             eprintln!("could not read {p}: {e}");

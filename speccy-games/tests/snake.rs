@@ -1,8 +1,8 @@
 //! End-to-end: boot Snake on a real Spectrum (runtime pump + GAME_TICK + the
 //! Frame rasteriser) and confirm it draws to the screen each frame.
-//! `SPECTRUM_ROM="$PWD/testroms/48.rom" cargo test -p speccy-sdk -- --ignored`
+//! `SPECTRUM_ROM="$PWD/testroms/48.rom" cargo test -p chuk-speccy-games -- --ignored`
 
-use speccy_sdk::demo::Snake;
+use speccy_games::Snake;
 
 #[test]
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
