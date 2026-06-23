@@ -27,10 +27,14 @@ fn emits_symbol_map_matching_layout() {
     let (tap, sym) = rustz80::compile_game_with_symbols(SEAM_GAME, "SEAM").expect("compile");
     assert!(!tap.is_empty(), "produced a tape");
 
-    assert_eq!(sym.base, rustz80::GAME_STATE, "state base is GAME_STATE");
+    assert_eq!(sym.base, 0xB000, "the compiler's documented state-base ABI");
     assert_eq!(sym.size, 4, "two u16 fields = 4 bytes");
-    assert_eq!(sym.addr_of("score"), Some(rustz80::GAME_STATE), "score is field 0");
-    assert_eq!(sym.addr_of("started"), Some(rustz80::GAME_STATE + 2), "started is field 1");
+    assert_eq!(sym.addr_of("score"), Some(sym.base), "score is field 0");
+    assert_eq!(
+        sym.addr_of("started"),
+        Some(sym.base + 2),
+        "started is field 1"
+    );
     assert_eq!(sym.addr_of("nope"), None);
 
     // The full layout is emitted (never a curated subset).
@@ -38,8 +42,11 @@ fn emits_symbol_map_matching_layout() {
 
     let toml = sym.to_toml();
     assert!(toml.contains("[state]") && toml.contains("[fields]"));
-    assert!(toml.contains(&format!("base = 0x{:04X}", rustz80::GAME_STATE)));
-    assert!(toml.contains(&format!("\"score\" = {{ addr = 0x{:04X}, width = 2, ty = \"u16\" }}", rustz80::GAME_STATE)));
+    assert!(toml.contains(&format!("base = 0x{:04X}", sym.base)));
+    assert!(toml.contains(&format!(
+        "\"score\" = {{ addr = 0x{:04X}, width = 2, count = 1, ty = \"u16\" }}",
+        sym.base
+    )));
 }
 
 /// The seam itself, end to end on the real ROM: compile the game, boot its tape,
@@ -75,6 +82,12 @@ fn score_round_trips_off_the_running_tape() {
     }
     let s2 = read_u16(&spec);
 
-    assert!(s1 > 0, "score should be advancing once the game is running (got {s1})");
-    assert!(s2 > s1, "score must keep climbing as the env reads it live ({s1} -> {s2})");
+    assert!(
+        s1 > 0,
+        "score should be advancing once the game is running (got {s1})"
+    );
+    assert!(
+        s2 > s1,
+        "score must keep climbing as the env reads it live ({s1} -> {s2})"
+    );
 }

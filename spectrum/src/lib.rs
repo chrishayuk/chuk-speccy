@@ -14,7 +14,7 @@ pub mod snapshot;
 pub mod tape;
 pub mod ula;
 
-use keyboard::{Keyboard, KeyPos};
+use keyboard::{KeyPos, Keyboard};
 use memory::Memory;
 use tape::{Tape, TapeSignal};
 use ula::Ula;
@@ -280,8 +280,14 @@ impl Spectrum {
         let mut pc = addr;
         for _ in 0..count {
             let d = z80::disassemble(pc, |a| self.board.mem.read(a));
-            let bytes = (0..d.len).map(|i| self.board.mem.read(pc.wrapping_add(i as u16))).collect();
-            out.push(DisasmLine { addr: pc, bytes, text: d.text });
+            let bytes = (0..d.len)
+                .map(|i| self.board.mem.read(pc.wrapping_add(i as u16)))
+                .collect();
+            out.push(DisasmLine {
+                addr: pc,
+                bytes,
+                text: d.text,
+            });
             pc = pc.wrapping_add(d.len as u16);
         }
         out
@@ -409,7 +415,9 @@ impl Spectrum {
 
     /// Set a key's pressed state directly in the matrix.
     pub fn set_key(&mut self, pos: KeyPos, pressed: bool) {
-        self.board.kb.set_key(pos.row as usize, pos.col as usize, pressed);
+        self.board
+            .kb
+            .set_key(pos.row as usize, pos.col as usize, pressed);
     }
 
     /// Release every key (heads that get real key-up events rebuild the matrix
@@ -589,7 +597,11 @@ mod tests {
         spec.cpu.regs.pc = tape::LD_BYTES;
 
         spec.tape_trap();
-        assert_eq!(spec.cpu.regs.f & 0x01, 0, "carry clear = failure on mismatch");
+        assert_eq!(
+            spec.cpu.regs.f & 0x01,
+            0,
+            "carry clear = failure on mismatch"
+        );
         assert_eq!(spec.cpu.regs.pc, 0x1000, "still RETs");
     }
 
@@ -629,7 +641,11 @@ mod tests {
             spec.run_frame();
         }
         spec.stop_recording();
-        assert_eq!(spec.recording_count(), 5, "10 frames / decimate 2 = 5 captured");
+        assert_eq!(
+            spec.recording_count(),
+            5,
+            "10 frames / decimate 2 = 5 captured"
+        );
         let data = spec.take_recording();
         assert_eq!(data.len(), 5 * 256 * 192, "flattened indexed screens");
         // Buffer is drained.
@@ -649,7 +665,10 @@ mod tests {
         assert_eq!(texts, ["LD HL,$4000", "INC HL", "LD A,(HL)", "HALT"]);
         assert_eq!(lines[0].addr, 0x8000);
         assert_eq!(lines[0].bytes, vec![0x21, 0x00, 0x40]);
-        assert_eq!(lines[1].addr, 0x8003, "next line follows the previous length");
+        assert_eq!(
+            lines[1].addr, 0x8003,
+            "next line follows the previous length"
+        );
     }
 
     #[test]
@@ -753,7 +772,9 @@ mod tests {
             let level = if i % 2 == 0 { 0x10 } else { 0x00 };
             spec.board.ula.write_port_fe(level);
         }
-        spec.board.ula.finish_frame_audio(TSTATES_PER_FRAME, FRAMES_PER_SEC);
+        spec.board
+            .ula
+            .finish_frame_audio(TSTATES_PER_FRAME, FRAMES_PER_SEC);
         let tone = spec.drain_audio();
         let max = tone.iter().cloned().fold(f32::MIN, f32::max);
         let min = tone.iter().cloned().fold(f32::MAX, f32::min);
@@ -883,11 +904,15 @@ mod tests {
             spec.run_frame(); // load both blocks via the trap, then auto-run
         }
         assert_eq!(
-            spec.board.ula.border, 6,
+            spec.board.ula.border,
+            6,
             "BORDER 6 should have run after the tape auto-loaded; screen:\n{}",
             spec.screen_text()
         );
-        assert!(spec.tape.as_ref().unwrap().finished(), "both blocks consumed");
+        assert!(
+            spec.tape.as_ref().unwrap().finished(),
+            "both blocks consumed"
+        );
     }
 
     /// Type a BASIC expression and confirm the ROM evaluates it. Exercises the

@@ -34,5 +34,8 @@ fn realtime_loads_a_standard_tap() {
     let idx = spec.screen_indexed();
     let fill = idx.iter().filter(|&&b| b != 0).count();
     println!("ran {frames} frames; screen fill {fill}/{}", idx.len());
-    assert!(fill > 1000, "the loaded game should fill the screen (fill={fill})");
+    assert!(
+        fill > 1000,
+        "the loaded game should fill the screen (fill={fill})"
+    );
 }

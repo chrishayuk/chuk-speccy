@@ -46,17 +46,17 @@ pub fn key_for_char(ch: char) -> Option<(KeyPos, bool, bool)> {
         ' ' => Some((SPACE, false, false)),
         '\n' | '\r' => Some((ENTER, false, false)),
         // A few SYM-shifted symbols, useful for typing BASIC expressions.
-        '+' => Some((k(6, 2), false, true)),  // SYM + K
-        '-' => Some((k(6, 3), false, true)),  // SYM + J
-        '*' => Some((k(7, 4), false, true)),  // SYM + B
-        '/' => Some((k(0, 4), false, true)),  // SYM + V
-        '=' => Some((k(6, 1), false, true)),  // SYM + L
-        '"' => Some((k(5, 0), false, true)),  // SYM + P
-        ';' => Some((k(5, 1), false, true)),  // SYM + O
-        ',' => Some((k(7, 3), false, true)),  // SYM + N
-        '.' => Some((k(7, 2), false, true)),  // SYM + M
-        '(' => Some((k(4, 2), false, true)),  // SYM + 8
-        ')' => Some((k(4, 1), false, true)),  // SYM + 9
+        '+' => Some((k(6, 2), false, true)), // SYM + K
+        '-' => Some((k(6, 3), false, true)), // SYM + J
+        '*' => Some((k(7, 4), false, true)), // SYM + B
+        '/' => Some((k(0, 4), false, true)), // SYM + V
+        '=' => Some((k(6, 1), false, true)), // SYM + L
+        '"' => Some((k(5, 0), false, true)), // SYM + P
+        ';' => Some((k(5, 1), false, true)), // SYM + O
+        ',' => Some((k(7, 3), false, true)), // SYM + N
+        '.' => Some((k(7, 2), false, true)), // SYM + M
+        '(' => Some((k(4, 2), false, true)), // SYM + 8
+        ')' => Some((k(4, 1), false, true)), // SYM + 9
         _ => None,
     }
 }

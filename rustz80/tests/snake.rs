@@ -159,7 +159,9 @@ fn snake_reference(steps: u16) -> (u16, Vec<u8>) {
 fn run_snake(steps: u16) -> (u16, Vec<u8>) {
     let prog = rustz80::compile_program(SNAKE).expect("compile");
     let run = prog.symbols["run"];
-    let mut bus = Ram { mem: vec![0u8; 0x1_0000] };
+    let mut bus = Ram {
+        mem: vec![0u8; 0x1_0000],
+    };
     // trampoline @ 0x7000:  LD HL,steps ; CALL run ; HALT
     bus.mem[0x7000] = 0x21;
     bus.mem[0x7001] = steps as u8;

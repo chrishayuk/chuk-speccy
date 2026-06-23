@@ -48,7 +48,8 @@ pub fn encode_indexed_to_vec(
     delay_cs: u16,
 ) -> Vec<u8> {
     let mut buf = Vec::new();
-    encode_indexed(&mut buf, frames, width, height, palette, delay_cs).expect("Vec write is infallible");
+    encode_indexed(&mut buf, frames, width, height, palette, delay_cs)
+        .expect("Vec write is infallible");
     buf
 }
 

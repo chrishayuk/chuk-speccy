@@ -41,7 +41,10 @@ impl speccy_sdk::Game for ScoreGame {
 
 impl FromState for ScoreGame {
     fn from_state(s: &StateView) -> Self {
-        ScoreGame { score: s.u16("score"), started: s.u16("started") }
+        ScoreGame {
+            score: s.u16("score"),
+            started: s.u16("started"),
+        }
     }
 }
 
@@ -67,14 +70,28 @@ fn env_reads_reward_off_the_tape_and_resets_bit_exact() {
 
     // A step: reconstruct the host game, run frames, reward = score delta.
     let t1 = env.step_game::<ScoreGame>(&[], 30);
-    assert!(t1.reward > 0, "reward read off the tape via the host Game (got {})", t1.reward);
+    assert!(
+        t1.reward > 0,
+        "reward read off the tape via the host Game (got {})",
+        t1.reward
+    );
     assert!(!t1.done, "the seam game never ends");
     let t2 = env.step_game::<ScoreGame>(&[], 30);
-    assert!(t2.reward > 0, "reward keeps coming as the env reads live state");
+    assert!(
+        t2.reward > 0,
+        "reward keeps coming as the env reads live state"
+    );
 
     // Bit-exact reset: back to exactly the warmup snapshot.
     let advanced = env.view().u16("score");
-    assert!(advanced > s0, "score advanced before reset ({s0} -> {advanced})");
+    assert!(
+        advanced > s0,
+        "score advanced before reset ({s0} -> {advanced})"
+    );
     env.reset();
-    assert_eq!(env.view().u16("score"), s0, "reset restores the snapshot bit-exactly");
+    assert_eq!(
+        env.view().u16("score"),
+        s0,
+        "reset restores the snapshot bit-exactly"
+    );
 }

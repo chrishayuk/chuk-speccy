@@ -270,10 +270,7 @@ mod tests {
     #[test]
     fn push_pop_roundtrip() {
         // LD SP,0xFFF0 ; LD BC,0x1234 ; PUSH BC ; POP HL
-        let (cpu, _) = run(
-            &[0x31, 0xF0, 0xFF, 0x01, 0x34, 0x12, 0xC5, 0xE1],
-            4,
-        );
+        let (cpu, _) = run(&[0x31, 0xF0, 0xFF, 0x01, 0x34, 0x12, 0xC5, 0xE1], 4);
         assert_eq!(cpu.regs.hl(), 0x1234);
         assert_eq!(cpu.regs.sp, 0xFFF0);
     }
@@ -397,10 +394,7 @@ mod tests {
     #[test]
     fn ex_de_hl_and_exx() {
         // LD HL,0x1111 ; LD DE,0x2222 ; EX DE,HL
-        let (cpu, _) = run(
-            &[0x21, 0x11, 0x11, 0x11, 0x22, 0x22, 0xEB],
-            3,
-        );
+        let (cpu, _) = run(&[0x21, 0x11, 0x11, 0x11, 0x22, 0x22, 0xEB], 3);
         assert_eq!(cpu.regs.hl(), 0x2222);
         assert_eq!(cpu.regs.de(), 0x1111);
     }

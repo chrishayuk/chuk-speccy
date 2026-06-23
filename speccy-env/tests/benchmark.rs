@@ -38,8 +38,11 @@ impl FromState for Reach {
 }
 
 fn reach_source() -> String {
-    std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../rustz80/samples/reach.rs"))
-        .expect("read reach.rs")
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rustz80/samples/reach.rs"
+    ))
+    .expect("read reach.rs")
 }
 
 /// Offline: the benchmark wiring (compile → symbol map → reconstruct) holds without
@@ -58,7 +61,11 @@ fn reach_compiles_and_reconstructs() {
         ("ty", 8),
         ("score", 9),
     ]));
-    assert_eq!((r.px, r.py, r.tx, r.ty, r.score), (3, 7, 4, 8, 9), "full reconstruction");
+    assert_eq!(
+        (r.px, r.py, r.tx, r.ty, r.score),
+        (3, 7, 4, 8, 9),
+        "full reconstruction"
+    );
 }
 
 /// The benchmark proper: scripted (steers toward the target via typed probes) beats
@@ -87,6 +94,12 @@ fn scripted_beats_random_on_reach() {
     eprintln!("  scripted  {scripted}");
 
     assert_eq!(noop, 0, "a no-op agent never reaches the target");
-    assert!(scripted > random, "scripted should beat random ({scripted} vs {random})");
-    assert!(scripted >= 5, "scripted reaches several targets ({scripted})");
+    assert!(
+        scripted > random,
+        "scripted should beat random ({scripted} vs {random})"
+    );
+    assert!(
+        scripted >= 5,
+        "scripted reaches several targets ({scripted})"
+    );
 }

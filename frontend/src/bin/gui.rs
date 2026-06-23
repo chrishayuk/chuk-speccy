@@ -105,7 +105,10 @@ fn main() {
             spec.run_frame();
         }
         spec.set_host_dispatcher(Box::new(spectrum::host::chat_traps()));
-        spec.write_memory(spectrum::sdk::CHAT_TERMINAL_ORG, &spectrum::sdk::CHAT_TERMINAL);
+        spec.write_memory(
+            spectrum::sdk::CHAT_TERMINAL_ORG,
+            &spectrum::sdk::CHAT_TERMINAL,
+        );
         spec.cpu.regs.pc = spectrum::sdk::CHAT_TERMINAL_ORG;
         eprintln!("chat mode: type a line and press ENTER (echo responder)");
     } else if let Some(name) = demo_mode.as_deref() {
@@ -122,7 +125,13 @@ fn main() {
             eprintln!("could not read {p}: {e}");
             std::process::exit(1);
         });
-        let fmt = if p.ends_with(".tap") { "tap" } else if p.ends_with(".sna") { "sna" } else { "z80" };
+        let fmt = if p.ends_with(".tap") {
+            "tap"
+        } else if p.ends_with(".sna") {
+            "sna"
+        } else {
+            "z80"
+        };
         load_media(&mut spec, fmt, &data);
     } else if !query_parts.is_empty() {
         let query = query_parts.join(" ");
@@ -250,7 +259,9 @@ impl ApplicationHandler for Gui {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                let PhysicalKey::Code(code) = event.physical_key else { return };
+                let PhysicalKey::Code(code) = event.physical_key else {
+                    return;
+                };
                 match event.state {
                     ElementState::Pressed => {
                         // App chrome (not Spectrum keys): don't feed to the matrix.
@@ -319,14 +330,24 @@ impl Gui {
             return;
         };
         let size = window.inner_size();
-        let (Some(pw), Some(ph)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
+        let (Some(pw), Some(ph)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+        else {
             return; // minimised
         };
         if surface.resize(pw, ph).is_err() {
             return;
         }
-        let Ok(mut buf) = surface.buffer_mut() else { return };
-        scale_blit(&frame.rgba, frame.width, frame.height, &mut buf, pw.get() as usize, ph.get() as usize);
+        let Ok(mut buf) = surface.buffer_mut() else {
+            return;
+        };
+        scale_blit(
+            &frame.rgba,
+            frame.width,
+            frame.height,
+            &mut buf,
+            pw.get() as usize,
+            ph.get() as usize,
+        );
         let _ = buf.present();
     }
 
@@ -445,7 +466,11 @@ impl Gui {
     fn toggle_fullscreen(&mut self) {
         if let Some(w) = &self.window {
             let on = w.fullscreen().is_some();
-            w.set_fullscreen(if on { None } else { Some(Fullscreen::Borderless(None)) });
+            w.set_fullscreen(if on {
+                None
+            } else {
+                Some(Fullscreen::Borderless(None))
+            });
         }
     }
 
@@ -564,7 +589,10 @@ fn start_audio(ring: Audio, device_name: Option<&str>) -> Result<(cpal::Stream, 
     }
     let config = device.default_output_config().map_err(|e| e.to_string())?;
     if config.sample_format() != cpal::SampleFormat::F32 {
-        eprintln!("warning: output sample format is {:?}, not F32 — audio may be wrong", config.sample_format());
+        eprintln!(
+            "warning: output sample format is {:?}, not F32 — audio may be wrong",
+            config.sample_format()
+        );
     }
     let rate = config.sample_rate().0;
     let channels = config.channels() as usize;
@@ -597,14 +625,18 @@ fn pick_output_device(host: &cpal::Host, want: Option<&str>) -> Result<cpal::Dev
         let lc = substr.to_lowercase();
         if let Ok(devices) = host.output_devices() {
             for d in devices {
-                if d.name().map(|n| n.to_lowercase().contains(&lc)).unwrap_or(false) {
+                if d.name()
+                    .map(|n| n.to_lowercase().contains(&lc))
+                    .unwrap_or(false)
+                {
                     return Ok(d);
                 }
             }
         }
         eprintln!("no audio output matching {substr:?}; using the default");
     }
-    host.default_output_device().ok_or_else(|| "no output device".to_string())
+    host.default_output_device()
+        .ok_or_else(|| "no output device".to_string())
 }
 
 /// Names of the available output devices (for the Audio menu / `audiolist`).
@@ -618,7 +650,9 @@ fn output_device_names() -> Vec<String> {
 /// The name `pick_output_device` would resolve `want` to (for the menu's tick).
 fn resolve_device_name(want: Option<&str>) -> Option<String> {
     let host = cpal::default_host();
-    pick_output_device(&host, want).ok().and_then(|d| d.name().ok())
+    pick_output_device(&host, want)
+        .ok()
+        .and_then(|d| d.name().ok())
 }
 
 /// Print the available output devices (marking the default), then return.
@@ -627,7 +661,11 @@ fn list_output_devices() {
     let default = host.default_output_device().and_then(|d| d.name().ok());
     println!("output audio devices:");
     for name in output_device_names() {
-        let mark = if Some(&name) == default.as_ref() { "  (default)" } else { "" };
+        let mark = if Some(&name) == default.as_ref() {
+            "  (default)"
+        } else {
+            ""
+        };
         println!("  {name}{mark}");
     }
 }
@@ -665,13 +703,42 @@ fn apply_keycode(spec: &mut Spectrum, code: KeyCode) {
 fn keycode_char(code: KeyCode) -> Option<char> {
     use KeyCode::*;
     Some(match code {
-        KeyA => 'a', KeyB => 'b', KeyC => 'c', KeyD => 'd', KeyE => 'e', KeyF => 'f',
-        KeyG => 'g', KeyH => 'h', KeyI => 'i', KeyJ => 'j', KeyK => 'k', KeyL => 'l',
-        KeyM => 'm', KeyN => 'n', KeyO => 'o', KeyP => 'p', KeyQ => 'q', KeyR => 'r',
-        KeyS => 's', KeyT => 't', KeyU => 'u', KeyV => 'v', KeyW => 'w', KeyX => 'x',
-        KeyY => 'y', KeyZ => 'z',
-        Digit0 => '0', Digit1 => '1', Digit2 => '2', Digit3 => '3', Digit4 => '4',
-        Digit5 => '5', Digit6 => '6', Digit7 => '7', Digit8 => '8', Digit9 => '9',
+        KeyA => 'a',
+        KeyB => 'b',
+        KeyC => 'c',
+        KeyD => 'd',
+        KeyE => 'e',
+        KeyF => 'f',
+        KeyG => 'g',
+        KeyH => 'h',
+        KeyI => 'i',
+        KeyJ => 'j',
+        KeyK => 'k',
+        KeyL => 'l',
+        KeyM => 'm',
+        KeyN => 'n',
+        KeyO => 'o',
+        KeyP => 'p',
+        KeyQ => 'q',
+        KeyR => 'r',
+        KeyS => 's',
+        KeyT => 't',
+        KeyU => 'u',
+        KeyV => 'v',
+        KeyW => 'w',
+        KeyX => 'x',
+        KeyY => 'y',
+        KeyZ => 'z',
+        Digit0 => '0',
+        Digit1 => '1',
+        Digit2 => '2',
+        Digit3 => '3',
+        Digit4 => '4',
+        Digit5 => '5',
+        Digit6 => '6',
+        Digit7 => '7',
+        Digit8 => '8',
+        Digit9 => '9',
         _ => return None,
     })
 }

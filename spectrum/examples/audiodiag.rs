@@ -55,7 +55,11 @@ fn note_name(hz: u32) -> String {
 }
 
 fn report(label: &str, samples: &[f32]) {
-    println!("\n== {label} ==  ({} samples, {:.2}s)", samples.len(), samples.len() as f64 / RATE as f64);
+    println!(
+        "\n== {label} ==  ({} samples, {:.2}s)",
+        samples.len(),
+        samples.len() as f64 / RATE as f64
+    );
     let max = samples.iter().cloned().fold(f32::MIN, f32::max);
     let min = samples.iter().cloned().fold(f32::MAX, f32::min);
     println!("amplitude: {min:.3}..{max:.3}");

@@ -8,7 +8,7 @@
 //! / tests — never crosses a language boundary) and any custom [`HostCalls`] impl
 //! (e.g. the PyO3 bridge that forwards to a Python callable).
 
-use crate::keyboard::{Keyboard, KeyPos};
+use crate::keyboard::{KeyPos, Keyboard};
 use crate::memory::Memory;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -42,7 +42,9 @@ impl<'a> HostCtx<'a> {
 
     /// Read `len` bytes of the 64K space from `addr` (wrapping).
     pub fn read(&self, addr: u16, len: u16) -> Vec<u8> {
-        (0..len).map(|i| self.mem.read(addr.wrapping_add(i))).collect()
+        (0..len)
+            .map(|i| self.mem.read(addr.wrapping_add(i)))
+            .collect()
     }
 
     /// Write `data` into memory at `addr` (ROM writes ignored, as on hardware).
@@ -186,7 +188,9 @@ impl ChatState {
 
 /// Clamp to the printable Spectrum charset (ASCII 32..126).
 fn to_spectrum(s: &str) -> Vec<u8> {
-    s.bytes().map(|b| if (32..=126).contains(&b) { b } else { b'?' }).collect()
+    s.bytes()
+        .map(|b| if (32..=126).contains(&b) { b } else { b'?' })
+        .collect()
 }
 
 /// The chatbot host syscalls (`CHAT_*`, id range `0x30–0x3F`) with a built-in

@@ -12,7 +12,12 @@
 use spectrum::Spectrum;
 
 fn main() {
-    let rom = std::fs::read(std::env::args().nth(1).expect("usage: chat_terminal <48.rom>")).unwrap();
+    let rom = std::fs::read(
+        std::env::args()
+            .nth(1)
+            .expect("usage: chat_terminal <48.rom>"),
+    )
+    .unwrap();
     let mut spec = Spectrum::new_48k(&rom);
 
     // The Z80 terminal program (origin 0x8000):
@@ -72,7 +77,12 @@ fn main() {
     println!("Z80 terminal program (disassembled):");
     for line in spec.disassemble(0x8000, 24) {
         let bytes: String = line.bytes.iter().map(|b| format!("{b:02X} ")).collect();
-        println!("  {:04X}  {:<12} {}", line.addr, bytes.trim_end(), line.text);
+        println!(
+            "  {:04X}  {:<12} {}",
+            line.addr,
+            bytes.trim_end(),
+            line.text
+        );
         if line.text == "JR $8030" {
             break; // stop at the spin (rest is the "HELLO" data)
         }

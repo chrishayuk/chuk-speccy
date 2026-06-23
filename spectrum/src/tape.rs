@@ -96,7 +96,13 @@ impl TapeSignal {
         if pulses.is_empty() {
             return Err(SnapshotError::Truncated);
         }
-        Ok(Self { pulses, idx: 0, in_pulse: 0, level: false, playing: false })
+        Ok(Self {
+            pulses,
+            idx: 0,
+            in_pulse: 0,
+            level: false,
+            playing: false,
+        })
     }
 
     pub fn play(&mut self) {
@@ -158,7 +164,18 @@ fn tap_pulses(data: &[u8]) -> Result<Vec<u32>, SnapshotError> {
             break;
         }
         let block = &data[i..i + len];
-        encode_block(&mut pulses, block, PILOT, SYNC1, SYNC2, ZERO, ONE, pilot_for(block), 8, 1000);
+        encode_block(
+            &mut pulses,
+            block,
+            PILOT,
+            SYNC1,
+            SYNC2,
+            ZERO,
+            ONE,
+            pilot_for(block),
+            8,
+            1000,
+        );
         i += len;
         blocks += 1;
     }
@@ -201,7 +218,14 @@ fn encode_block(
 }
 
 /// Append just the data bits (two equal pulses per bit, MSB first) and a pause.
-fn encode_data_bits(pulses: &mut Vec<u32>, data: &[u8], zero: u32, one: u32, last_bits: u32, pause_ms: u32) {
+fn encode_data_bits(
+    pulses: &mut Vec<u32>,
+    data: &[u8],
+    zero: u32,
+    one: u32,
+    last_bits: u32,
+    pause_ms: u32,
+) {
     let n = data.len();
     for (i, &byte) in data.iter().enumerate() {
         let bits = if i + 1 == n { last_bits.clamp(1, 8) } else { 8 };
@@ -239,7 +263,18 @@ fn tzx_pulses(data: &[u8]) -> Result<Vec<u32>, SnapshotError> {
                 i += 4;
                 let block = slice(data, i, len)?;
                 i += len;
-                encode_block(&mut pulses, block, PILOT, SYNC1, SYNC2, ZERO, ONE, pilot_for(block), 8, pause as u32);
+                encode_block(
+                    &mut pulses,
+                    block,
+                    PILOT,
+                    SYNC1,
+                    SYNC2,
+                    ZERO,
+                    ONE,
+                    pilot_for(block),
+                    8,
+                    pause as u32,
+                );
             }
             0x11 => {
                 // Turbo speed data: full timing header, len:u24, data.
@@ -256,7 +291,18 @@ fn tzx_pulses(data: &[u8]) -> Result<Vec<u32>, SnapshotError> {
                 i += 18;
                 let block = slice(data, i, len)?;
                 i += len;
-                encode_block(&mut pulses, block, pilot, s1, s2, zero, one, pilot_n, last_bits, pause);
+                encode_block(
+                    &mut pulses,
+                    block,
+                    pilot,
+                    s1,
+                    s2,
+                    zero,
+                    one,
+                    pilot_n,
+                    last_bits,
+                    pause,
+                );
             }
             0x12 => {
                 // Pure tone: pulse:u16, count:u16.
@@ -320,11 +366,11 @@ fn tzx_pulses(data: &[u8]) -> Result<Vec<u32>, SnapshotError> {
                 let n = data[i] as usize;
                 i += 1 + n;
             } // group start
-            0x22 => {} // group end
-            0x23 => i += 2,                                 // jump (ignored)
-            0x27 => {}                                      // return from call seq
-            0x2a => i += 4,                                 // stop tape if 48K
-            0x2b => i += 5,                                 // set signal level
+            0x22 => {}      // group end
+            0x23 => i += 2, // jump (ignored)
+            0x27 => {}      // return from call seq
+            0x2a => i += 4, // stop tape if 48K
+            0x2b => i += 5, // set signal level
             0x30 => {
                 need(data, i, 1)?;
                 let n = data[i] as usize;
@@ -398,7 +444,10 @@ mod tests {
         let tap = [0x02, 0x00, 0xFF, 0x00];
         let sig = TapeSignal::from_bytes("tap", &tap).unwrap();
         let p = &sig.pulses;
-        assert_eq!(p[..PILOT_DATA_PULSES as usize], vec![PILOT; PILOT_DATA_PULSES as usize][..]);
+        assert_eq!(
+            p[..PILOT_DATA_PULSES as usize],
+            vec![PILOT; PILOT_DATA_PULSES as usize][..]
+        );
         let mut i = PILOT_DATA_PULSES as usize;
         assert_eq!((p[i], p[i + 1]), (SYNC1, SYNC2));
         i += 2;
@@ -422,7 +471,13 @@ mod tests {
         // 0x10 standard data: pause=0, len=1, byte 0xFF (flag>=128 → short pilot).
         let sig = TapeSignal::from_bytes("tzx", &tzx(&[0x10, 0, 0, 1, 0, 0xFF])).unwrap();
         assert_eq!(sig.pulses[0], PILOT);
-        assert_eq!(sig.pulses[..PILOT_DATA_PULSES as usize].iter().filter(|&&x| x == PILOT).count(), PILOT_DATA_PULSES as usize);
+        assert_eq!(
+            sig.pulses[..PILOT_DATA_PULSES as usize]
+                .iter()
+                .filter(|&&x| x == PILOT)
+                .count(),
+            PILOT_DATA_PULSES as usize
+        );
     }
 
     #[test]

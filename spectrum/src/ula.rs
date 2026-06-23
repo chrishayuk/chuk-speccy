@@ -281,7 +281,13 @@ const BEEPER_AMP: f32 = 0.22;
 /// Each output sample is the fraction of its T-state window the speaker was high,
 /// mapped to `-AMP..+AMP`. `edges` are `(tstate, new_level)` in time order;
 /// `start_level` is the speaker level before the first edge.
-fn render_beeper(out: &mut Vec<f32>, edges: &[(u32, bool)], start_level: bool, n: usize, frame_t: u32) {
+fn render_beeper(
+    out: &mut Vec<f32>,
+    edges: &[(u32, bool)],
+    start_level: bool,
+    n: usize,
+    frame_t: u32,
+) {
     let mut high = vec![0u64; n]; // high-time per output-sample window, in T-states
     let mut t0 = 0u32;
     let mut level = start_level;

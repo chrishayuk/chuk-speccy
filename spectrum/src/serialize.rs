@@ -90,7 +90,10 @@ impl Spectrum {
     /// whose magic or length doesn't match.
     pub fn deserialize_full(&mut self, blob: &[u8]) -> Result<(), String> {
         if blob.len() != TOTAL || &blob[..4] != MAGIC {
-            return Err(format!("not a full-state blob (len {}, want {TOTAL})", blob.len()));
+            return Err(format!(
+                "not a full-state blob (len {}, want {TOTAL})",
+                blob.len()
+            ));
         }
         let mut c = Cur::new(blob);
         let _ = c.take(4); // magic
@@ -140,7 +143,9 @@ mod tests {
     use crate::Spectrum;
 
     fn rom() -> Option<Vec<u8>> {
-        std::env::var("SPECTRUM_ROM").ok().and_then(|p| std::fs::read(p).ok())
+        std::env::var("SPECTRUM_ROM")
+            .ok()
+            .and_then(|p| std::fs::read(p).ok())
     }
 
     /// Reset must be a non-source-of-variance: a restored machine evolves
@@ -164,14 +169,22 @@ mod tests {
         b.deserialize_full(&blob).unwrap();
 
         // Exact round-trip.
-        assert_eq!(b.serialize_full(), blob, "restore should reproduce the blob");
+        assert_eq!(
+            b.serialize_full(),
+            blob,
+            "restore should reproduce the blob"
+        );
 
         // And both evolve identically — full state equal every frame. If any
         // execution-affecting field were dropped, the two would diverge.
         for f in 0..300 {
             a.run_frame();
             b.run_frame();
-            assert_eq!(a.serialize_full(), b.serialize_full(), "state diverged at frame {f}");
+            assert_eq!(
+                a.serialize_full(),
+                b.serialize_full(),
+                "state diverged at frame {f}"
+            );
         }
     }
 

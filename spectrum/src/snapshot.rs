@@ -168,7 +168,9 @@ pub fn load_z80(spec: &mut Spectrum, data: &[u8]) -> Result<(), SnapshotError> {
         let hw = data[ext_start + 2];
         // 48K hardware modes only: 0 (48K), 1 (48K+IF1). Reject 128K (>=3, except some).
         if hw >= 3 {
-            return Err(SnapshotError::Unsupported("z80: 128K hardware not supported (48K only)"));
+            return Err(SnapshotError::Unsupported(
+                "z80: 128K hardware not supported (48K only)",
+            ));
         }
         let mut off = ext_start + ext_len;
         while off + 3 <= data.len() {

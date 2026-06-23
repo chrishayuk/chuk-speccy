@@ -198,7 +198,11 @@ pub struct Frame {
 /// `indexed` is `SCREEN_W * SCREEN_H` logical colour indices (0–15); `border` is
 /// the current border colour (0–7). Output size depends on the border mode.
 pub fn render(indexed: &[u8], border: u8, cfg: &DisplayConfig) -> Frame {
-    assert_eq!(indexed.len(), SCREEN_W * SCREEN_H, "indexed framebuffer size");
+    assert_eq!(
+        indexed.len(),
+        SCREEN_W * SCREEN_H,
+        "indexed framebuffer size"
+    );
     let b = cfg.border.px();
     let width = SCREEN_W + 2 * b;
     let height = SCREEN_H + 2 * b;
@@ -222,7 +226,11 @@ pub fn render(indexed: &[u8], border: u8, cfg: &DisplayConfig) -> Frame {
         }
     }
 
-    let mut frame = Frame { width, height, rgba };
+    let mut frame = Frame {
+        width,
+        height,
+        rgba,
+    };
     for effect in &cfg.effects {
         apply_effect(&mut frame, effect);
     }
@@ -256,7 +264,7 @@ mod tests {
     #[test]
     fn authentic_maps_indices_directly() {
         let f = render(&solid(2), 0, &DisplayConfig::authentic()); // 2 = red
-        // Centre display pixel should be authentic red.
+                                                                   // Centre display pixel should be authentic red.
         let b = BorderMode::Full.px();
         let p = ((b + 10) * f.width + (b + 10)) * 4;
         assert_eq!(&f.rgba[p..p + 3], &[0xD7, 0x00, 0x00]);
@@ -272,7 +280,10 @@ mod tests {
         };
         assert_eq!(t.rgb(0), [10, 20, 30], "black -> dark");
         assert_eq!(t.rgb(15), [200, 210, 220], "bright white -> light");
-        assert!(t.rgb(7)[0] < 200, "normal white is dimmer than bright white");
+        assert!(
+            t.rgb(7)[0] < 200,
+            "normal white is dimmer than bright white"
+        );
     }
 
     #[test]
