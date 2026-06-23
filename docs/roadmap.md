@@ -289,6 +289,13 @@ dial is never multiplied before it's watched close:
   bug doing this: the dialect Down/`A` key read a bad port — QAOP `A` never worked.)*
   *Remaining:* memory-probe / vision-LLM / replay agents + a multi-game score table.
   `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
+- [~] **Input as one source of truth + demo ROMs** (the build→extract loop, spec 08 §4).
+  `Controls` (remappable `Button`↔keys) extracted into the SDK; the demo games moved
+  out of the library into **`chuk-speccy-games`** (`snake`/`keytest`/`typing`/`mover`)
+  behind a name→installer **registry**, so heads stay game-agnostic
+  (`speccy_games::install(spec, name)`). `Frame::new`/`Input::none`/`held_now` exposed
+  for testing games. *Next here:* lift the move/erase/draw loop into an `Actor`/`Sprite`
+  and a `Hud` — which needs the `rustz80` array-struct-fields extension to go pure.
 - [ ] **2 · The kit (L1 + L0)** — `chuk-speccy-game` (subset-clean Sprite/TileMap/
   Scene/Hud/SoundBank; sprites *name* the colour-clash; a dirty-cell engine as the
   **dial canary**) + `chuk-speccy-assets` (PNG/Tiled/tracker → `const`; the

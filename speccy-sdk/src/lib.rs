@@ -12,11 +12,9 @@
 //! `(state, input)` — seed RNG from state, count frames, no host I/O — so rewind,
 //! replay and RL stay correct.
 
-pub mod demo;
-
 use spectrum::host::{HostCalls, HostCtx};
 use spectrum::keyboard;
-use spectrum::Spectrum;
+pub use spectrum::Spectrum;
 
 /// The per-frame host syscall id (`docs/03` id map, `0x60` = game).
 pub const GAME_TICK: u8 = 0x60;
@@ -44,9 +42,19 @@ pub fn load_runtime(spec: &mut Spectrum) {
     spec.cpu.regs.pc = RUNTIME_ORG;
 }
 
-/// Install `game` as the host's `GAME_TICK` handler. Pair with [`load_runtime`].
+/// Install `game` as the host's `GAME_TICK` handler with the default [`Controls`].
+/// Pair with [`load_runtime`].
 pub fn install(spec: &mut Spectrum, game: impl Game + Send + 'static) {
-    spec.set_host_dispatcher(Box::new(Dispatcher::new(game)));
+    install_with_controls(spec, game, Controls::default());
+}
+
+/// Install `game` with a custom key mapping (e.g. WASD). Pair with [`load_runtime`].
+pub fn install_with_controls(
+    spec: &mut Spectrum,
+    game: impl Game + Send + 'static,
+    controls: Controls,
+) {
+    spec.set_host_dispatcher(Box::new(Dispatcher::new(game, controls)));
 }
 
 /// Convenience: boot the ROM, load the runtime, and install `game` — ready for a
@@ -282,6 +290,18 @@ impl Input {
     pub fn pressed(&self, b: Button) -> bool {
         self.cur & b as u8 != 0 && self.prev & b as u8 == 0
     }
+    /// No input — for tests / headless stepping.
+    pub fn none() -> Self {
+        Input { cur: 0, prev: 0 }
+    }
+    /// Construct from a set of currently-held buttons (for testing a `Game`).
+    pub fn held_now(buttons: &[Button]) -> Self {
+        let mut cur = 0u8;
+        for &b in buttons {
+            cur |= b as u8;
+        }
+        Input { cur, prev: 0 }
+    }
 }
 
 /// The 8 Spectrum colours, with bright variants where useful. `as u8` packs
@@ -352,8 +372,17 @@ pub struct Frame {
     font: [u8; ATTRS], // 96 glyphs × 8 bytes, lifted from the ROM
 }
 
+impl Default for Frame {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Frame {
-    fn new() -> Self {
+    /// A blank frame (white ink on black). The host head supplies one each tick;
+    /// games receive `&mut Frame`. Public so you can construct one to unit-test a
+    /// `Game::update`.
+    pub fn new() -> Self {
         Frame {
             pixels: [0; PIXELS],
             attrs: [0; ATTRS],
@@ -455,46 +484,99 @@ fn byte_index(x: usize, y: usize) -> usize {
     (y / 64) * 2048 + (y % 8) * 256 + ((y % 64) / 8) * 32 + x / 8
 }
 
-// --- the GAME_TICK dispatcher -----------------------------------------------
+// --- controls: the one place key bindings live -----------------------------
 
-/// Button → key map: cursor keys *and* QAOP+Space, so any common scheme works.
-const KEYMAP: &[(Button, char)] = &[
-    (Button::Up, '7'),
-    (Button::Up, 'q'),
-    (Button::Down, '6'),
-    (Button::Down, 'a'),
-    (Button::Left, '5'),
-    (Button::Left, 'o'),
-    (Button::Right, '8'),
-    (Button::Right, 'p'),
-    (Button::Fire, '0'),
-];
-
-struct Dispatcher<G> {
-    game: G,
-    frame: Frame,
-    prev: u8,
-    font_loaded: bool,
+/// Maps each logical [`Button`] to the physical key(s) that trigger it — the
+/// single source of truth for input, shared by the host head ([`install`]) and
+/// reusable by the agent env. Remappable: build a custom scheme with
+/// [`Controls::set`] / [`Controls::bind`] and pass it to [`install_with_controls`].
+/// The default is cursor keys **and** QAOP + `0`/Space, so any common scheme works.
+#[derive(Clone)]
+pub struct Controls {
+    bindings: Vec<(Button, char)>,
 }
 
-impl<G: Game> Dispatcher<G> {
-    fn new(game: G) -> Self {
-        Dispatcher { game, frame: Frame::new(), prev: 0, font_loaded: false }
+impl Default for Controls {
+    fn default() -> Self {
+        // Cursor key listed first per button, so `key_pos` prefers it.
+        Controls {
+            bindings: vec![
+                (Button::Up, '7'),
+                (Button::Up, 'q'),
+                (Button::Down, '6'),
+                (Button::Down, 'a'),
+                (Button::Left, '5'),
+                (Button::Left, 'o'),
+                (Button::Right, '8'),
+                (Button::Right, 'p'),
+                (Button::Fire, '0'),
+                (Button::Fire, ' '),
+            ],
+        }
+    }
+}
+
+impl Controls {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    fn read_buttons(ctx: &HostCtx) -> u8 {
+    /// Add a key for `button` (additive).
+    pub fn bind(&mut self, button: Button, key: char) -> &mut Self {
+        self.bindings.push((button, key));
+        self
+    }
+
+    /// Replace all keys for `button` with `keys`.
+    pub fn set(&mut self, button: Button, keys: &[char]) -> &mut Self {
+        self.bindings.retain(|(b, _)| *b != button);
+        for &k in keys {
+            self.bindings.push((button, k));
+        }
+        self
+    }
+
+    /// The keys currently bound to `button`.
+    pub fn keys_for(&self, button: Button) -> impl Iterator<Item = char> + '_ {
+        self.bindings.iter().filter(move |(b, _)| *b == button).map(|(_, k)| *k)
+    }
+
+    /// The primary physical key for `button` (first binding) — the one the env
+    /// presses to drive the button.
+    pub fn key_pos(&self, button: Button) -> Option<keyboard::KeyPos> {
+        self.bindings
+            .iter()
+            .find(|(b, _)| *b == button)
+            .and_then(|(_, ch)| keyboard::key_for_char(*ch).map(|(p, _, _)| p))
+    }
+
+    /// Read the held-button bitset from the live keyboard (host side).
+    fn read(&self, ctx: &HostCtx) -> u8 {
         let mut b = 0u8;
-        for &(button, ch) in KEYMAP {
+        for &(button, ch) in &self.bindings {
             if let Some((pos, _, _)) = keyboard::key_for_char(ch) {
                 if ctx.key(pos) {
                     b |= button as u8;
                 }
             }
         }
-        if ctx.key(keyboard::SPACE) {
-            b |= Button::Fire as u8;
-        }
         b
+    }
+}
+
+// --- the GAME_TICK dispatcher -----------------------------------------------
+
+struct Dispatcher<G> {
+    game: G,
+    frame: Frame,
+    controls: Controls,
+    prev: u8,
+    font_loaded: bool,
+}
+
+impl<G: Game> Dispatcher<G> {
+    fn new(game: G, controls: Controls) -> Self {
+        Dispatcher { game, frame: Frame::new(), controls, prev: 0, font_loaded: false }
     }
 }
 
@@ -509,7 +591,7 @@ impl<G: Game + Send + 'static> HostCalls for Dispatcher<G> {
             self.frame.font.copy_from_slice(&ctx.read(0x3D00, ATTRS as u16));
             self.font_loaded = true;
         }
-        let cur = Self::read_buttons(ctx);
+        let cur = self.controls.read(ctx);
         let input = Input { cur, prev: self.prev };
         self.prev = cur;
 

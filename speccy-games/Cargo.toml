@@ -1,0 +1,13 @@
+[package]
+name = "chuk-speccy-games"
+description = "Demo games built on chuk-speccy-sdk (Snake + the input/typing/mover demos). Content that consumes the SDK — not part of the library."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "speccy_games"
+
+[dependencies]
+speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }
