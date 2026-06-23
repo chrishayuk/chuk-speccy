@@ -95,7 +95,7 @@ fn __key(port: u16, bit: u16) -> u16 {
 fn __input_held(b: u16) -> u16 {
     let mut h = 0u16;
     if b == 1u16  { h = __key(61438u16, 8u16)  | __key(64510u16, 1u16); }
-    if b == 2u16  { h = __key(61438u16, 16u16) | __key(64765u16, 1u16); }
+    if b == 2u16  { h = __key(61438u16, 16u16) | __key(65022u16, 1u16); }
     if b == 4u16  { h = __key(63486u16, 16u16) | __key(57342u16, 2u16); }
     if b == 8u16  { h = __key(61438u16, 4u16)  | __key(57342u16, 1u16); }
     if b == 16u16 { h = __key(61438u16, 1u16)  | __key(32766u16, 1u16); }

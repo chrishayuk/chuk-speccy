@@ -279,11 +279,15 @@ dial is never multiplied before it's watched close:
   (typed — **no string DSL**), `done()`, `reset(seed)`, all with defaults so every
   existing game compiles unchanged. The demo Snake overrides `reward` (score delta) /
   `done` (death) / `reset` (seed). Writing a game *is* writing its env.
-- [~] **`chuk-speccy-env`** — the Gym surface *exists*: `SpectrumEnv` with bit-exact
-  `reset` (`serialize_full` snapshot / `deserialize_full`), `step_game` (hold keys +
-  `run_frames`), `frame_indexed` (pixel obs), `view`/`reconstruct` (typed obs via the
-  symbol map), and `Transition { obs, reward, done }`. *Remaining:* agent examples
-  (random, scripted, **memory-probe**, vision-LLM, replay) + a benchmark score table.
+- [~] **`chuk-speccy-env`** — the Gym surface + baseline agents + a benchmark exist.
+  `SpectrumEnv`: bit-exact `reset` (`serialize_full`/`deserialize_full`), `step_game`
+  (hold keys + `run_frames`), `frame_indexed` (pixel obs), `view`/`reconstruct` (typed
+  obs via the symbol map), `Transition { obs, reward, done }`. `agents`: `Agent` trait
+  + `NoOp`/`Random`/`Scripted` + `run_episode`. The `reach` sample (a reward-bearing
+  input game) gives a working **agentability benchmark** — `speccy-env/tests/benchmark.rs`
+  shows `no-op 0 < random 0 < scripted 17` on real hardware. *(Found + fixed a real
+  bug doing this: the dialect Down/`A` key read a bad port — QAOP `A` never worked.)*
+  *Remaining:* memory-probe / vision-LLM / replay agents + a multi-game score table.
   `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
 - [ ] **2 · The kit (L1 + L0)** — `chuk-speccy-game` (subset-clean Sprite/TileMap/
   Scene/Hud/SoundBank; sprites *name* the colour-clash; a dirty-cell engine as the
