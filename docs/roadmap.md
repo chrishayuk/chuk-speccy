@@ -397,12 +397,13 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
   (standalone, no emulator deps → clean downward reference).
 
 ### H3. Frontend de-duplication
-- [ ] No `frontend` lib → media-load dispatch copy-pasted across all 4 bins and already
-  diverged (`.tzx` missing in `main.rs`); boot constant repeated ~7×. Add
-  `spectrum::load_media` (or a frontend lib) + a `BOOT_FRAMES` const.
+- [x] `Spectrum::load_media(fmt, data)` + `BOOT_FRAMES` + `media_format(name)` in the
+  core; all 4 bins now call it (the copy-pasted dispatch deleted, the `.tzx` gap in
+  `main.rs`/`gui` fixed). Format strings are now `spectrum::format::{TAP,TZX,SNA,Z80}`
+  constants, not magic strings.
 - [ ] Block-glyph renderer (`main.rs`) untested + belongs in `display`; `keycode_char`
   drops symbol keys (GUI/TUI input asymmetry); test-card / z80-header knowledge in heads
-  belongs near `spectrum`.
+  belongs near `spectrum`. *(Deferred.)*
 
 ### H4. Core layering hygiene (`z80`/`spectrum`)
 - [ ] `StopReason` lives in `z80` but is a run-loop concept it never produces → move to

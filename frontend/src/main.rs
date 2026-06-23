@@ -47,9 +47,7 @@ fn main() {
             "quad" => mode = RenderMode::Quad,
             "sextant" | "sext" => mode = RenderMode::Sext,
             "half" | "halfblock" => mode = RenderMode::Half,
-            _ if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") => {
-                snapshot_path = Some(a)
-            }
+            _ if spectrum::media_format(&a).is_some() => snapshot_path = Some(a),
             _ if DisplayConfig::preset(&a).is_some() => theme_name = a,
             _ => eprintln!("ignoring unrecognised arg '{a}'"),
         }
@@ -67,25 +65,13 @@ fn main() {
     let mut loaded_game = false;
     if let Some(p) = &snapshot_path {
         match std::fs::read(p) {
-            Ok(data) if p.ends_with(".tap") => {
-                for _ in 0..250 {
-                    spec.run_frame(); // boot, then insert tape + LOAD ""
-                }
-                match spec.load_tap(&data) {
-                    Ok(()) => {
-                        spec.autoload_tape();
-                        loaded_game = true;
-                    }
-                    Err(e) => eprintln!("tape load failed: {e:?}"),
-                }
-            }
-            Ok(data) => {
-                let fmt = if p.ends_with(".sna") { "sna" } else { "z80" };
-                match spec.load_snapshot(fmt, &data) {
-                    Ok(()) => loaded_game = true,
-                    Err(e) => eprintln!("snapshot load failed: {e:?}"),
-                }
-            }
+            Ok(data) => match spec.load_media(
+                spectrum::media_format(p).unwrap_or(spectrum::format::Z80),
+                &data,
+            ) {
+                Ok(()) => loaded_game = true,
+                Err(e) => eprintln!("media load failed: {e:?}"),
+            },
             Err(e) => eprintln!("could not read media {p}: {e}"),
         }
     }
