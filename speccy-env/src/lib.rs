@@ -9,7 +9,7 @@
 //! hardware. Reset is bit-exact (`serialize_full`/`deserialize_full`), so episodes
 //! are reproducible.
 //!
-//! ```ignore
+//! ```text
 //! let (tap, map) = speccy_sdk::compile::compile_game_with_symbols(src, "GAME")?;
 //! let map = speccy_env::SymbolMap::from_toml(&map.to_toml())?;
 //! let mut env = speccy_env::SpectrumEnv::new(&rom, &tap, map, 450);
@@ -29,27 +29,43 @@ pub use speccy_sdk::Obs;
 pub use speccy_sdk::{Symbol, SymbolMap};
 
 /// A snapshot of the game's typed fields, read from RAM via the [`SymbolMap`].
-/// The full layout is always present (spec 08 §2), so any `Self` can be rebuilt.
+/// The full layout is always present (spec 08 §2), so any `Self` can be rebuilt —
+/// including array fields (each field holds all `count` elements).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateView {
-    values: Vec<(String, u16)>,
+    /// `(field name, elements)` — a scalar is one element, a `[u16; N]` array is `N`.
+    values: Vec<(String, Vec<u16>)>,
 }
 
 impl StateView {
-    /// Build a synthetic view (for tests, or agents reasoning over hand-made state).
+    /// Build a synthetic *scalar* view (for tests, or agents over hand-made state).
     pub fn from_pairs(pairs: &[(&str, u16)]) -> StateView {
         StateView {
-            values: pairs.iter().map(|(k, v)| ((*k).to_string(), *v)).collect(),
+            values: pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), vec![*v]))
+                .collect(),
         }
     }
 
-    /// Read a field as `u16` (little-endian); `0` if the field is unknown.
-    pub fn u16(&self, name: &str) -> u16 {
+    fn elems(&self, name: &str) -> Option<&[u16]> {
         self.values
             .iter()
             .find(|(n, _)| n == name)
-            .map(|(_, v)| *v)
-            .unwrap_or(0)
+            .map(|(_, v)| v.as_slice())
+    }
+
+    /// Read a scalar field's `u16`, or `None` if the field isn't in the map.
+    pub fn try_u16(&self, name: &str) -> Option<u16> {
+        self.elems(name).and_then(|e| e.first().copied())
+    }
+    /// Read a scalar field's `u16`. **Panics** if the field is absent — that means a
+    /// `FromState` named a field the symbol map doesn't have (spec 08 §2: a silently
+    /// missing field is the worst kind of bug). Use [`try_u16`](Self::try_u16) to be
+    /// lenient.
+    pub fn u16(&self, name: &str) -> u16 {
+        self.try_u16(name)
+            .unwrap_or_else(|| panic!("field `{name}` is not in the symbol map"))
     }
     /// Read a field as `u8` (the low byte of its slot).
     pub fn u8(&self, name: &str) -> u8 {
@@ -58,6 +74,10 @@ impl StateView {
     /// Read a field as `bool` (non-zero).
     pub fn bool(&self, name: &str) -> bool {
         self.u16(name) != 0
+    }
+    /// Read an array field's elements (empty if the field is absent).
+    pub fn array(&self, name: &str) -> &[u16] {
+        self.elems(name).unwrap_or(&[])
     }
 }
 
@@ -115,17 +135,28 @@ impl SpectrumEnv {
             .expect("own snapshot deserializes");
     }
 
-    /// The current typed state, read off RAM via the symbol map.
+    /// The current typed state, read off RAM via the symbol map — every field,
+    /// including all `count` elements of array fields.
     pub fn view(&self) -> StateView {
         let values = self
             .map
             .fields
             .iter()
             .map(|f| {
-                let bytes = self.spec.read_memory(f.addr, f.width.max(1) as u16);
-                let v = bytes.first().copied().unwrap_or(0) as u16
-                    | (*bytes.get(1).unwrap_or(&0) as u16) << 8;
-                (f.field.clone(), if f.width <= 1 { v & 0xFF } else { v })
+                let w = f.width.max(1) as u16;
+                let elems = (0..f.count)
+                    .map(|i| {
+                        let bytes = self.spec.read_memory(f.addr + i * w, w);
+                        let v = bytes.first().copied().unwrap_or(0) as u16
+                            | (*bytes.get(1).unwrap_or(&0) as u16) << 8;
+                        if f.width <= 1 {
+                            v & 0xFF
+                        } else {
+                            v
+                        }
+                    })
+                    .collect();
+                (f.field.clone(), elems)
             })
             .collect();
         StateView { values }
@@ -203,5 +234,25 @@ size = 4
         assert_eq!(m.fields[1].width, 1);
         assert_eq!(m.fields[0].ty, "u16");
         assert_eq!(m.addr_of("nope"), None);
+    }
+
+    #[test]
+    fn state_view_scalar_array_and_missing() {
+        let v = StateView::from_pairs(&[("score", 7), ("lives", 3)]);
+        assert_eq!(v.u16("score"), 7);
+        assert_eq!(v.try_u16("score"), Some(7));
+        assert_eq!(v.try_u16("ghost"), None, "absent field is None, not 0");
+        assert_eq!(
+            v.array("score"),
+            &[7],
+            "a scalar reads as a 1-element array"
+        );
+        assert_eq!(v.array("ghost"), &[] as &[u16]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not in the symbol map")]
+    fn missing_field_is_loud() {
+        let _ = StateView::from_pairs(&[]).u16("ghost");
     }
 }
