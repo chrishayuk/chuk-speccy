@@ -28,11 +28,49 @@ fn struct_slots(fields: &[FieldDef]) -> usize {
 /// rule: an explicit `= N` discriminant, else the previous value + 1 (from 0).
 type Enums = HashMap<String, Vec<(String, u16)>>;
 
-/// Per-function lowering context: locals + the program's struct/enum layouts.
+/// Caller-supplied routing for "handle" parameters — method receivers whose type is
+/// a handle (e.g. an SDK `Frame`/`Input`) route a method call to a free prelude
+/// function, *dropping* the receiver (the 3-register calling convention has no room
+/// for `self` + 3 args). This keeps the compiler generic: it knows nothing about any
+/// particular SDK; the SDK (or any caller) provides the map. Generic compilation
+/// passes an empty config — then there are no handle types.
+#[derive(Default, Clone)]
+pub struct PreludeConfig {
+    /// `(handle type name, method) → prelude function name`.
+    routes: HashMap<(String, String), String>,
+}
+
+impl PreludeConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Route `<handle>.<method>(args)` to `fn_name(args)` (receiver dropped).
+    pub fn route(mut self, handle: &str, method: &str, fn_name: &str) -> Self {
+        self.routes.insert(
+            (handle.to_string(), method.to_string()),
+            fn_name.to_string(),
+        );
+        self
+    }
+    /// Is `ty` a handle type (any method of it routes to a prelude fn)?
+    fn is_handle(&self, ty: &str) -> bool {
+        self.routes.keys().any(|(h, _)| h == ty)
+    }
+    /// The prelude fn for `<handle>.<method>`, if routed.
+    fn lookup(&self, handle: &str, method: &str) -> Option<&str> {
+        self.routes
+            .get(&(handle.to_string(), method.to_string()))
+            .map(String::as_str)
+    }
+}
+
+/// Per-function lowering context: locals + the program's struct/enum layouts + the
+/// caller's handle-routing config.
 struct Ctx<'a> {
     vars: Vars,
     structs: &'a Structs,
     enums: &'a Enums,
+    prelude: &'a PreludeConfig,
     /// Counter for synthesised `match` scrutinee temporaries.
     temp: usize,
 }
@@ -122,8 +160,12 @@ impl Vars {
     }
 }
 
-/// Lower every `fn` in a file to `(name, Func)`, using the file's struct layouts.
-pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
+/// Lower every `fn` in a file to `(name, Func)`, using the file's struct layouts and
+/// the caller's handle-routing config (empty for plain generic compilation).
+pub fn lower_program(
+    file: &syn::File,
+    prelude: &PreludeConfig,
+) -> Result<Vec<(String, Func)>, String> {
     let structs = collect_structs(file)?;
     let enums = collect_enums(file)?;
     let mut out = Vec::new();
@@ -131,9 +173,10 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
         match item {
             // `poke`/`peek` are host-only prelude intrinsics — skip their bodies.
             syn::Item::Fn(f) if is_intrinsic(&f.sig.ident.to_string()) => {}
-            syn::Item::Fn(f) => {
-                out.push((f.sig.ident.to_string(), lower_with(f, &structs, &enums)?))
-            }
+            syn::Item::Fn(f) => out.push((
+                f.sig.ident.to_string(),
+                lower_with(f, &structs, &enums, prelude)?,
+            )),
             // `impl T { fn m(&mut self, …) }` — each method becomes a `T::m` function
             // taking `self` as a leading pointer argument.
             syn::Item::Impl(imp) => {
@@ -143,7 +186,7 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
                         return Err("only methods are supported in impl blocks".into());
                     };
                     let name = format!("{self_ty}::{}", m.sig.ident);
-                    out.push((name, lower_method(m, &self_ty, &structs, &enums)?));
+                    out.push((name, lower_method(m, &self_ty, &structs, &enums, prelude)?));
                 }
             }
             syn::Item::Struct(_) | syn::Item::Enum(_) => {} // already collected
@@ -163,7 +206,12 @@ pub fn lower_program(file: &syn::File) -> Result<Vec<(String, Func)>, String> {
 
 /// Lower a standalone function (no struct/enum context — used by `compile_fn`).
 pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
-    lower_with(item, &Structs::new(), &Enums::new())
+    lower_with(
+        item,
+        &Structs::new(),
+        &Enums::new(),
+        &PreludeConfig::default(),
+    )
 }
 
 /// Lower an `impl` method. The receiver (`&self`/`&mut self`) becomes a leading
@@ -173,11 +221,13 @@ fn lower_method(
     self_ty: &str,
     structs: &Structs,
     enums: &Enums,
+    prelude: &PreludeConfig,
 ) -> Result<Func, String> {
     let mut ctx = Ctx {
         vars: Vars::default(),
         structs,
         enums,
+        prelude,
         temp: 0,
     };
     let params = lower_inputs(&m.sig.inputs, &mut ctx, Some(self_ty))?;
@@ -265,11 +315,17 @@ fn collect_structs(file: &syn::File) -> Result<Structs, String> {
     Ok(m)
 }
 
-fn lower_with(item: &syn::ItemFn, structs: &Structs, enums: &Enums) -> Result<Func, String> {
+fn lower_with(
+    item: &syn::ItemFn,
+    structs: &Structs,
+    enums: &Enums,
+    prelude: &PreludeConfig,
+) -> Result<Func, String> {
     let mut ctx = Ctx {
         vars: Vars::default(),
         structs,
         enums,
+        prelude,
         temp: 0,
     };
     let params = lower_inputs(&item.sig.inputs, &mut ctx, None)?;
@@ -301,7 +357,7 @@ fn lower_inputs(
             }
             syn::FnArg::Typed(pt) => {
                 let name = pat_ident(&pt.pat)?;
-                match handle_type(&pt.ty) {
+                match handle_type(&pt.ty, ctx.prelude) {
                     Some(h) => ctx.vars.declare_handle(&name, &h),
                     None => ctx.vars.declare(&name, 1, None, ty_of_type(&pt.ty)),
                 };
@@ -773,8 +829,9 @@ fn lower_method_call(m: &syn::ExprMethodCall, ctx: &mut Ctx) -> Result<(Expr, Wi
     Ok((Expr::Call(format!("{sname}::{method}"), args), Width::Word))
 }
 
-/// A prelude handle type (`&mut Frame` → `"Frame"`, `&Input` → `"Input"`).
-fn handle_type(t: &syn::Type) -> Option<String> {
+/// A handle parameter type (`&mut T`/`&T`/`T` → `"T"`) if `T` is a configured
+/// handle type (e.g. the SDK's `Frame`/`Input`); otherwise `None`.
+fn handle_type(t: &syn::Type, prelude: &PreludeConfig) -> Option<String> {
     let inner = match t {
         syn::Type::Reference(r) => &*r.elem,
         other => other,
@@ -782,7 +839,7 @@ fn handle_type(t: &syn::Type) -> Option<String> {
     if let syn::Type::Path(p) = inner {
         if let Some(id) = p.path.get_ident() {
             let s = id.to_string();
-            if s == "Frame" || s == "Input" {
+            if prelude.is_handle(&s) {
                 return Some(s);
             }
         }
@@ -790,28 +847,24 @@ fn handle_type(t: &syn::Type) -> Option<String> {
     None
 }
 
-/// Route `frame.*` / `input.*` method calls to the dialect prelude functions.
+/// Route `<handle>.<method>(args)` to the configured prelude function (the receiver
+/// is dropped — see [`PreludeConfig`]).
 fn lower_prelude_call(
     handle: &str,
     method: &str,
     args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
     ctx: &mut Ctx,
 ) -> Result<(Expr, Width), String> {
-    let name = match (handle, method) {
-        ("Frame", "pixel") => "__frame_pixel",
-        ("Frame", "clear") => "__frame_clear",
-        ("Input", "held") | ("Input", "pressed") => "__input_held",
-        _ => {
-            return Err(format!(
-                "prelude method {handle}::{method} is not supported yet"
-            ))
-        }
-    };
+    let name = ctx
+        .prelude
+        .lookup(handle, method)
+        .ok_or_else(|| format!("prelude method {handle}::{method} is not routed"))?
+        .to_string();
     let lowered = args
         .iter()
         .map(|a| Ok(lower_expr(a, ctx)?.0))
         .collect::<Result<_, String>>()?;
-    Ok((Expr::Call(name.to_string(), lowered), Width::Word))
+    Ok((Expr::Call(name, lowered), Width::Word))
 }
 
 /// The simple name of an `impl` target type (`impl Foo` → `Foo`).

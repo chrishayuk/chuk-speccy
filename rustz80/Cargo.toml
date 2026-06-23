@@ -17,5 +17,3 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 z80 = { package = "chuk-speccy-z80", version = "0.1.0", path = "../z80" }
 # Boot a compiled `.tap` on the full machine (ROM-gated end-to-end test).
 spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
-# The host side of the dial: the same `impl Game` compiled under rustc.
-speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }

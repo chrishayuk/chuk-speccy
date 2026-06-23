@@ -99,12 +99,12 @@ clear error (the "host-only" signal). The current subset (spec 07):
 > `const`. The *only* host-only constructs in an authored game are explicitly
 > declared escape-hatch traps.
 
-This is a real discipline with real teeth, and the repo already violates it in its
-showcase: **`speccy-sdk/src/demo.rs` Snake uses `Vec` and `format!`** — it is
-host-only and cannot take the pure path. The dial-closed samples (`bounce`, `move`)
-are minimal. So the first concrete gap is not "add sprites"; it is **provide the
-subset-clean primitives that let a real game (Snake-with-collections) compile both
-ways.** Three small types, all subset Rust, shipped in `chuk-speccy-sdk`:
+This is a real discipline with real teeth. The original showcase Snake used `Vec`
+and `format!` (host-only, couldn't take the pure path); it has since been rewritten
+onto the subset-clean primitives below (now in `chuk-speccy-games`). The first
+concrete gap was not "add sprites"; it was **provide the subset-clean primitives that
+let a real game (Snake-with-collections) compile both ways.** Three small types, all
+subset Rust, shipped in `chuk-speccy-sdk`:
 
 ```rust
 Entities<T, const N: usize>   // fixed-capacity vec — replaces Vec<T>
@@ -649,7 +649,9 @@ chuk-speccy-sdk            runtime API: Game, Scene, Frame, Input, Audio, Rng,
 chuk-speccy-assets         PNG/Aseprite/Tiled/tracker → const Rust; clash report
 chuk-speccy-game           reusable systems: maps, sprites, collisions, HUD, splash, menu
 chuk-speccy-env            env wrappers: Obs/reward/done, symbol-map reader, Gym surface
-rustz80               .rs → .tap  +  emits .sym.toml from struct layout   ← the bridge
+rustz80               GENERIC restricted-Rust → Z80 compiler (no game knowledge)
+chuk-speccy-sdk        `compile` feature: impl Game → .tap + .sym.toml (the bridge),
+                       built on rustz80; the dialect prelude + state ABI live here
 chuk-mcp-speccy-kit   AUTHORING plane: scaffold · assets · compile · audit (LAST)
 chuk-mcp-spectrum     RUNTIME plane: play · observe · rewind · record · benchmark
 ```

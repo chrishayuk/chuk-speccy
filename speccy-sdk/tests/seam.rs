@@ -1,3 +1,5 @@
+#![cfg(feature = "compile")]
+
 //! "Prove the seam" (spec 08 §10): one typed `impl Game` source → a bootable
 //! `.tap` *and* a symbol map, and an env reading a typed field off the running
 //! tape's RAM via that map. This is the join the whole authoring plane stands on.
@@ -24,7 +26,8 @@ impl Game for Seam {
 /// codegen layout (every field a `u16` slot at `GAME_STATE + i*2`). No ROM needed.
 #[test]
 fn emits_symbol_map_matching_layout() {
-    let (tap, sym) = rustz80::compile_game_with_symbols(SEAM_GAME, "SEAM").expect("compile");
+    let (tap, sym) =
+        speccy_sdk::compile::compile_game_with_symbols(SEAM_GAME, "SEAM").expect("compile");
     assert!(!tap.is_empty(), "produced a tape");
 
     assert_eq!(sym.base, 0xB000, "the compiler's documented state-base ABI");
@@ -58,7 +61,8 @@ fn emits_symbol_map_matching_layout() {
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
 fn score_round_trips_off_the_running_tape() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let (tap, sym) = rustz80::compile_game_with_symbols(SEAM_GAME, "SEAM").expect("compile");
+    let (tap, sym) =
+        speccy_sdk::compile::compile_game_with_symbols(SEAM_GAME, "SEAM").expect("compile");
     let score_addr = sym.addr_of("score").expect("score in the symbol map");
 
     let read_u16 = |spec: &spectrum::Spectrum| -> u16 {

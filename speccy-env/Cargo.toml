@@ -1,6 +1,6 @@
 [package]
 name = "chuk-speccy-env"
-description = "Agent environments over the deterministic core: read a game's typed state off a running .tap via the rustz80-emitted symbol map, and run the host Game's reward/done/observe over it (spec 08)."
+description = "Agent environments over the deterministic core: read a game's typed state off a running .tap via the compiler-emitted symbol map, and run the host Game's reward/done/observe over it (spec 08)."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -14,5 +14,6 @@ spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spe
 speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }
 
 [dev-dependencies]
-# Compile a dialect game (+ its symbol map) to drive in the end-to-end tests.
-rustz80 = { version = "0.1.0", path = "../rustz80" }
+# Compile a dialect game (+ its symbol map) to drive in the end-to-end tests — via
+# the SDK's `compile` feature (the one game-compile entry point).
+speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk", features = ["compile"] }

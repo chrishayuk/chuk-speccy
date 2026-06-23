@@ -371,25 +371,25 @@ A workspace-wide placement + code review (4 parallel reviewers). Grouped by area
 roughly in priority order. The headline is making `rustz80` a *generic* compiler and
 lifting the game layer into the SDK; the rest is layering hygiene + code quality.
 
-### H1. Make `rustz80` generic; lift the game layer into the SDK
-The leak is deeper than `lib.rs` — it's in `codegen.rs` and `lower.rs` too.
-- [ ] `rustz80` keeps only generic API: `compile_program`/`compile_fn`/`compile_to_tap`,
-  `lower_program` (taking a **prelude/handle config**, not hardcoded `Frame`/`Input`),
-  a parameterised entry-loop codegen (`state_base` a param, no `GAME_STATE`), `to_tap`,
-  `ORG`. Remove `PRELUDE`, `compile_game*`, `has_game`, `find_game_impl`, `struct_layout`,
-  `GAME_STATE`, `codegen_game`, `state_symbols`.
-- [ ] `lower.rs`: `handle_type`/`lower_prelude_call` hardcode the SDK method→prelude-fn
-  map — make it caller-supplied config so the lowerer has no game knowledge.
-- [ ] Move the game layer into `speccy-sdk` behind a **`compile` feature** (`dep:rustz80`,
-  `dep:syn`) so runtime consumers (the 4 frontend bins) stay `syn`-free. CI runs
-  `--all-features`.
-- [ ] Move the `speccy-compile` bin to the SDK (behind `compile`).
-- [ ] **Unify `SymbolMap`**: one `speccy-sdk` type (parse free, emit behind `compile`);
-  delete `speccy-env`'s duplicate copy.
+### H1. Make `rustz80` generic; lift the game layer into the SDK — **done**
+The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All lifted.
+- [x] `rustz80` is now generic API only: `compile_program`/`compile_fn`/`compile_to_tap`,
+  `lower_program(file, &PreludeConfig)`, `codegen_loop(funcs, org, entry, state_base,
+  state_bytes)` (no `GAME_STATE`), `to_tap`, `ORG`. Removed `PRELUDE`, `compile_game*`,
+  `has_game`, `find_game_impl`, `struct_layout`, `GAME_STATE`, `codegen_game`, `state_symbols`.
+- [x] `lower.rs`: `handle_type`/`lower_prelude_call` now use a caller-supplied
+  `PreludeConfig` (the `(handle, method) → fn` map) — the lowerer has no game knowledge.
+- [x] Game layer moved into `speccy-sdk::compile` behind a **`compile` feature**
+  (`dep:rustz80`, `dep:syn`); the frontend bins stay `rustz80`/`syn`-free (verified via
+  `cargo tree`). CI now runs `--all-features`.
+- [x] `speccy-compile` bin moved to the SDK (behind `compile`); release workflow updated.
+- [x] **Unified `SymbolMap`**: one `speccy-sdk::symbols` type (parse + emit, no `syn`);
+  `speccy-env` re-exports it; its duplicate deleted.
 - [ ] Split `samples/`: `bounce`/`move`/`reach` (`impl Game`) → SDK/games side;
-  `snake`/`pixels` (`fn main`) stay as generic `rustz80` examples. Update path refs.
-- [ ] Update spec 08 (it still assigns `.sym.toml` emission to `rustz80` and cites the
-  removed `demo.rs`).
+  `snake`/`pixels` stay generic. *(Deferred — inert `.rs` files referenced by path;
+  left in `rustz80/samples/` to bound churn.)*
+- [x] Spec 08 reconciled with the placement (symbol-map emission is the SDK's, not
+  `rustz80`'s; the removed `demo.rs` reference fixed).
 
 ### H2. Presentation out of the emulator core (`display` vs `spectrum`)
 - [ ] `spectrum` duplicates `display`: `ula::PALETTE` (RGBA) is a copy of

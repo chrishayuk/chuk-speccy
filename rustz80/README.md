@@ -15,11 +15,17 @@ Not an LLVM backend and not real `core`: a `syn` frontend → a small typed IR �
 Z80 codegen (`HL` accumulator, `DE` secondary, a fixed RAM "register file"), plus a
 hand-written mul/div micro-runtime.
 
+`rustz80` is **generic** — it knows nothing about games or any SDK. The game layer
+(`impl Game`, the dialect prelude, the symbol map, the `speccy-compile` CLI) lives in
+[`chuk-speccy-sdk`](../speccy-sdk) behind its `compile` feature, built on this crate's
+generic API (`lower_program` with a caller-supplied `PreludeConfig`, `codegen_loop`,
+`to_tap`).
+
 ## Quick start
 
 ```bash
 # Compile a dialect program to a bootable tape (entry: a no-arg `fn main`):
-cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
 
 # Boot it on the emulator (needs a 48K ROM at testroms/48.rom):
 cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
@@ -84,7 +90,7 @@ The headline. Write an ordinary [`speccy-sdk`](../speccy-sdk/README.md) `Game` a
   `update`). The output boots on the real ROM.
 
 ```bash
-cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/bounce.rs -o bounce.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/bounce.rs -o bounce.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom bounce.tap
 ```
 
@@ -96,7 +102,7 @@ intrinsic, mapped like the SDK). Games stay in the dialect subset (fixed state, 
 `Vec`/`String`).
 
 ```bash
-cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press 5/6/7/8 or Q/A/O/P
 ```
 

@@ -23,9 +23,10 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       # Lint every target (lib, bins, tests, examples) — warnings fail the build.
+      # `--all-features` so the SDK's `compile` flow (rustz80 game layer) is linted/tested.
       - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # The non-gated suite. ROM-backed and network tests are `#[ignore]` (they
       # need SPECTRUM_ROM / the network), so they're skipped here by design.
       - name: test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features

@@ -12,5 +12,20 @@ repository.workspace = true
 [lib]
 name = "speccy_sdk"
 
+# `speccy-compile`: the dialect `.rs` → bootable `.tap` (+ `.sym.toml`) CLI. Needs the
+# `compile` feature (so the runtime API stays free of `rustz80`/`syn`).
+[[bin]]
+name = "speccy-compile"
+path = "src/bin/speccy-compile.rs"
+required-features = ["compile"]
+
+[features]
+# The host game-compile flow (`compile` module + the CLI). Off by default so the
+# runtime API (Game/Frame/Controls/Rng/Entities) doesn't drag in the compiler.
+compile = ["dep:rustz80", "dep:syn"]
+
 [dependencies]
 spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
+# Only for the `compile` feature (the game-compile flow).
+rustz80 = { version = "0.1.0", path = "../rustz80", optional = true }
+syn = { version = "2", features = ["full"], optional = true }

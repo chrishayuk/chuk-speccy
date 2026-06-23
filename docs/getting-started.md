@@ -76,7 +76,7 @@ subset of Rust that's *also real Rust*, compile it to a bootable `.tap`. See the
 **[`rustz80` README](../rustz80/README.md)**.
 
 ```bash
-cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 ```
 
