@@ -20,6 +20,8 @@
 use spectrum::keyboard::{self, KeyPos};
 use spectrum::Spectrum;
 
+pub mod agents;
+
 pub use speccy_sdk::Obs;
 
 /// One field's RAM location, mirroring the compiler's `.sym.toml` entry.
@@ -126,6 +128,11 @@ pub struct StateView {
 }
 
 impl StateView {
+    /// Build a synthetic view (for tests, or agents reasoning over hand-made state).
+    pub fn from_pairs(pairs: &[(&str, u16)]) -> StateView {
+        StateView { values: pairs.iter().map(|(k, v)| ((*k).to_string(), *v)).collect() }
+    }
+
     /// Read a field as `u16` (little-endian); `0` if the field is unknown.
     pub fn u16(&self, name: &str) -> u16 {
         self.values.iter().find(|(n, _)| n == name).map(|(_, v)| *v).unwrap_or(0)
