@@ -65,7 +65,8 @@ fn main() -> ExitCode {
 
     // 50 Hz → an `every`-frame gap is `every*2` centiseconds of playback.
     let delay_cs = (every * 2) as u16;
-    let bytes = display::gif::encode_indexed_to_vec(&gif_frames, 256, 192, &display::AUTHENTIC, delay_cs);
+    let bytes =
+        display::gif::encode_indexed_to_vec(&gif_frames, 256, 192, &display::AUTHENTIC, delay_cs);
     if let Err(e) = std::fs::write(out, &bytes) {
         eprintln!("cannot write {out}: {e}");
         return ExitCode::FAILURE;

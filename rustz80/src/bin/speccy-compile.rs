@@ -26,7 +26,9 @@ fn main() -> ExitCode {
             }
             "--name" => name = args.next(),
             "-h" | "--help" => {
-                eprintln!("usage: speccy-compile <input.rs> [-o out.tap] [--entry main] [--name GAME]");
+                eprintln!(
+                    "usage: speccy-compile <input.rs> [-o out.tap] [--entry main] [--name GAME]"
+                );
                 return ExitCode::SUCCESS;
             }
             other => input = Some(other.to_string()),
@@ -43,7 +45,10 @@ fn main() -> ExitCode {
     });
     // Tape name: up to 10 uppercase chars from the output stem.
     let tape_name = name.unwrap_or_else(|| {
-        let stem = std::path::Path::new(&out_path).file_stem().and_then(|s| s.to_str()).unwrap_or("GAME");
+        let stem = std::path::Path::new(&out_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("GAME");
         stem.to_uppercase().chars().take(10).collect()
     });
 
@@ -81,14 +86,22 @@ fn main() -> ExitCode {
     }
     // Sidecar the symbol map next to the tape (`game.tap` → `game.sym.toml`).
     if let Some(symbols) = &symbols {
-        let sym_path = out_path.strip_suffix(".tap").unwrap_or(&out_path).to_string() + ".sym.toml";
+        let sym_path = out_path
+            .strip_suffix(".tap")
+            .unwrap_or(&out_path)
+            .to_string()
+            + ".sym.toml";
         if let Err(e) = std::fs::write(&sym_path, symbols.to_toml()) {
             eprintln!("error: cannot write {sym_path}: {e}");
             return ExitCode::FAILURE;
         }
         eprintln!("wrote {sym_path} ({} fields)", symbols.fields.len());
     }
-    let how = if is_game { "impl Game".to_string() } else { format!("entry `{entry}`") };
+    let how = if is_game {
+        "impl Game".to_string()
+    } else {
+        format!("entry `{entry}`")
+    };
     eprintln!("wrote {out_path} ({} bytes, {how})", tap.len());
     ExitCode::SUCCESS
 }

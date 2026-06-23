@@ -3,7 +3,9 @@
 //! pumps frames (`speccy-gui <rom> <name>`). They double as manual test ROMs:
 //! `keytest` (input), `typing` (font), `mover` (controls + remap), `snake` (a game).
 
-use speccy_sdk::{Button, Cell, Colour, Controls, Entities, Frame, Game, Input, Rng, Spectrum, Tile, BLOCK};
+use speccy_sdk::{
+    Button, Cell, Colour, Controls, Entities, Frame, Game, Input, Rng, Spectrum, Tile, BLOCK,
+};
 
 /// Demo names — the single source of truth (no magic strings at the call site).
 pub const SNAKE: &str = "snake";
@@ -123,7 +125,9 @@ impl Game for Snake {
             let c = self.body[i];
             frame.tile(&BLOCK, c.x, c.y);
         }
-        frame.ink(Colour::BrightRed).tile(&BLOCK, self.food.x, self.food.y);
+        frame
+            .ink(Colour::BrightRed)
+            .tile(&BLOCK, self.food.x, self.food.y);
         frame.ink(Colour::White);
         frame.text(0, 0, "SNAKE   LEN");
         frame.text_u16(12, 0, self.body.len() as u16);
@@ -172,7 +176,11 @@ impl Game for KeyTest {
         for (i, (label, b)) in rows.iter().enumerate() {
             let y = 8 + i as u8 * 2;
             let held = input.held(*b);
-            frame.ink(if held { Colour::BrightYellow } else { Colour::White });
+            frame.ink(if held {
+                Colour::BrightYellow
+            } else {
+                Colour::White
+            });
             frame.text(8, y, label);
             if held {
                 frame.ink(Colour::BrightGreen);
@@ -247,7 +255,11 @@ pub struct Mover {
 
 impl Default for Mover {
     fn default() -> Self {
-        Mover { x: 16, y: 12, started: false }
+        Mover {
+            x: 16,
+            y: 12,
+            started: false,
+        }
     }
 }
 
@@ -322,10 +334,26 @@ fn install_mover(s: &mut Spectrum) {
 
 /// Every installable demo — the registry. Add a game here and every head picks it up.
 pub const DEMOS: &[Demo] = &[
-    Demo { name: SNAKE, about: "a grid snake", install: install_snake },
-    Demo { name: KEYTEST, about: "input visualiser", install: install_keytest },
-    Demo { name: TYPING, about: "font / typing test", install: install_typing },
-    Demo { name: MOVER, about: "move a blob (WASD — remapped controls)", install: install_mover },
+    Demo {
+        name: SNAKE,
+        about: "a grid snake",
+        install: install_snake,
+    },
+    Demo {
+        name: KEYTEST,
+        about: "input visualiser",
+        install: install_keytest,
+    },
+    Demo {
+        name: TYPING,
+        about: "font / typing test",
+        install: install_typing,
+    },
+    Demo {
+        name: MOVER,
+        about: "move a blob (WASD — remapped controls)",
+        install: install_mover,
+    },
 ];
 
 /// Is `name` a known demo? (For arg parsing, before the machine exists.)

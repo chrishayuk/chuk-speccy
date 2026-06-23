@@ -194,12 +194,7 @@ impl Cpu {
         if res == 0 {
             f |= ZF;
         }
-        if (a & 0x0fff)
-            .wrapping_sub(b & 0x0fff)
-            .wrapping_sub(c as u16)
-            & 0x1000
-            != 0
-        {
+        if (a & 0x0fff).wrapping_sub(b & 0x0fff).wrapping_sub(c as u16) & 0x1000 != 0 {
             f |= HF;
         }
         if (a ^ b) & 0x8000 != 0 && (a ^ res) & 0x8000 != 0 {

@@ -19,7 +19,10 @@ pub fn to_tap(code: &[u8], org: u16, entry: u16, name: &str) -> Vec<u8> {
     tap.extend(tap_block(0x00, &header(0, name, blen, 10, blen)));
     tap.extend(tap_block(0xFF, &basic));
     // CODE: header (load address `org`) + the bytes.
-    tap.extend(tap_block(0x00, &header(3, name, code.len() as u16, org, 0x8000)));
+    tap.extend(tap_block(
+        0x00,
+        &header(3, name, code.len() as u16, org, 0x8000),
+    ));
     tap.extend(tap_block(0xFF, code));
     tap
 }

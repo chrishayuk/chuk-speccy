@@ -119,7 +119,10 @@ fn sequential_decode_walks_a_program() {
         out.push(d.text);
         pc += d.len as u16;
     }
-    assert_eq!(out, ["DI", "LD HL,$4000", "LD A,$02", "OUT ($FE),A", "HALT"]);
+    assert_eq!(
+        out,
+        ["DI", "LD HL,$4000", "LD A,$02", "OUT ($FE),A", "HALT"]
+    );
     assert_eq!(pc as usize, prog.len(), "lengths tile the program exactly");
 }
 
@@ -134,12 +137,14 @@ fn length_matches_cpu_execution() {
     // absolute jumps/calls/returns/RST move PC elsewhere and are pinned by the
     // golden tests instead.
     let is_branch = |op: u8| {
-        matches!(op,
+        matches!(
+            op,
             0xC3 | 0xCD | 0xC9 | 0xE9                                  // JP nn, CALL nn, RET, JP (HL)
             | 0xC2 | 0xCA | 0xD2 | 0xDA | 0xE2 | 0xEA | 0xF2 | 0xFA    // JP cc,nn
             | 0xC4 | 0xCC | 0xD4 | 0xDC | 0xE4 | 0xEC | 0xF4 | 0xFC    // CALL cc,nn
             | 0xC0 | 0xC8 | 0xD0 | 0xD8 | 0xE0 | 0xE8 | 0xF0 | 0xF8    // RET cc
-            | 0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF)   // RST
+            | 0xC7 | 0xCF | 0xD7 | 0xDF | 0xE7 | 0xEF | 0xF7 | 0xFF
+        ) // RST
     };
 
     for op in 0u16..=255 {
@@ -154,7 +159,11 @@ fn length_matches_cpu_execution() {
         cpu.step(&mut bus);
         let advanced = cpu.regs.pc.wrapping_sub(0x8000) as u8;
         let d = disassemble(0x8000, |a| bus.mem[a as usize]);
-        assert_eq!(advanced, d.len, "op {op:02X} ({}): cpu +{advanced}, disasm len {}", d.text, d.len);
+        assert_eq!(
+            advanced, d.len,
+            "op {op:02X} ({}): cpu +{advanced}, disasm len {}",
+            d.text, d.len
+        );
     }
 }
 

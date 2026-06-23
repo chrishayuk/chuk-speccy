@@ -42,7 +42,9 @@ const CC: [&str; 8] = ["NZ", "Z", "NC", "C", "PO", "PE", "P", "M"];
 // CB rotate/shift ops (index 6 = the undocumented SLL).
 const ROT: [&str; 8] = ["RLC", "RRC", "RL", "RR", "SLA", "SRA", "SLL", "SRL"];
 // ALU ops, including the conventional `A,` for the ones that take it.
-const ALU: [&str; 8] = ["ADD A,", "ADC A,", "SUB ", "SBC A,", "AND ", "XOR ", "OR ", "CP "];
+const ALU: [&str; 8] = [
+    "ADD A,", "ADC A,", "SUB ", "SBC A,", "AND ", "XOR ", "OR ", "CP ",
+];
 // ED block ops, indexed `[y-4][z]` (rows: I/D/IR/DR; cols: LD/CP/IN/OUT).
 const BLOCK: [[&str; 4]; 4] = [
     ["LDI", "CPI", "INI", "OUTI"],
@@ -146,7 +148,7 @@ impl<F: Fn(u16) -> u8> Dis<F> {
             let dst = self.mem(im);
             format!("LD {},{}", dst, R[z as usize])
         } else {
-            format!("LD {},{}", self.r8(y, im, ), self.r8(z, im))
+            format!("LD {},{}", self.r8(y, im,), self.r8(z, im))
         }
     }
 

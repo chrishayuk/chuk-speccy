@@ -4,7 +4,9 @@
 use spectrum::Spectrum;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: boot <48.rom> [frames]");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: boot <48.rom> [frames]");
     let frames: u32 = std::env::args()
         .nth(2)
         .and_then(|s| s.parse().ok())

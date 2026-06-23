@@ -182,7 +182,9 @@ fn run_live(spec: &mut Spectrum, cfg: &DisplayConfig, mode: RenderMode, theme: &
     // and auto-releases: (key, optional shift, frames remaining).
     let mut held: Vec<(KeyPos, Option<KeyPos>, u32)> = Vec::new();
     let tick = Duration::from_micros(19_968); // ~50.08 Hz
-    let max_ticks: Option<u64> = std::env::var("SPECCY_TICKS").ok().and_then(|s| s.parse().ok());
+    let max_ticks: Option<u64> = std::env::var("SPECCY_TICKS")
+        .ok()
+        .and_then(|s| s.parse().ok());
     let mut n: u64 = 0;
 
     loop {
@@ -307,7 +309,9 @@ fn query_cell_aspect() -> Option<f64> {
     }
     // Parse "ESC [ 6 ; H ; W t".
     let txt = String::from_utf8_lossy(&buf[..n]);
-    let body = txt.trim_matches(|c| c == '\x1b' || c == '[').trim_end_matches('t');
+    let body = txt
+        .trim_matches(|c| c == '\x1b' || c == '[')
+        .trim_end_matches('t');
     let parts: Vec<&str> = body.split(';').collect();
     if parts.len() == 3 && parts[0] == "6" {
         if let (Ok(h), Ok(w)) = (parts[1].parse::<f64>(), parts[2].parse::<f64>()) {
@@ -324,7 +328,9 @@ fn term_size() -> (usize, usize) {
     if let Ok(o) = std::process::Command::new("stty").arg("size").output() {
         if let Ok(s) = String::from_utf8(o.stdout) {
             let mut it = s.split_whitespace();
-            if let (Some(Ok(r)), Some(Ok(c))) = (it.next().map(str::parse), it.next().map(str::parse)) {
+            if let (Some(Ok(r)), Some(Ok(c))) =
+                (it.next().map(str::parse), it.next().map(str::parse))
+            {
                 return (r, c);
             }
         }
@@ -340,7 +346,13 @@ type Rgb = (u8, u8, u8);
 /// set bits mark the foreground pixels. Because the Spectrum has at most 2 colours
 /// per 8×8 cell, this is usually exact; near attribute boundaries it degrades to
 /// the brightest/darkest pair. Sampling is fractional, so no resolution is wasted.
-fn render_blocks(s: &mut String, frame: &Frame, out_cols: usize, out_rows: usize, mode: RenderMode) {
+fn render_blocks(
+    s: &mut String,
+    frame: &Frame,
+    out_cols: usize,
+    out_rows: usize,
+    mode: RenderMode,
+) {
     let (w, h) = (frame.width, frame.height);
     let (gx, gy) = mode.grid();
     let at = |x: usize, y: usize| -> Rgb {

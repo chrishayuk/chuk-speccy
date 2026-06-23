@@ -42,7 +42,10 @@ fn main() {
         titles.iter().map(String::as_str).collect()
     };
 
-    println!("{:<28} {:<28} {:>5}  {:>6}  result", "query", "title", "fmt", "fill%");
+    println!(
+        "{:<28} {:<28} {:>5}  {:>6}  result",
+        "query", "title", "fmt", "fill%"
+    );
     println!("{}", "-".repeat(86));
     let mut ok = 0usize;
     for q in &titles {
@@ -82,7 +85,13 @@ fn main() {
                 );
             }
             Err(e) => {
-                println!("{:<28} {:<28} {:>5}  {:>6}  FETCH FAIL: {e}", truncate(q, 28), "", "-", "-");
+                println!(
+                    "{:<28} {:<28} {:>5}  {:>6}  FETCH FAIL: {e}",
+                    truncate(q, 28),
+                    "",
+                    "-",
+                    "-"
+                );
             }
         }
     }

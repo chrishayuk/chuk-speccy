@@ -16,11 +16,20 @@ fn snake_renders_on_the_machine() {
 
     let screen = spec.read_memory(0x4000, 6144);
     let set = screen.iter().filter(|&&b| b != 0).count();
-    assert!(set > 50, "the game should be drawing pixels, set bytes = {set}");
+    assert!(
+        set > 50,
+        "the game should be drawing pixels, set bytes = {set}"
+    );
 
     let text = spec.screen_text();
-    assert!(text.contains("SNAKE"), "expected the score line on screen, got:\n{text}");
-    assert!(text.contains("LEN 3"), "expected initial length 3, got:\n{text}");
+    assert!(
+        text.contains("SNAKE"),
+        "expected the score line on screen, got:\n{text}"
+    );
+    assert!(
+        text.contains("LEN 3"),
+        "expected initial length 3, got:\n{text}"
+    );
 }
 
 #[test]
@@ -34,5 +43,8 @@ fn snake_runs_long_without_overflow() {
     for _ in 0..600 {
         spec.run_frame();
     }
-    assert!(spec.screen_text().contains("SNAKE"), "still drawing after a long run");
+    assert!(
+        spec.screen_text().contains("SNAKE"),
+        "still drawing after a long run"
+    );
 }

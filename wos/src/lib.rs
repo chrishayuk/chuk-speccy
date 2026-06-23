@@ -17,7 +17,10 @@ const API: &str = "https://api.zxinfo.dk/v3";
 /// File mirrors, tried in order. Spectrum Computing serves both the legacy
 /// `/pub/sinclair/...` paths and the newer `/zxdb/sinclair/entries/...` ones;
 /// World of Spectrum is a fallback for the legacy layout.
-const MIRRORS: [&str; 2] = ["https://spectrumcomputing.co.uk", "https://worldofspectrum.net"];
+const MIRRORS: [&str; 2] = [
+    "https://spectrumcomputing.co.uk",
+    "https://worldofspectrum.net",
+];
 /// Formats the core can load, best first: instant trap/snapshot loads, then
 /// `.tzx` (real-time, signal-level — needed for turbo/custom loaders, slower).
 const FORMATS: [&str; 4] = ["tap", "z80", "sna", "tzx"];
@@ -73,7 +76,10 @@ fn agent() -> ureq::Agent {
 
 /// GET a URL and parse the body as JSON (avoids ureq's optional `json` feature).
 fn get_json(agent: &ureq::Agent, url: &str) -> Result<serde_json::Value, Error> {
-    let resp = agent.get(url).call().map_err(|e| Error::Http(e.to_string()))?;
+    let resp = agent
+        .get(url)
+        .call()
+        .map_err(|e| Error::Http(e.to_string()))?;
     serde_json::from_reader(resp.into_reader()).map_err(|e| Error::Parse(e.to_string()))
 }
 
@@ -156,7 +162,9 @@ fn candidates(agent: &ureq::Agent, id: &str) -> Result<Vec<Candidate>, Error> {
                     };
                     let lower = path.to_ascii_lowercase();
                     for (rank, ext) in FORMATS.iter().enumerate() {
-                        if lower.ends_with(&format!(".{ext}.zip")) || lower.ends_with(&format!(".{ext}")) {
+                        if lower.ends_with(&format!(".{ext}.zip"))
+                            || lower.ends_with(&format!(".{ext}"))
+                        {
                             // Bias toward 48K builds: the core is a 48K, so a
                             // "128"/"+2"/"+3" file ranks below a plain one.
                             let key = (rank, is_128k(&lower) as usize);
@@ -168,7 +176,10 @@ fn candidates(agent: &ureq::Agent, id: &str) -> Result<Vec<Candidate>, Error> {
         }
     }
     out.sort_by_key(|(key, _, _)| *key);
-    Ok(out.into_iter().map(|((rank, _), ext, path)| (rank, ext, path)).collect())
+    Ok(out
+        .into_iter()
+        .map(|((rank, _), ext, path)| (rank, ext, path))
+        .collect())
 }
 
 /// Download `path` (trying each mirror) and extract the inner `.{ext}` file. The
@@ -204,14 +215,15 @@ fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, Error> {
 }
 
 fn extract_from_zip(bytes: &[u8], ext: &str) -> Result<Vec<u8>, Error> {
-    let mut zip =
-        zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| Error::Parse(e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| Error::Parse(e.to_string()))?;
     let suffix = format!(".{ext}");
     for i in 0..zip.len() {
         let mut f = zip.by_index(i).map_err(|e| Error::Parse(e.to_string()))?;
         if f.name().to_ascii_lowercase().ends_with(&suffix) {
             let mut data = Vec::new();
-            f.read_to_end(&mut data).map_err(|e| Error::Parse(e.to_string()))?;
+            f.read_to_end(&mut data)
+                .map_err(|e| Error::Parse(e.to_string()))?;
             return Ok(data);
         }
     }
@@ -223,7 +235,9 @@ fn extract_from_zip(bytes: &[u8], ext: &str) -> Result<Vec<u8>, Error> {
 /// Heuristic: does this filename look like a 128K / +2 / +3 build? Those won't
 /// run on the 48K core, so they rank below a plain file of the same format.
 fn is_128k(lower_path: &str) -> bool {
-    ["128", "+2", "+3", "plus2", "plus3"].iter().any(|m| lower_path.contains(m))
+    ["128", "+2", "+3", "plus2", "plus3"]
+        .iter()
+        .any(|m| lower_path.contains(m))
 }
 
 const STOPWORDS: [&str; 4] = ["the", "a", "an", "of"];
@@ -232,7 +246,12 @@ const STOPWORDS: [&str; 4] = ["the", "a", "an", "of"];
 /// `"Daley Thompson's Decathlon"` → `["daley", "thompsons", "decathlon"]`.
 fn normalize(s: &str) -> Vec<String> {
     s.split_whitespace()
-        .map(|w| w.chars().filter(|c| c.is_ascii_alphanumeric()).flat_map(|c| c.to_lowercase()).collect::<String>())
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .flat_map(|c| c.to_lowercase())
+                .collect::<String>()
+        })
         .filter(|t| !t.is_empty() && !STOPWORDS.contains(&t.as_str()))
         .collect()
 }
@@ -278,7 +297,10 @@ mod tests {
 
     #[test]
     fn normalize_strips_punctuation_and_stopwords() {
-        assert_eq!(normalize("Daley Thompson's Decathlon"), ["daley", "thompsons", "decathlon"]);
+        assert_eq!(
+            normalize("Daley Thompson's Decathlon"),
+            ["daley", "thompsons", "decathlon"]
+        );
         assert_eq!(normalize("The Lords of Midnight"), ["lords", "midnight"]);
         assert_eq!(normalize("Spy vs Spy"), ["spy", "vs", "spy"]);
     }

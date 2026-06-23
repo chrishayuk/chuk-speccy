@@ -29,7 +29,11 @@ fn tap_structure() {
     assert_eq!(b[0][0], 0x00, "header block flag");
     assert_eq!(b[0][1], 0, "type 0 = BASIC program");
     assert_eq!(&b[0][2..12], b"DEMO      ", "10-char name");
-    assert_eq!(u16::from_le_bytes([b[0][14], b[0][15]]), 10, "autostart line 10");
+    assert_eq!(
+        u16::from_le_bytes([b[0][14], b[0][15]]),
+        10,
+        "autostart line 10"
+    );
 
     // BASIC data: line number 10 (big-endian) and a terminating ENTER.
     assert_eq!(b[1][0], 0xFF, "data block flag");
@@ -39,7 +43,11 @@ fn tap_structure() {
     // CODE header: type 3, load address 0x8000, length 4.
     assert_eq!(b[2][1], 3, "type 3 = CODE");
     assert_eq!(u16::from_le_bytes([b[2][12], b[2][13]]), 4, "code length");
-    assert_eq!(u16::from_le_bytes([b[2][14], b[2][15]]), 0x8000, "load address");
+    assert_eq!(
+        u16::from_le_bytes([b[2][14], b[2][15]]),
+        0x8000,
+        "load address"
+    );
 
     // CODE data == our bytes.
     assert_eq!(b[3][0], 0xFF, "data block flag");
@@ -80,8 +88,16 @@ fn boots_on_real_rom() {
     }
 
     let sentinel = spec.read_memory(0x9F00, 2);
-    assert_eq!(sentinel, vec![222, 173], "main() ran from tape and wrote its sentinel");
-    assert_eq!(spec.read_memory(0x4000, 1)[0], 0xFF, "top-left screen byte poked");
+    assert_eq!(
+        sentinel,
+        vec![222, 173],
+        "main() ran from tape and wrote its sentinel"
+    );
+    assert_eq!(
+        spec.read_memory(0x4000, 1)[0],
+        0xFF,
+        "top-left screen byte poked"
+    );
 }
 
 /// Boot `samples/snake.rs` from tape on the real ROM and confirm the snake both
@@ -93,7 +109,8 @@ fn boots_on_real_rom() {
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
 fn snake_sample_animates() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/snake.rs")).unwrap();
+    let src =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/snake.rs")).unwrap();
     let tap = rustz80::compile_to_tap(&src, "main", "SNAKE").expect("compile");
 
     let mut spec = spectrum::Spectrum::new_48k(&rom);
@@ -120,7 +137,9 @@ fn snake_sample_animates() {
     for _ in 0..400 {
         spec.run_frame();
     }
-    let lit_a = (0x4000u16..0x5800).filter(|&p| spec.read_memory(p, 1)[0] == 0xFF).count();
+    let lit_a = (0x4000u16..0x5800)
+        .filter(|&p| spec.read_memory(p, 1)[0] == 0xFF)
+        .count();
     let a = cell_hash(&spec);
     for _ in 0..1200 {
         spec.run_frame();

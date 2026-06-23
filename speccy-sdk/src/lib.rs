@@ -152,7 +152,9 @@ impl Rng {
     /// Seed the generator. Zero is mapped to a fixed non-zero constant (xorshift
     /// must never have a zero state).
     pub fn seed(seed: u32) -> Self {
-        Rng { state: if seed == 0 { 0x9E37_79B9 } else { seed } }
+        Rng {
+            state: if seed == 0 { 0x9E37_79B9 } else { seed },
+        }
     }
 
     /// Next 32-bit value.
@@ -182,7 +184,10 @@ pub struct Entities<T: Copy + Default, const N: usize> {
 
 impl<T: Copy + Default, const N: usize> Default for Entities<T, N> {
     fn default() -> Self {
-        Entities { items: [T::default(); N], len: 0 }
+        Entities {
+            items: [T::default(); N],
+            len: 0,
+        }
     }
 }
 
@@ -538,7 +543,10 @@ impl Controls {
 
     /// The keys currently bound to `button`.
     pub fn keys_for(&self, button: Button) -> impl Iterator<Item = char> + '_ {
-        self.bindings.iter().filter(move |(b, _)| *b == button).map(|(_, k)| *k)
+        self.bindings
+            .iter()
+            .filter(move |(b, _)| *b == button)
+            .map(|(_, k)| *k)
     }
 
     /// The primary physical key for `button` (first binding) — the one the env
@@ -576,7 +584,13 @@ struct Dispatcher<G> {
 
 impl<G: Game> Dispatcher<G> {
     fn new(game: G, controls: Controls) -> Self {
-        Dispatcher { game, frame: Frame::new(), controls, prev: 0, font_loaded: false }
+        Dispatcher {
+            game,
+            frame: Frame::new(),
+            controls,
+            prev: 0,
+            font_loaded: false,
+        }
     }
 }
 
@@ -588,11 +602,16 @@ impl<G: Game + Send + 'static> HostCalls for Dispatcher<G> {
         }
         // Lift the 8×8 font from the ROM once (chars 32..127 at $3D00).
         if !self.font_loaded {
-            self.frame.font.copy_from_slice(&ctx.read(0x3D00, ATTRS as u16));
+            self.frame
+                .font
+                .copy_from_slice(&ctx.read(0x3D00, ATTRS as u16));
             self.font_loaded = true;
         }
         let cur = self.controls.read(ctx);
-        let input = Input { cur, prev: self.prev };
+        let input = Input {
+            cur,
+            prev: self.prev,
+        };
         self.prev = cur;
 
         self.game.update(&input, &mut self.frame);
@@ -631,9 +650,15 @@ mod tests {
 
     #[test]
     fn input_edges() {
-        let down = Input { cur: Button::Fire as u8, prev: 0 };
+        let down = Input {
+            cur: Button::Fire as u8,
+            prev: 0,
+        };
         assert!(down.held(Button::Fire) && down.pressed(Button::Fire));
-        let still = Input { cur: Button::Fire as u8, prev: Button::Fire as u8 };
+        let still = Input {
+            cur: Button::Fire as u8,
+            prev: Button::Fire as u8,
+        };
         assert!(still.held(Button::Fire) && !still.pressed(Button::Fire));
     }
 

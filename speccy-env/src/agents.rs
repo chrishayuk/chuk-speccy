@@ -63,8 +63,12 @@ pub struct ScriptedAgent;
 
 impl Agent for ScriptedAgent {
     fn act(&mut self, view: &StateView) -> Vec<char> {
-        let (px, py, tx, ty) =
-            (view.u16("px"), view.u16("py"), view.u16("tx"), view.u16("ty"));
+        let (px, py, tx, ty) = (
+            view.u16("px"),
+            view.u16("py"),
+            view.u16("tx"),
+            view.u16("ty"),
+        );
         let mut keys = Vec::new();
         if tx > px {
             keys.push('p'); // right

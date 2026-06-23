@@ -31,7 +31,9 @@ impl z80::Bus for Ram {
 /// Load `bytes` at `ORG`, `CALL` it from a trampoline that `HALT`s on return,
 /// run to the halt, and return `HL`.
 fn run(bytes: &[u8]) -> u16 {
-    let mut bus = Ram { mem: vec![0u8; 0x1_0000] };
+    let mut bus = Ram {
+        mem: vec![0u8; 0x1_0000],
+    };
     let org = rustz80::ORG;
     // trampoline @ 0x7000:  CALL org ; HALT
     bus.mem[0x7000] = 0xCD;
@@ -161,7 +163,9 @@ fn mul_div_rem() {
 
 /// Run a multi-function program from its `entry` symbol.
 fn run_program(prog: &rustz80::Program, entry: &str) -> u16 {
-    let mut bus = Ram { mem: vec![0u8; 0x1_0000] };
+    let mut bus = Ram {
+        mem: vec![0u8; 0x1_0000],
+    };
     let target = prog.symbols[entry];
     bus.mem[0x7000] = 0xCD;
     bus.mem[0x7001] = target as u8;
@@ -217,7 +221,7 @@ fn scalar_u8() {
         let b = 50u8;
         (a + b) as u16
     }); // 150
-    // u8 wrapping must match rustc's wrapping_* exactly.
+        // u8 wrapping must match rustc's wrapping_* exactly.
     check!({
         let a = 200u8;
         let b = 100u8;
@@ -233,12 +237,12 @@ fn scalar_u8() {
         let b = 20u8;
         a.wrapping_mul(b) as u16
     }); // 400 wraps to 144
-    // u16 -> u8 cast truncates to the low byte.
+        // u16 -> u8 cast truncates to the low byte.
     check!({
         let x = 300u16;
         (x as u8) as u16
     }); // 44
-    // u8 loop counter with widening reads.
+        // u8 loop counter with widening reads.
     check!({
         let mut sum = 0u16;
         let mut i = 0u8;
@@ -261,7 +265,7 @@ fn arrays() {
         a[3] = 40u16;
         a[1] + a[3]
     }); // 60
-    // array literal + variable index (needs `as usize` — valid host Rust)
+        // array literal + variable index (needs `as usize` — valid host Rust)
     check!({
         let a = [3u16, 1u16, 4u16, 1u16, 5u16];
         let mut sum = 0u16;
@@ -272,7 +276,7 @@ fn arrays() {
         }
         sum
     }); // 14
-    // fill via loop, read back
+        // fill via loop, read back
     check!({
         let mut sq = [0u16; 8];
         let mut i = 0u16;
@@ -282,7 +286,7 @@ fn arrays() {
         }
         sq[7]
     }); // 49
-    // in-place reverse, then read both ends
+        // in-place reverse, then read both ends
     check!({
         let mut a = [1u16, 2u16, 3u16, 4u16, 5u16];
         let mut i = 0u16;
@@ -308,13 +312,13 @@ fn byte_arrays() {
         let a = [10u8, 20u8, 30u8, 250u8];
         a[0] as u16 + a[3] as u16
     }); // 260
-    // Low-byte truncation must match `as u8`.
+        // Low-byte truncation must match `as u8`.
     check!({
         let mut a = [0u8; 2];
         a[0] = 300u16 as u8;
         a[0] as u16
     }); // 300 as u8 = 44
-    // Fill a byte array in a loop, read back.
+        // Fill a byte array in a loop, read back.
     check!({
         let mut a = [0u8; 5];
         let mut i = 0u16;
@@ -579,7 +583,9 @@ fn bitwise() {
 
 /// Run a no-result program (entry `run`) on a 64K RAM bus and return the bus.
 fn run_to_memory(prog: &rustz80::Program, entry: &str) -> Vec<u8> {
-    let mut bus = Ram { mem: vec![0u8; 0x1_0000] };
+    let mut bus = Ram {
+        mem: vec![0u8; 0x1_0000],
+    };
     let target = prog.symbols[entry];
     bus.mem[0x7000] = 0xCD;
     bus.mem[0x7001] = target as u8;
@@ -634,7 +640,11 @@ fn pixels_to_screen() {
         let addr = 0x4000 + ((y & 0xC0) << 5) + ((y & 0x07) << 8) + ((y & 0x38) << 2) + (x >> 3);
         want[addr as usize] |= 0x80 >> (x & 7);
     }
-    assert_eq!(&mem[0x4000..0x5800], &want[0x4000..0x5800], "screen bytes differ");
+    assert_eq!(
+        &mem[0x4000..0x5800],
+        &want[0x4000..0x5800],
+        "screen bytes differ"
+    );
 }
 
 #[test]
