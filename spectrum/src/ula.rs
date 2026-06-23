@@ -27,28 +27,8 @@ fn build_contention_table() -> Vec<u8> {
     table
 }
 
-/// The 8 hardware colours as RGBA, [normal, bright]. Index by the 3-bit colour.
-/// Bright black is the same as normal black.
-pub const PALETTE: [[u8; 4]; 16] = [
-    // normal (BRIGHT=0)
-    [0x00, 0x00, 0x00, 0xFF], // black
-    [0x00, 0x00, 0xD7, 0xFF], // blue
-    [0xD7, 0x00, 0x00, 0xFF], // red
-    [0xD7, 0x00, 0xD7, 0xFF], // magenta
-    [0x00, 0xD7, 0x00, 0xFF], // green
-    [0x00, 0xD7, 0xD7, 0xFF], // cyan
-    [0xD7, 0xD7, 0x00, 0xFF], // yellow
-    [0xD7, 0xD7, 0xD7, 0xFF], // white
-    // bright (BRIGHT=1)
-    [0x00, 0x00, 0x00, 0xFF],
-    [0x00, 0x00, 0xFF, 0xFF],
-    [0xFF, 0x00, 0x00, 0xFF],
-    [0xFF, 0x00, 0xFF, 0xFF],
-    [0x00, 0xFF, 0x00, 0xFF],
-    [0x00, 0xFF, 0xFF, 0xFF],
-    [0xFF, 0xFF, 0x00, 0xFF],
-    [0xFF, 0xFF, 0xFF, 0xFF],
-];
+// The authentic colour palette is owned by the `display` crate
+// ([`display::AUTHENTIC`]) — the one source of truth; `render_rgba` reads it there.
 
 pub const SCREEN_W: usize = 256;
 pub const SCREEN_H: usize = 192;
@@ -262,7 +242,8 @@ impl Ula {
         let idx = self.screen_indexed(ram);
         let mut fb = vec![0u8; SCREEN_W * SCREEN_H * 4];
         for (i, &c) in idx.iter().enumerate() {
-            fb[i * 4..i * 4 + 4].copy_from_slice(&PALETTE[c as usize]);
+            let [r, g, b] = display::AUTHENTIC[c as usize];
+            fb[i * 4..i * 4 + 4].copy_from_slice(&[r, g, b, 0xFF]);
         }
         fb
     }
