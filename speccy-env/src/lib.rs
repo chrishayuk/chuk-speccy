@@ -10,7 +10,7 @@
 //! are reproducible.
 //!
 //! ```ignore
-//! let (tap, map) = rustz80::compile_game_with_symbols(src, "GAME")?;
+//! let (tap, map) = speccy_sdk::compile::compile_game_with_symbols(src, "GAME")?;
 //! let map = speccy_env::SymbolMap::from_toml(&map.to_toml())?;
 //! let mut env = speccy_env::SpectrumEnv::new(&rom, &tap, map, 450);
 //! let step = env.step_game::<MyGame>(&['o'], 4);   // hold O for 4 frames
@@ -24,114 +24,9 @@ pub mod agents;
 
 pub use speccy_sdk::Obs;
 
-/// One field's RAM location, mirroring the compiler's `.sym.toml` entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Field {
-    pub name: String,
-    pub addr: u16,
-    pub width: u8,
-    /// Element count: 1 for a scalar, `N` for a `[u16; N]` array field.
-    pub count: u16,
-    pub ty: String,
-}
-
-/// The game-state layout read from a `.sym.toml` sidecar — the env's view of where
-/// the typed fields live (spec 08 §2). Parsed, never hand-written.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SymbolMap {
-    pub base: u16,
-    pub size: u16,
-    pub fields: Vec<Field>,
-}
-
-fn parse_int(s: &str) -> Result<u16, String> {
-    let s = s.trim();
-    let v = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u16::from_str_radix(hex, 16)
-    } else {
-        s.parse::<u16>()
-    };
-    v.map_err(|_| format!("bad integer {s:?}"))
-}
-
-impl SymbolMap {
-    /// Parse a `.sym.toml` sidecar (the artifact `rustz80` emits next to the tape).
-    /// Deliberately tolerant of our own fixed format rather than a full TOML parser.
-    pub fn from_toml(src: &str) -> Result<SymbolMap, String> {
-        let mut map = SymbolMap::default();
-        let mut section = "";
-        for line in src.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some(name) = line.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
-                section = match name {
-                    "state" => "state",
-                    "fields" => "fields",
-                    _ => "",
-                };
-                continue;
-            }
-            match section {
-                "state" => {
-                    if let Some(v) = kv(line, "base") {
-                        map.base = parse_int(v)?;
-                    } else if let Some(v) = kv(line, "size") {
-                        map.size = parse_int(v)?;
-                    }
-                }
-                "fields" => map.fields.push(parse_field(line)?),
-                _ => {}
-            }
-        }
-        Ok(map)
-    }
-
-    /// Address of a named field, if present.
-    pub fn addr_of(&self, name: &str) -> Option<u16> {
-        self.fields.iter().find(|f| f.name == name).map(|f| f.addr)
-    }
-}
-
-/// Split a `key = value` line; returns the value if the key matches.
-fn kv<'a>(line: &'a str, key: &str) -> Option<&'a str> {
-    let (k, v) = line.split_once('=')?;
-    (k.trim() == key).then(|| v.trim())
-}
-
-/// Parse `"name" = { addr = 0x.., width = N, ty = ".." }`.
-fn parse_field(line: &str) -> Result<Field, String> {
-    let name = line
-        .split('"')
-        .nth(1)
-        .ok_or_else(|| format!("no field name in {line:?}"))?
-        .to_string();
-    let inner = line
-        .split_once('{')
-        .and_then(|(_, r)| r.split_once('}'))
-        .map(|(b, _)| b)
-        .ok_or_else(|| format!("no {{ }} body in {line:?}"))?;
-    let (mut addr, mut width, mut count, mut ty) = (0u16, 2u8, 1u16, "u16".to_string());
-    for part in inner.split(',') {
-        if let Some((k, v)) = part.split_once('=') {
-            match k.trim() {
-                "addr" => addr = parse_int(v)?,
-                "width" => width = parse_int(v)? as u8,
-                "count" => count = parse_int(v)?,
-                "ty" => ty = v.trim().trim_matches('"').to_string(),
-                _ => {}
-            }
-        }
-    }
-    Ok(Field {
-        name,
-        addr,
-        width,
-        count,
-        ty,
-    })
-}
+/// The symbol map + symbol type come from the SDK (one source of truth for the
+/// `.sym.toml` contract — emit on the SDK's `compile` feature, parse here).
+pub use speccy_sdk::{Symbol, SymbolMap};
 
 /// A snapshot of the game's typed fields, read from RAM via the [`SymbolMap`].
 /// The full layout is always present (spec 08 §2), so any `Self` can be rebuilt.
@@ -230,7 +125,7 @@ impl SpectrumEnv {
                 let bytes = self.spec.read_memory(f.addr, f.width.max(1) as u16);
                 let v = bytes.first().copied().unwrap_or(0) as u16
                     | (*bytes.get(1).unwrap_or(&0) as u16) << 8;
-                (f.name.clone(), if f.width <= 1 { v & 0xFF } else { v })
+                (f.field.clone(), if f.width <= 1 { v & 0xFF } else { v })
             })
             .collect();
         StateView { values }

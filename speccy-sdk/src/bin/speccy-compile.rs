@@ -1,12 +1,14 @@
-//! `speccy-compile` — compile a rustz80-dialect `.rs` file to a bootable `.tap`.
+//! `speccy-compile` — compile an SDK-dialect `.rs` file to a bootable `.tap`.
 //!
 //! ```text
 //! speccy-compile game.rs [-o game.tap] [--entry main] [--name GAME]
 //! ```
 //!
-//! The dialect file must contain the entry function (default `main`, no args).
+//! An `impl Game` compiles via the SDK game flow (frame loop + a `.sym.toml` symbol
+//! map sidecar); otherwise the file needs a no-arg `fn main` entry (generic path).
 //! Load the resulting tape in `speccy-gui` (or any Spectrum) to run it.
 
+use speccy_sdk::compile;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -43,7 +45,6 @@ fn main() -> ExitCode {
         let stem = input.strip_suffix(".rs").unwrap_or(&input);
         format!("{stem}.tap")
     });
-    // Tape name: up to 10 uppercase chars from the output stem.
     let tape_name = name.unwrap_or_else(|| {
         let stem = std::path::Path::new(&out_path)
             .file_stem()
@@ -59,12 +60,12 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // An `impl Game` compiles via the SDK-prelude path (frame loop) and also emits
-    // a `.sym.toml` symbol map (the env bridge); otherwise the file needs a no-arg
-    // `fn main` entry.
-    let is_game = rustz80::has_game(&src);
+
+    // An `impl Game` compiles via the SDK game flow (+ a `.sym.toml` symbol map);
+    // otherwise the file needs a no-arg `fn main` entry (the generic compiler path).
+    let is_game = compile::has_game(&src);
     let (tap, symbols) = if is_game {
-        match rustz80::compile_game_with_symbols(&src, &tape_name) {
+        match compile::compile_game_with_symbols(&src, &tape_name) {
             Ok((t, s)) => (t, Some(s)),
             Err(e) => {
                 eprintln!("error: {input}: {e}");

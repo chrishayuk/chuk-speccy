@@ -46,7 +46,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release -p speccy -p rustz80
+        # speccy-* heads from `speccy`; speccy-compile is the SDK's `compile`-feature bin.
+        run: cargo build --release -p speccy -p chuk-speccy-sdk --features chuk-speccy-sdk/compile
 
       - name: Package
         id: pkg

@@ -39,7 +39,7 @@ cargo run --release --bin speccy-gui -- testroms/48.rom testroms/manic.z80   # p
 cargo run --release --bin speccy-gui -- testroms/48.rom "Skool Daze"          # add `fullscreen` to project it
 cargo run --release --bin speccy     -- testroms/48.rom testroms/manic.z80 terminal   # themed TUI
 # …or write a game in Rust and boot it:
-cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 ```
 

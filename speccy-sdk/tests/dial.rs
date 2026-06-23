@@ -1,9 +1,17 @@
+#![cfg(feature = "compile")]
+
 //! The fidelity dial, closed end to end: `samples/bounce.rs` and `samples/move.rs`
 //! are each compiled **both** by `rustc` (as `speccy-sdk` `Game`s) and by `rustz80`
 //! (to bootable tapes) — one source, two compilers.
 
-const BOUNCE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/bounce.rs"));
-const MOVE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/move.rs"));
+const BOUNCE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../rustz80/samples/bounce.rs"
+));
+const MOVE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../rustz80/samples/move.rs"
+));
 
 /// Host side: the same sample texts, compiled here by `rustc` against `speccy-sdk`.
 /// If they type-check as `Game`s, this passes (a compile-time assertion).
@@ -14,7 +22,10 @@ fn host_games_are_valid_rust() {
     #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
     mod bounce {
         use speccy_sdk::*;
-        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/bounce.rs"));
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rustz80/samples/bounce.rs"
+        ));
         pub fn check() {
             fn is_game<T: Game + Default>() {}
             is_game::<Bounce>();
@@ -23,7 +34,10 @@ fn host_games_are_valid_rust() {
     #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
     mod mover {
         use speccy_sdk::*;
-        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/move.rs"));
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../rustz80/samples/move.rs"
+        ));
         pub fn check() {
             fn is_game<T: Game + Default>() {}
             is_game::<Mover>();
@@ -36,9 +50,9 @@ fn host_games_are_valid_rust() {
 /// Pure side: the same texts compile through `rustz80` to `.tap`s.
 #[test]
 fn games_compile_pure() {
-    assert!(rustz80::has_game(BOUNCE) && rustz80::has_game(MOVE));
-    rustz80::compile_game(BOUNCE, "BOUNCE").expect("bounce compiles");
-    rustz80::compile_game(MOVE, "MOVE").expect("move compiles");
+    assert!(speccy_sdk::compile::has_game(BOUNCE) && speccy_sdk::compile::has_game(MOVE));
+    speccy_sdk::compile::compile_game(BOUNCE, "BOUNCE").expect("bounce compiles");
+    speccy_sdk::compile::compile_game(MOVE, "MOVE").expect("move compiles");
 }
 
 fn boot(rom: &[u8], tap: &[u8]) -> spectrum::Spectrum {
@@ -64,7 +78,7 @@ fn bounce_boots_visible_and_animates() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
     let mut spec = boot(
         &rom,
-        &rustz80::compile_game(BOUNCE, "BOUNCE").expect("compile"),
+        &speccy_sdk::compile::compile_game(BOUNCE, "BOUNCE").expect("compile"),
     );
 
     // clear(Black) must set white ink on black paper, else pixels are invisible.
@@ -101,7 +115,7 @@ fn bounce_boots_visible_and_animates() {
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
 fn move_responds_to_keys() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let (tap, sym) = rustz80::compile_game_with_symbols(MOVE, "MOVE").expect("compile");
+    let (tap, sym) = speccy_sdk::compile::compile_game_with_symbols(MOVE, "MOVE").expect("compile");
     let mut spec = boot(&rom, &tap);
 
     // Read Mover's `x` field at the address the compiler emitted in the symbol map.

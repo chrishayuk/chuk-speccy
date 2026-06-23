@@ -1,3 +1,5 @@
+#![cfg(feature = "compile")]
+
 //! Array struct fields: a `[u16; N]` field lives inline in the game state, gets a
 //! proper symbol-map entry (with `count`), and reads/writes correctly on hardware.
 //! This is what lets a game hold its own grid/level instead of poking raw memory.
@@ -32,7 +34,8 @@ impl Game for Arr {
 
 #[test]
 fn array_field_layout_in_symbol_map() {
-    let (tap, sym) = rustz80::compile_game_with_symbols(ARR_GAME, "ARR").expect("compile");
+    let (tap, sym) =
+        speccy_sdk::compile::compile_game_with_symbols(ARR_GAME, "ARR").expect("compile");
     assert!(!tap.is_empty());
     let base = sym.base; // read the base from the map, not a compiler constant
     assert_eq!(sym.addr_of("sum"), Some(base), "scalar at slot 0");
@@ -64,7 +67,8 @@ fn array_field_layout_in_symbol_map() {
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
 fn array_field_reads_and_writes_on_hardware() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let (tap, sym) = rustz80::compile_game_with_symbols(ARR_GAME, "ARR").expect("compile");
+    let (tap, sym) =
+        speccy_sdk::compile::compile_game_with_symbols(ARR_GAME, "ARR").expect("compile");
     let cells_addr = sym.addr_of("cells").unwrap();
     let sum_addr = sym.addr_of("sum").unwrap();
 

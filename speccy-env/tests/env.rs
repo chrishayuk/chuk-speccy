@@ -5,7 +5,7 @@
 
 use speccy_env::{FromState, SpectrumEnv, StateView, SymbolMap};
 
-/// The same minimal game as `rustz80/tests/seam.rs`: `score` ticks up every frame.
+/// The same minimal game as `speccy-sdk/tests/seam.rs`: `score` ticks up every frame.
 const SEAM_GAME: &str = r#"
 struct Seam {
     score: u16,
@@ -56,7 +56,8 @@ impl FromState for ScoreGame {
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
 fn env_reads_reward_off_the_tape_and_resets_bit_exact() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let (tap, rz_map) = rustz80::compile_game_with_symbols(SEAM_GAME, "SEAM").expect("compile");
+    let (tap, rz_map) =
+        speccy_sdk::compile::compile_game_with_symbols(SEAM_GAME, "SEAM").expect("compile");
     // Go through the sidecar format — exactly what a consumer with a `.tap` +
     // `.sym.toml` on disk would do.
     let map = SymbolMap::from_toml(&rz_map.to_toml()).expect("parse sym.toml");

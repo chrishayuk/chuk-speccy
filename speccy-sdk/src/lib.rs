@@ -16,6 +16,14 @@ use spectrum::host::{HostCalls, HostCtx};
 use spectrum::keyboard;
 pub use spectrum::Spectrum;
 
+pub mod symbols;
+pub use symbols::{Symbol, SymbolMap};
+
+/// Compile an SDK `impl Game` to a bootable `.tap` + symbol map (spec 08). Behind
+/// the `compile` feature so runtime consumers don't pull in `rustz80`/`syn`.
+#[cfg(feature = "compile")]
+pub mod compile;
+
 /// The per-frame host syscall id (`docs/03` id map, `0x60` = game).
 pub const GAME_TICK: u8 = 0x60;
 

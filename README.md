@@ -35,7 +35,7 @@ controlled, reproducible agent/RL environment, not just nostalgiaware.
 **3 — Write a game in Rust and boot it.** The same `.rs` runs under `rustc` (host,
 for debugging) *and* compiles **pure** to a real tape via [`rustz80`](./rustz80/README.md).
 ```bash
-cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/move.rs -o move.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press Q/A/O/P
 ```
 
@@ -117,7 +117,7 @@ intrinsics — enough to write a game.
 
 ```bash
 # Compile the dialect Snake to a bootable tape, then run it on the real ROM:
-cargo run -p rustz80 --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 ```
 
@@ -134,9 +134,9 @@ Any dialect `.rs` with a no-arg `fn main()` compiles the same way (the autoloade
 | [`display`](./display) | Theme + effect pipeline (palette remap / duotone ramp / scanlines). One `DisplayConfig`, every head. |
 | [`frontend`](./frontend) | `speccy` (TUI), `speccy-gui` (native window), `speccy-library` (headless check). |
 | [`wos`](./wos) | World of Spectrum search + download (ZXInfo API), shared by the CLI and MCP. |
-| [`speccy-sdk`](./speccy-sdk) | Native Rust game SDK **(the library)**: `Game`, `Frame`, `Controls`, `Rng`, `Entities` — write `Game::update`, run on the substrate over the trap ABI. |
+| [`speccy-sdk`](./speccy-sdk) | Native Rust game SDK: `Game`, `Frame`, `Controls`, `Rng`, `Entities`, the `SymbolMap`. The game-compile flow (`impl Game` → `.tap` + `.sym.toml`, the `speccy-compile` CLI) is behind its **`compile` feature** (runtime use stays `syn`-free). |
 | [`speccy-games`](./speccy-games) | Demo games built **on** the SDK (`snake` / `keytest` / `typing` / `mover`) + a name→installer registry. Content, not library. |
-| [`rustz80`](./rustz80) | Restricted Rust → Z80 compiler (`syn` frontend, own IR/codegen, mul/div micro-runtime) + `speccy-compile` (`.rs` → bootable `.tap` + `.sym.toml` symbol map). |
+| [`rustz80`](./rustz80) | **Generic** restricted Rust → Z80 compiler (`syn` frontend, own IR/codegen, mul/div micro-runtime). Knows nothing about games — the SDK's `compile` feature builds the game layer on it. |
 | [`speccy-env`](./speccy-env) | Agent environments: read typed game state off a running `.tap` via the symbol map, run the host `Game`'s `reward`/`done`/`observe`; bit-exact `reset`. |
 | [`zxspec_py`](./zxspec_py) | PyO3 binding exposing the core to Python (maturin). |
 | [`chuk-mcp-spectrum`](./chuk-mcp-spectrum) | The MCP server (two endpoints + autonomy plane). |

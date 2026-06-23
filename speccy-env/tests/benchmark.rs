@@ -50,7 +50,7 @@ fn reach_source() -> String {
 #[test]
 fn reach_compiles_and_reconstructs() {
     let (_tap, rz_map) =
-        rustz80::compile_game_with_symbols(&reach_source(), "REACH").expect("compile");
+        speccy_sdk::compile::compile_game_with_symbols(&reach_source(), "REACH").expect("compile");
     let map = SymbolMap::from_toml(&rz_map.to_toml()).expect("parse");
     assert!(map.addr_of("score").is_some() && map.addr_of("px").is_some());
 
@@ -76,7 +76,7 @@ fn reach_compiles_and_reconstructs() {
 fn scripted_beats_random_on_reach() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
     let (tap, rz_map) =
-        rustz80::compile_game_with_symbols(&reach_source(), "REACH").expect("compile");
+        speccy_sdk::compile::compile_game_with_symbols(&reach_source(), "REACH").expect("compile");
     let map = SymbolMap::from_toml(&rz_map.to_toml()).expect("parse");
     let mut env = SpectrumEnv::new(&rom, &tap, map, 500);
 

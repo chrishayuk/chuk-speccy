@@ -166,55 +166,35 @@ pub fn codegen_program(
     a.finish()
 }
 
-/// Where a `Game`'s single global state instance lives (well above the per-function
-/// scratch at `SCRATCH`); the entry zeroes it and passes its address as `self`.
-pub(crate) const GAME_STATE: u16 = 0xB000;
-
-/// Build the game-state symbol map from its `(field, slots)` layout. Codegen owns
-/// the RAM layout (state lives at [`GAME_STATE`], consecutive `u16` slots), so it is
-/// the single place that assigns field addresses — callers read them off the map.
-pub(crate) fn state_symbols(layout: &[(String, usize)]) -> crate::SymbolMap {
-    let mut fields = Vec::with_capacity(layout.len());
-    let mut slot = 0usize;
-    for (name, slots) in layout {
-        fields.push(crate::Symbol {
-            field: name.clone(),
-            addr: GAME_STATE + (slot as u16) * 2,
-            width: 2,
-            count: *slots as u16,
-            ty: "u16".to_string(),
-        });
-        slot += *slots;
-    }
-    crate::SymbolMap {
-        base: GAME_STATE,
-        size: (slot as u16) * 2,
-        fields,
-    }
-}
-
-/// Compile a `Game` program: a generated frame-loop entry at `org` + the functions.
-/// The entry zeroes `state_bytes` of state, then each frame does
-/// `EI; HALT; DI; CALL update(&state, 0, 0)` — interrupts on only for the `HALT`
-/// frame-sync, off during `update` (so its arithmetic isn't corrupted).
-pub fn codegen_game(funcs: &[(String, Func)], org: u16, update: &str, state_bytes: u16) -> Vec<u8> {
+/// A generic **frame-synced entry loop** at `org`: zero a `state_bytes` region at
+/// `state_base`, then each interrupt do `EI; HALT; DI; CALL entry(state_base, 0, 0);
+/// JP loop` — interrupts on only for the `HALT` frame-sync, off during `entry` (so
+/// its arithmetic isn't corrupted by the ROM's keyboard scan). The compiler knows
+/// nothing about "games": `entry`, `state_base`, and `state_bytes` are the caller's.
+pub fn codegen_loop(
+    funcs: &[(String, Func)],
+    org: u16,
+    entry: &str,
+    state_base: u16,
+    state_bytes: u16,
+) -> Vec<u8> {
     let mut a = Asm::new(org);
     a.byte(0xF3); // DI
-                  // Zero the global state (memset via LD (HL),0 + LDIR).
+                  // Zero the state region (memset via LD (HL),0 + LDIR).
     if state_bytes >= 2 {
         a.byte(0x21);
-        a.word(GAME_STATE); // LD HL, STATE
+        a.word(state_base); // LD HL, STATE
         a.byte(0x36);
         a.byte(0x00); // LD (HL), 0
         a.byte(0x11);
-        a.word(GAME_STATE + 1); // LD DE, STATE+1
+        a.word(state_base + 1); // LD DE, STATE+1
         a.byte(0x01);
         a.word(state_bytes - 1); // LD BC, n-1
         a.byte(0xED);
         a.byte(0xB0); // LDIR
     } else if state_bytes == 1 {
         a.byte(0x21);
-        a.word(GAME_STATE);
+        a.word(state_base);
         a.byte(0x36);
         a.byte(0x00);
     }
@@ -224,12 +204,12 @@ pub fn codegen_game(funcs: &[(String, Func)], org: u16, update: &str, state_byte
     a.byte(0x76); // HALT     (wait for the 50 Hz frame interrupt)
     a.byte(0xF3); // DI
     a.byte(0x21);
-    a.word(GAME_STATE); // LD HL, &state   (self)
+    a.word(state_base); // LD HL, &state   (first arg)
     a.byte(0x11);
-    a.word(0); // LD DE, 0   (input handle, unused)
+    a.word(0); // LD DE, 0   (second arg, unused)
     a.byte(0x01);
-    a.word(0); // LD BC, 0   (frame handle, unused)
-    a.call(update); // CALL T::update
+    a.word(0); // LD BC, 0   (third arg, unused)
+    a.call(entry); // CALL entry
     a.jump(0xC3, loop_l); // JP loop
 
     let mut base = 0u16;
