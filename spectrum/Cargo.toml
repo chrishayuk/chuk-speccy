@@ -11,3 +11,6 @@ name = "spectrum"
 
 [dependencies]
 z80 = { package = "chuk-speccy-z80", version = "0.1.0", path = "../z80" }
+# The authentic colour palette (one source of truth for RGBA rendering). `display`
+# is standalone (no emulator deps), so this is a clean downward reference.
+display = { package = "chuk-speccy-display", version = "0.1.0", path = "../display" }

@@ -391,10 +391,10 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
 - [x] Spec 08 reconciled with the placement (symbol-map emission is the SDK's, not
   `rustz80`'s; the removed `demo.rs` reference fixed).
 
-### H2. Presentation out of the emulator core (`display` vs `spectrum`)
-- [ ] `spectrum` duplicates `display`: `ula::PALETTE` (RGBA) is a copy of
-  `display::AUTHENTIC`; `screen_rgba`/`render_rgba` bake presentation into the core.
-  Route RGBA through `display`; delete the core's copy (it *will* drift).
+### H2. Presentation out of the emulator core (`display` vs `spectrum`) — **done**
+- [x] Deleted `spectrum::ula::PALETTE` (the duplicate); `render_rgba`/`screen_rgba` now
+  read `display::AUTHENTIC` (one source of truth). `spectrum` depends on `display`
+  (standalone, no emulator deps → clean downward reference).
 
 ### H3. Frontend de-duplication
 - [ ] No `frontend` lib → media-load dispatch copy-pasted across all 4 bins and already
