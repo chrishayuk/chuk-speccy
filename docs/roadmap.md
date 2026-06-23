@@ -268,19 +268,23 @@ dial is never multiplied before it's watched close:
   `rustz80/tests/seam.rs` proves it on the real ROM — a typed `score` field read off
   the running tape **via its emitted address**, climbing as the game runs. The bridge
   exists.
-- [ ] **The symbol map — the env side.** reward/done/observe run on a `Self`
-  *reconstructed from RAM* via the map (the bridge's other half, in `chuk-speccy-env`).
-  **Supersedes hand-written memory maps for *authored* games** (a hand `memory_map.toml`
-  survives only for *found* commercial titles); the `env_report` trap becomes an
-  optional fast-path.
+- [x] **The symbol map — the env side** (*done*; the bridge's other half).
+  `chuk-speccy-env` parses the `.sym.toml`, reads the typed fields off a running
+  tape's RAM into a `StateView`, reconstructs a host `Self` (`FromState`), and runs
+  the **same** host `reward`/`done`/`observe` over it — proven end to end in
+  `speccy-env/tests/env.rs`. **Supersedes hand-written memory maps for *authored*
+  games** (a hand `memory_map.toml` survives only for *found* commercial titles); the
+  `env_report` trap becomes an optional fast-path.
 - [x] **Widened `Game` trait** — `observe() -> Obs`, `reward(&self, prev: &Self) -> i16`
   (typed — **no string DSL**), `done()`, `reset(seed)`, all with defaults so every
   existing game compiles unchanged. The demo Snake overrides `reward` (score delta) /
   `done` (death) / `reset` (seed). Writing a game *is* writing its env.
-- [ ] **`chuk-speccy-env`** — the Gym surface (`reset` = `deserialize_full`, `step` =
-  keys + `run_frames`, obs = pixels / typed features; the snapshot tree = MCTS
-  rollouts) + agent examples (random, scripted, **memory-probe**, vision-LLM, replay)
-  + a benchmark score table. `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
+- [~] **`chuk-speccy-env`** — the Gym surface *exists*: `SpectrumEnv` with bit-exact
+  `reset` (`serialize_full` snapshot / `deserialize_full`), `step_game` (hold keys +
+  `run_frames`), `frame_indexed` (pixel obs), `view`/`reconstruct` (typed obs via the
+  symbol map), and `Transition { obs, reward, done }`. *Remaining:* agent examples
+  (random, scripted, **memory-probe**, vision-LLM, replay) + a benchmark score table.
+  `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
 - [ ] **2 · The kit (L1 + L0)** — `chuk-speccy-game` (subset-clean Sprite/TileMap/
   Scene/Hud/SoundBank; sprites *name* the colour-clash; a dirty-cell engine as the
   **dial canary**) + `chuk-speccy-assets` (PNG/Tiled/tracker → `const`; the
