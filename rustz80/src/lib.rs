@@ -15,7 +15,6 @@ mod ir;
 mod lower;
 mod tap;
 
-pub use codegen::GAME_STATE;
 pub use ir::Func;
 pub use tap::to_tap;
 
@@ -119,10 +118,9 @@ pub fn compile_game(src: &str, name: &str) -> Result<Vec<u8>, String> {
 pub fn compile_game_with_symbols(src: &str, name: &str) -> Result<(Vec<u8>, SymbolMap), String> {
     let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
     let ty = find_game_impl(&file).ok_or("no `impl Game for T` found")?;
-    let field_names = struct_field_names(&file, &ty).ok_or_else(|| format!("struct `{ty}` not found"))?;
-    let state_bytes =
-        u8::try_from(field_names.len() * 2).map_err(|_| "game state too large".to_string())?;
-    let symbols = SymbolMap::from_fields(&ty, &field_names);
+    let layout = struct_layout(&file, &ty).ok_or_else(|| format!("struct `{ty}` not found"))?;
+    let symbols = codegen::state_symbols(&layout); // codegen owns the RAM layout
+    let state_bytes = symbols.size; // total state, in bytes
 
     let combined = format!("{PRELUDE}\n{src}");
     let cfile: syn::File = syn::parse_str(&combined).map_err(|e| format!("parse error: {e}"))?;
@@ -137,7 +135,10 @@ pub fn compile_game_with_symbols(src: &str, name: &str) -> Result<(Vec<u8>, Symb
 
 /// Does the source contain an `impl Game for T` (so [`compile_game`] applies)?
 pub fn has_game(src: &str) -> bool {
-    syn::parse_str::<syn::File>(src).ok().and_then(|f| find_game_impl(&f)).is_some()
+    syn::parse_str::<syn::File>(src)
+        .ok()
+        .and_then(|f| find_game_impl(&f))
+        .is_some()
 }
 
 fn find_game_impl(file: &syn::File) -> Option<String> {
@@ -155,14 +156,23 @@ fn find_game_impl(file: &syn::File) -> Option<String> {
     None
 }
 
-fn struct_field_names(file: &syn::File, name: &str) -> Option<Vec<String>> {
+/// The game-state struct's layout as `(field_name, slot_count)` in declaration
+/// order — a scalar is 1 slot, a `[u16; N]` array field is `N` slots.
+fn struct_layout(file: &syn::File, name: &str) -> Option<Vec<(String, usize)>> {
     for item in &file.items {
         if let syn::Item::Struct(s) = item {
             if s.ident == name {
                 if let syn::Fields::Named(n) = &s.fields {
-                    return Some(
-                        n.named.iter().map(|f| f.ident.as_ref().unwrap().to_string()).collect(),
-                    );
+                    let mut out = Vec::new();
+                    for f in &n.named {
+                        let fname = f.ident.as_ref().unwrap().to_string();
+                        let slots = match &f.ty {
+                            syn::Type::Array(arr) => array_len(&arr.len)?,
+                            _ => 1,
+                        };
+                        out.push((fname, slots));
+                    }
+                    return Some(out);
                 }
             }
         }
@@ -170,12 +180,25 @@ fn struct_field_names(file: &syn::File, name: &str) -> Option<Vec<String>> {
     None
 }
 
-/// The RAM location of one game-state field on the running tape.
+/// The `N` in a `[T; N]` array type's length expression (a literal).
+fn array_len(e: &syn::Expr) -> Option<usize> {
+    if let syn::Expr::Lit(l) = e {
+        if let syn::Lit::Int(i) = &l.lit {
+            return i.base10_parse::<usize>().ok();
+        }
+    }
+    None
+}
+
+/// The RAM location of one game-state field on the running tape. `count` is 1 for a
+/// scalar field and `N` for a `[u16; N]` array field (so an env can read/inject the
+/// whole field with `count` × `width` bytes from `addr`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub field: String,
     pub addr: u16,
     pub width: u8,
+    pub count: u16,
     pub ty: String,
 }
 
@@ -186,7 +209,8 @@ pub struct Symbol {
 /// always emitted (never a curated subset) so an env can reconstruct any `Self`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolMap {
-    /// Where the state struct instance lives in RAM ([`GAME_STATE`]).
+    /// Where the state struct instance lives in RAM (the compiler's fixed base,
+    /// `0xB000`) — read this rather than hardcoding the address.
     pub base: u16,
     /// Total state size in bytes.
     pub size: u16,
@@ -194,38 +218,27 @@ pub struct SymbolMap {
 }
 
 impl SymbolMap {
-    /// Lay out `field_names` (declaration order) the way codegen does today: every
-    /// field is one `u16` slot, so field *i* is at `GAME_STATE + i*2`.
-    fn from_fields(_ty: &str, field_names: &[String]) -> Self {
-        let fields = field_names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| Symbol {
-                field: name.clone(),
-                addr: GAME_STATE + (i as u16) * 2,
-                width: 2,
-                ty: "u16".to_string(),
-            })
-            .collect();
-        SymbolMap { base: GAME_STATE, size: (field_names.len() as u16) * 2, fields }
-    }
-
     /// Address of a named field, if present.
     pub fn addr_of(&self, field: &str) -> Option<u16> {
-        self.fields.iter().find(|f| f.field == field).map(|f| f.addr)
+        self.fields
+            .iter()
+            .find(|f| f.field == field)
+            .map(|f| f.addr)
     }
 
     /// Render as a `.sym.toml` sidecar (the artifact written next to the `.tap`).
     pub fn to_toml(&self) -> String {
-        let mut s = String::from("# emitted by rustz80 from the Game state struct layout — never hand-written\n");
+        let mut s = String::from(
+            "# emitted by rustz80 from the Game state struct layout — never hand-written\n",
+        );
         s.push_str("[state]\n");
         s.push_str(&format!("base = 0x{:04X}\n", self.base));
         s.push_str(&format!("size = {}\n\n", self.size));
         s.push_str("[fields]\n");
         for f in &self.fields {
             s.push_str(&format!(
-                "\"{}\" = {{ addr = 0x{:04X}, width = {}, ty = \"{}\" }}\n",
-                f.field, f.addr, f.width, f.ty
+                "\"{}\" = {{ addr = 0x{:04X}, width = {}, count = {}, ty = \"{}\" }}\n",
+                f.field, f.addr, f.width, f.count, f.ty
             ));
         }
         s

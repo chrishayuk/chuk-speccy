@@ -62,10 +62,17 @@ fn boot(rom: &[u8], tap: &[u8]) -> spectrum::Spectrum {
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
 fn bounce_boots_visible_and_animates() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let mut spec = boot(&rom, &rustz80::compile_game(BOUNCE, "BOUNCE").expect("compile"));
+    let mut spec = boot(
+        &rom,
+        &rustz80::compile_game(BOUNCE, "BOUNCE").expect("compile"),
+    );
 
     // clear(Black) must set white ink on black paper, else pixels are invisible.
-    assert_eq!(spec.read_memory(0x5800, 1)[0], 0x07, "attrs = white ink on black");
+    assert_eq!(
+        spec.read_memory(0x5800, 1)[0],
+        0x07,
+        "attrs = white ink on black"
+    );
 
     let bitmap = |s: &spectrum::Spectrum| s.read_memory(0x4000, 0x1800);
     // Sample across frames: the blob's update overruns a frame, so a single
@@ -78,8 +85,14 @@ fn bounce_boots_visible_and_animates() {
         max_lit = max_lit.max(b.iter().map(|x| x.count_ones()).sum());
         frames.insert(b);
     }
-    assert!(max_lit >= 24, "the 6x6 blob should be fully drawn at some frame, max {max_lit}");
-    assert!(frames.len() > 3, "the blob should be moving (distinct frames)");
+    assert!(
+        max_lit >= 24,
+        "the 6x6 blob should be fully drawn at some frame, max {max_lit}"
+    );
+    assert!(
+        frames.len() > 3,
+        "the blob should be moving (distinct frames)"
+    );
 }
 
 /// Pure, end to end: the *playable* game reads the keyboard — holding a key moves
@@ -88,11 +101,13 @@ fn bounce_boots_visible_and_animates() {
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
 fn move_responds_to_keys() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
-    let mut spec = boot(&rom, &rustz80::compile_game(MOVE, "MOVE").expect("compile"));
+    let (tap, sym) = rustz80::compile_game_with_symbols(MOVE, "MOVE").expect("compile");
+    let mut spec = boot(&rom, &tap);
 
-    // Mover's first field `x` is the global state's first u16.
+    // Read Mover's `x` field at the address the compiler emitted in the symbol map.
+    let x_addr = sym.addr_of("x").expect("x in the symbol map");
     let read_x = |s: &spectrum::Spectrum| -> u16 {
-        let m = s.read_memory(rustz80::GAME_STATE, 2);
+        let m = s.read_memory(x_addr, 2);
         u16::from_le_bytes([m[0], m[1]])
     };
     let x0 = read_x(&spec);
@@ -106,7 +121,10 @@ fn move_responds_to_keys() {
     let x_right = read_x(&spec);
     spec.set_key(p, false);
 
-    assert!(x_right > x0, "holding Right should grow x: {x0} -> {x_right}");
+    assert!(
+        x_right > x0,
+        "holding Right should grow x: {x0} -> {x_right}"
+    );
 
     // Now hold "O" (Left) and confirm it comes back.
     let o = spectrum::keyboard::key_for_char('o').unwrap().0;
@@ -117,6 +135,8 @@ fn move_responds_to_keys() {
     let x_left = read_x(&spec);
     spec.set_key(o, false);
 
-    assert!(x_left < x_right, "holding Left should shrink x: {x_right} -> {x_left}");
+    assert!(
+        x_left < x_right,
+        "holding Left should shrink x: {x_right} -> {x_left}"
+    );
 }
-

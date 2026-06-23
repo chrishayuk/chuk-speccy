@@ -121,7 +121,10 @@ impl Asm {
             self.code[*pos + 1] = (a >> 8) as u8;
         }
         for (pos, name) in &self.call_fixups {
-            let a = *self.symbols.get(name).unwrap_or_else(|| panic!("unknown call target {name}"));
+            let a = *self
+                .symbols
+                .get(name)
+                .unwrap_or_else(|| panic!("unknown call target {name}"));
             self.code[*pos] = a as u8;
             self.code[*pos + 1] = (a >> 8) as u8;
         }
@@ -165,16 +168,39 @@ pub fn codegen_program(
 
 /// Where a `Game`'s single global state instance lives (well above the per-function
 /// scratch at `SCRATCH`); the entry zeroes it and passes its address as `self`.
-pub const GAME_STATE: u16 = 0xB000;
+pub(crate) const GAME_STATE: u16 = 0xB000;
+
+/// Build the game-state symbol map from its `(field, slots)` layout. Codegen owns
+/// the RAM layout (state lives at [`GAME_STATE`], consecutive `u16` slots), so it is
+/// the single place that assigns field addresses — callers read them off the map.
+pub(crate) fn state_symbols(layout: &[(String, usize)]) -> crate::SymbolMap {
+    let mut fields = Vec::with_capacity(layout.len());
+    let mut slot = 0usize;
+    for (name, slots) in layout {
+        fields.push(crate::Symbol {
+            field: name.clone(),
+            addr: GAME_STATE + (slot as u16) * 2,
+            width: 2,
+            count: *slots as u16,
+            ty: "u16".to_string(),
+        });
+        slot += *slots;
+    }
+    crate::SymbolMap {
+        base: GAME_STATE,
+        size: (slot as u16) * 2,
+        fields,
+    }
+}
 
 /// Compile a `Game` program: a generated frame-loop entry at `org` + the functions.
 /// The entry zeroes `state_bytes` of state, then each frame does
 /// `EI; HALT; DI; CALL update(&state, 0, 0)` — interrupts on only for the `HALT`
 /// frame-sync, off during `update` (so its arithmetic isn't corrupted).
-pub fn codegen_game(funcs: &[(String, Func)], org: u16, update: &str, state_bytes: u8) -> Vec<u8> {
+pub fn codegen_game(funcs: &[(String, Func)], org: u16, update: &str, state_bytes: u16) -> Vec<u8> {
     let mut a = Asm::new(org);
     a.byte(0xF3); // DI
-    // Zero the global state (memset via LD (HL),0 + LDIR).
+                  // Zero the global state (memset via LD (HL),0 + LDIR).
     if state_bytes >= 2 {
         a.byte(0x21);
         a.word(GAME_STATE); // LD HL, STATE
@@ -183,7 +209,7 @@ pub fn codegen_game(funcs: &[(String, Func)], org: u16, update: &str, state_byte
         a.byte(0x11);
         a.word(GAME_STATE + 1); // LD DE, STATE+1
         a.byte(0x01);
-        a.word(state_bytes as u16 - 1); // LD BC, n-1
+        a.word(state_bytes - 1); // LD BC, n-1
         a.byte(0xED);
         a.byte(0xB0); // LDIR
     } else if state_bytes == 1 {
@@ -355,7 +381,27 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.byte(0x56); // LD D,(HL)
             a.byte(0xEB); // EX DE,HL   -> HL = u16 at *(ptr + off)
         }
+        Expr::PtrIndex { ptr, off, index } => {
+            gen_ptr_elem_addr(a, ptr, *off, index); // HL = ptr + off + index*2
+            a.byte(0x5E); // LD E,(HL)
+            a.byte(0x23); // INC HL
+            a.byte(0x56); // LD D,(HL)
+            a.byte(0xEB); // EX DE,HL   -> HL = u16 element
+        }
     }
+}
+
+/// Leave `HL = ptr + off + index*2` — the address of a `u16` array element reached
+/// through a pointer (`self.arr[index]`). `index*2` uses `ADD HL,HL` (no multiply
+/// runtime); `index` is evaluated once.
+fn gen_ptr_elem_addr(a: &mut Asm, ptr: &Expr, off: usize, index: &Expr) {
+    gen_expr(a, index); // HL = index
+    a.byte(0x29); // ADD HL,HL   (index * 2)
+    a.byte(0xE5); // PUSH HL
+    gen_expr(a, ptr); // HL = base pointer
+    gen_add_offset(a, off); // HL = ptr + off
+    a.byte(0xD1); // POP DE      (DE = index*2)
+    a.byte(0x19); // ADD HL,DE   -> HL = ptr + off + index*2
 }
 
 /// `HL += off` (a small constant byte offset), if non-zero.
@@ -440,6 +486,20 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             a.byte(0xE5); // PUSH HL  (value)
             gen_expr(a, ptr); // HL = base pointer
             gen_add_offset(a, *off); // HL = &field
+            a.byte(0xD1); // POP DE   (DE = value)
+            a.byte(0x73); // LD (HL),E
+            a.byte(0x23); // INC HL
+            a.byte(0x72); // LD (HL),D
+        }
+        Stmt::PtrStoreIndex {
+            ptr,
+            off,
+            index,
+            value,
+        } => {
+            gen_expr(a, value);
+            a.byte(0xE5); // PUSH HL  (value)
+            gen_ptr_elem_addr(a, ptr, *off, index); // HL = &arr[index] (balanced push/pop)
             a.byte(0xD1); // POP DE   (DE = value)
             a.byte(0x73); // LD (HL),E
             a.byte(0x23); // INC HL

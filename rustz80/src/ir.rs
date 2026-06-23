@@ -54,6 +54,13 @@ pub enum Expr {
     /// Read a `u16` at `*(ptr + byte_offset)` — field access through a pointer
     /// (`self.field`).
     Deref(Box<Expr>, usize),
+    /// Read a `u16` array element through a pointer: `*(ptr + off + index*2)` — an
+    /// array *field* reached through a pointer receiver (`self.arr[index]`).
+    PtrIndex {
+        ptr: Box<Expr>,
+        off: usize,
+        index: Box<Expr>,
+    },
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -75,6 +82,14 @@ pub enum Stmt {
     /// Write a `u16` to `*(ptr + byte_offset)` — field store through a pointer
     /// (`self.field = v`).
     Store(Expr, usize, Expr),
+    /// Write a `u16` array element through a pointer: `*(ptr + off + index*2) = value`
+    /// — an array *field* store through a pointer receiver (`self.arr[index] = v`).
+    PtrStoreIndex {
+        ptr: Box<Expr>,
+        off: usize,
+        index: Box<Expr>,
+        value: Expr,
+    },
     /// Evaluate an expression for its side effect, discarding the result
     /// (e.g. a `void` function call as a statement).
     Eval(Expr),

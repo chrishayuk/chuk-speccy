@@ -30,6 +30,8 @@ pub struct Field {
     pub name: String,
     pub addr: u16,
     pub width: u8,
+    /// Element count: 1 for a scalar, `N` for a `[u16; N]` array field.
+    pub count: u16,
     pub ty: String,
 }
 
@@ -100,24 +102,35 @@ fn kv<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 
 /// Parse `"name" = { addr = 0x.., width = N, ty = ".." }`.
 fn parse_field(line: &str) -> Result<Field, String> {
-    let name = line.split('"').nth(1).ok_or_else(|| format!("no field name in {line:?}"))?.to_string();
+    let name = line
+        .split('"')
+        .nth(1)
+        .ok_or_else(|| format!("no field name in {line:?}"))?
+        .to_string();
     let inner = line
         .split_once('{')
         .and_then(|(_, r)| r.split_once('}'))
         .map(|(b, _)| b)
         .ok_or_else(|| format!("no {{ }} body in {line:?}"))?;
-    let (mut addr, mut width, mut ty) = (0u16, 2u8, "u16".to_string());
+    let (mut addr, mut width, mut count, mut ty) = (0u16, 2u8, 1u16, "u16".to_string());
     for part in inner.split(',') {
         if let Some((k, v)) = part.split_once('=') {
             match k.trim() {
                 "addr" => addr = parse_int(v)?,
                 "width" => width = parse_int(v)? as u8,
+                "count" => count = parse_int(v)?,
                 "ty" => ty = v.trim().trim_matches('"').to_string(),
                 _ => {}
             }
         }
     }
-    Ok(Field { name, addr, width, ty })
+    Ok(Field {
+        name,
+        addr,
+        width,
+        count,
+        ty,
+    })
 }
 
 /// A snapshot of the game's typed fields, read from RAM via the [`SymbolMap`].
@@ -130,12 +143,18 @@ pub struct StateView {
 impl StateView {
     /// Build a synthetic view (for tests, or agents reasoning over hand-made state).
     pub fn from_pairs(pairs: &[(&str, u16)]) -> StateView {
-        StateView { values: pairs.iter().map(|(k, v)| ((*k).to_string(), *v)).collect() }
+        StateView {
+            values: pairs.iter().map(|(k, v)| ((*k).to_string(), *v)).collect(),
+        }
     }
 
     /// Read a field as `u16` (little-endian); `0` if the field is unknown.
     pub fn u16(&self, name: &str) -> u16 {
-        self.values.iter().find(|(n, _)| n == name).map(|(_, v)| *v).unwrap_or(0)
+        self.values
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| *v)
+            .unwrap_or(0)
     }
     /// Read a field as `u8` (the low byte of its slot).
     pub fn u8(&self, name: &str) -> u8 {
@@ -186,13 +205,19 @@ impl SpectrumEnv {
             spec.run_frame(); // load + auto-run into the frame loop
         }
         let snapshot = spec.serialize_full();
-        SpectrumEnv { spec, map, snapshot }
+        SpectrumEnv {
+            spec,
+            map,
+            snapshot,
+        }
     }
 
     /// Reset to the warmup snapshot — bit-exact, so the next episode is identical
     /// given the same actions.
     pub fn reset(&mut self) {
-        self.spec.deserialize_full(&self.snapshot).expect("own snapshot deserializes");
+        self.spec
+            .deserialize_full(&self.snapshot)
+            .expect("own snapshot deserializes");
     }
 
     /// The current typed state, read off RAM via the symbol map.
@@ -223,8 +248,10 @@ impl SpectrumEnv {
 
     /// Hold `keys` (by character) down for `frames` frames, then release.
     pub fn hold(&mut self, keys: &[char], frames: usize) {
-        let positions: Vec<KeyPos> =
-            keys.iter().filter_map(|&c| keyboard::key_for_char(c).map(|(p, _, _)| p)).collect();
+        let positions: Vec<KeyPos> = keys
+            .iter()
+            .filter_map(|&c| keyboard::key_for_char(c).map(|(p, _, _)| p))
+            .collect();
         for &p in &positions {
             self.spec.set_key(p, true);
         }
@@ -247,7 +274,11 @@ impl SpectrumEnv {
         let prev: G = self.reconstruct();
         self.hold(keys, frames);
         let cur: G = self.reconstruct();
-        Transition { obs: cur.observe(), reward: cur.reward(&prev), done: cur.done() }
+        Transition {
+            obs: cur.observe(),
+            reward: cur.reward(&prev),
+            done: cur.done(),
+        }
     }
 }
 
