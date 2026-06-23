@@ -74,7 +74,7 @@ fn main() {
             demo_mode = Some(a);
         } else if let Some(name) = a.strip_prefix("audiodev=") {
             audio_device = Some(name.to_string());
-        } else if a.ends_with(".sna") || a.ends_with(".z80") || a.ends_with(".tap") {
+        } else if spectrum::media_format(&a).is_some() {
             media_path = Some(a);
         } else if a == "fullscreen" || a == "present" {
             start_fullscreen = true;
@@ -125,14 +125,8 @@ fn main() {
             eprintln!("could not read {p}: {e}");
             std::process::exit(1);
         });
-        let fmt = if p.ends_with(".tap") {
-            "tap"
-        } else if p.ends_with(".sna") {
-            "sna"
-        } else {
-            "z80"
-        };
-        load_media(&mut spec, fmt, &data);
+        let fmt = spectrum::media_format(p).unwrap_or(spectrum::format::Z80);
+        let _ = spec.load_media(fmt, &data);
     } else if !query_parts.is_empty() {
         let query = query_parts.join(" ");
         eprintln!("searching World of Spectrum for {query:?}…");
@@ -140,7 +134,7 @@ fn main() {
             Ok(game) => {
                 let year = game.year.map(|y| format!(" ({y})")).unwrap_or_default();
                 eprintln!("loaded {}{} [{}]", game.title, year, game.format);
-                load_media(&mut spec, &game.format, &game.data);
+                let _ = spec.load_media(&game.format, &game.data);
             }
             Err(e) => {
                 eprintln!("could not fetch {query:?}: {e}");
@@ -420,7 +414,7 @@ impl Gui {
 
     fn save_snapshot(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Spectrum snapshot", &["sna"])
+            .add_filter("Spectrum snapshot", &[spectrum::format::SNA])
             .set_file_name("snapshot.sna")
             .save_file()
         {
@@ -433,7 +427,10 @@ impl Gui {
 
     fn load_snapshot(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Spectrum snapshot", &["sna", "z80"])
+            .add_filter(
+                "Spectrum snapshot",
+                &[spectrum::format::SNA, spectrum::format::Z80],
+            )
             .pick_file()
         else {
             return;
@@ -446,8 +443,8 @@ impl Gui {
             }
         };
         let fmt = match path.extension().and_then(|e| e.to_str()) {
-            Some(e) if e.eq_ignore_ascii_case("sna") => "sna",
-            _ => "z80",
+            Some(e) if e.eq_ignore_ascii_case(spectrum::format::SNA) => spectrum::format::SNA,
+            _ => spectrum::format::Z80,
         };
         if let Err(e) = self.spec.load_snapshot(fmt, &data) {
             eprintln!("snapshot load failed: {e:?}");
@@ -540,40 +537,6 @@ fn push_audio(ring: &Audio, samples: Vec<f32>) {
         q.extend(samples);
         while q.len() > AUDIO_QUEUE_CAP {
             q.pop_front();
-        }
-    }
-}
-
-/// Load a game by format. `.tap` boots to the prompt and `LOAD ""`s it via the
-/// ROM trap (instant); `.tzx` `LOAD ""`s it and plays the tape *signal* in real
-/// time (turbo/custom loaders — watch it load); snapshots load directly.
-fn load_media(spec: &mut Spectrum, fmt: &str, data: &[u8]) {
-    match fmt {
-        "tap" => {
-            for _ in 0..250 {
-                spec.run_frame();
-            }
-            if let Err(e) = spec.load_tap(data) {
-                eprintln!("tape load failed: {e:?}");
-            } else {
-                spec.autoload_tape();
-            }
-        }
-        "tzx" => {
-            for _ in 0..250 {
-                spec.run_frame();
-            }
-            spec.autoload_tape(); // type LOAD "" — the loader reads the signal
-            if let Err(e) = spec.play_tape("tzx", data) {
-                eprintln!("tape load failed: {e:?}");
-            } else {
-                eprintln!("loading from tape in real time…");
-            }
-        }
-        _ => {
-            if let Err(e) = spec.load_snapshot(fmt, data) {
-                eprintln!("snapshot load failed: {e:?}");
-            }
         }
     }
 }

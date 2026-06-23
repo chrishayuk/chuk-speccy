@@ -36,18 +36,10 @@ fn main() -> ExitCode {
     let every: usize = a.get(4).and_then(|s| s.parse().ok()).unwrap_or(2).max(1);
     let boot: usize = a.get(5).and_then(|s| s.parse().ok()).unwrap_or(420);
 
-    let fmt = if a[1].ends_with(".tap") {
-        "tap"
-    } else if a[1].ends_with(".tzx") {
-        "tzx"
-    } else if a[1].ends_with(".sna") {
-        "sna"
-    } else {
-        "z80"
-    };
+    let fmt = spectrum::media_format(&a[1]).unwrap_or(spectrum::format::Z80);
 
     let mut spec = Spectrum::new_48k(&rom);
-    load(&mut spec, fmt, &data);
+    let _ = spec.load_media(fmt, &data);
     while spec.tape_playing() {
         spec.run_frame();
     }
@@ -73,27 +65,4 @@ fn main() -> ExitCode {
     }
     eprintln!("wrote {out} ({frames} frames, {} bytes)", bytes.len());
     ExitCode::SUCCESS
-}
-
-fn load(spec: &mut Spectrum, fmt: &str, data: &[u8]) {
-    match fmt {
-        "tap" => {
-            for _ in 0..250 {
-                spec.run_frame();
-            }
-            if spec.load_tap(data).is_ok() {
-                spec.autoload_tape();
-            }
-        }
-        "tzx" => {
-            for _ in 0..250 {
-                spec.run_frame();
-            }
-            spec.autoload_tape();
-            let _ = spec.play_tape("tzx", data);
-        }
-        _ => {
-            let _ = spec.load_snapshot(fmt, data);
-        }
-    }
 }

@@ -52,7 +52,7 @@ fn main() {
         match wos::fetch(q) {
             Ok(game) => {
                 let mut spec = Spectrum::new_48k(&rom);
-                load(&mut spec, &game.format, &game.data);
+                let _ = spec.load_media(&game.format, &game.data);
                 // Real-time tapes (.tzx) load over many frames; run until the
                 // signal is exhausted, then let the title settle.
                 let mut f = 0;
@@ -103,8 +103,8 @@ fn main() {
 /// 128K `.sna` is larger than the fixed 48K size. `.tap`/`.tzx` don't encode it.
 fn model_128k(fmt: &str, data: &[u8]) -> bool {
     match fmt {
-        "z80" => z80_is_128k(data),
-        "sna" => data.len() > 49179, // a 48K .sna is exactly 49179 bytes
+        spectrum::format::Z80 => z80_is_128k(data),
+        spectrum::format::SNA => data.len() > 49179, // a 48K .sna is exactly 49179 bytes
         _ => false,
     }
 }
@@ -121,31 +121,6 @@ fn z80_is_128k(d: &[u8]) -> bool {
     match ext_len {
         23 => hw >= 3, // v2: 3 = 128K, 4 = 128K+IF1
         _ => hw >= 4,  // v3: 4 = 128K, 5 = 128K+IF1, 6 = 128K+MGT, …
-    }
-}
-
-/// Load a game by format (`.tap` boots + trap-loads; `.tzx` loads real-time via
-/// the tape signal; snapshots load directly).
-fn load(spec: &mut Spectrum, fmt: &str, data: &[u8]) {
-    match fmt {
-        "tap" => {
-            for _ in 0..250 {
-                spec.run_frame();
-            }
-            if spec.load_tap(data).is_ok() {
-                spec.autoload_tape();
-            }
-        }
-        "tzx" => {
-            for _ in 0..250 {
-                spec.run_frame();
-            }
-            spec.autoload_tape();
-            let _ = spec.play_tape("tzx", data);
-        }
-        _ => {
-            let _ = spec.load_snapshot(fmt, data);
-        }
     }
 }
 

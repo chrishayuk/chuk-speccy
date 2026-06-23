@@ -26,6 +26,30 @@ pub const TSTATES_PER_FRAME: u32 = 69888;
 /// 48K PAL frame rate: 3.5 MHz / 69888 T-states ≈ 50.08 Hz.
 pub const FRAMES_PER_SEC: f64 = 3_500_000.0 / TSTATES_PER_FRAME as f64;
 
+/// Frames to run before auto-loading a tape — enough to reach the BASIC `K` cursor.
+pub const BOOT_FRAMES: u32 = 250;
+
+/// The media format identifiers, so callers pass named constants rather than bare
+/// strings (`load_media`/`load_snapshot`/`play_tape` all speak these).
+pub mod format {
+    pub const TAP: &str = "tap";
+    pub const TZX: &str = "tzx";
+    pub const SNA: &str = "sna";
+    pub const Z80: &str = "z80";
+    /// Every recognised media format.
+    pub const ALL: &[&str] = &[TAP, TZX, SNA, Z80];
+}
+
+/// The media format for a filename by extension, for [`Spectrum::load_media`].
+/// Case-insensitive; `None` if unrecognised. Returns a [`format`] constant.
+pub fn media_format(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    format::ALL
+        .iter()
+        .copied()
+        .find(|f| lower.ends_with(&format!(".{f}")))
+}
+
 /// Everything the CPU can touch: memory, the ULA clock/video, and the keyboard.
 /// This is the `Bus` the CPU borrows.
 pub struct Board {
@@ -299,8 +323,8 @@ impl Spectrum {
     /// from the data length if `fmt` is empty.
     pub fn load_snapshot(&mut self, fmt: &str, data: &[u8]) -> Result<(), snapshot::SnapshotError> {
         match fmt {
-            "sna" => snapshot::load_sna(self, data),
-            "z80" => snapshot::load_z80(self, data),
+            format::SNA => snapshot::load_sna(self, data),
+            format::Z80 => snapshot::load_z80(self, data),
             _ => {
                 // Sniff: a 48K .sna is exactly 27 + 49152 bytes.
                 if data.len() == 27 + 49152 {
@@ -348,6 +372,35 @@ impl Spectrum {
     /// True while a real-time tape is still playing.
     pub fn tape_playing(&self) -> bool {
         self.board.tape_signal.as_ref().is_some_and(|t| t.playing())
+    }
+
+    /// Load media into the machine by `fmt`, the one place every head shares:
+    /// - `"sna"`/`"z80"` — restore a snapshot (instant; no boot needed);
+    /// - `"tap"` — boot to the prompt, insert the tape, and `LOAD ""` (fast ROM
+    ///   trap; run frames afterwards to let it complete);
+    /// - `"tzx"` — boot, `LOAD ""`, and play the tape *signal* in real time
+    ///   (turbo/custom loaders).
+    ///
+    /// A failed/unknown load is a no-op (returns `Err` for tapes so heads can warn).
+    pub fn load_media(&mut self, fmt: &str, data: &[u8]) -> Result<(), snapshot::SnapshotError> {
+        match fmt {
+            format::TAP => {
+                for _ in 0..BOOT_FRAMES {
+                    self.run_frame();
+                }
+                self.load_tap(data)?;
+                self.autoload_tape();
+                Ok(())
+            }
+            format::TZX => {
+                for _ in 0..BOOT_FRAMES {
+                    self.run_frame();
+                }
+                self.autoload_tape();
+                self.play_tape(format::TZX, data)
+            }
+            _ => self.load_snapshot(fmt, data),
+        }
     }
 
     // --- host traps (`ED FE`) -----------------------------------------------
@@ -532,7 +585,7 @@ mod tests {
         assert_eq!(snap.len(), 27 + 49152);
 
         let mut b = Spectrum::new_48k(&[]);
-        b.load_snapshot("sna", &snap).expect("load");
+        b.load_snapshot(format::SNA, &snap).expect("load");
 
         assert_eq!(b.cpu.regs.pc, 0x8000, "PC popped from stack");
         assert_eq!(b.cpu.regs.sp, 0xFF00, "SP restored");
@@ -829,11 +882,7 @@ mod tests {
         let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
         let game = std::fs::read(std::env::var("SPECTRUM_GAME").expect("SPECTRUM_GAME")).unwrap();
         let mut spec = Spectrum::new_48k(&rom);
-        let fmt = if std::env::var("SPECTRUM_GAME").unwrap().ends_with(".sna") {
-            "sna"
-        } else {
-            "z80"
-        };
+        let fmt = media_format(&std::env::var("SPECTRUM_GAME").unwrap()).unwrap_or(format::Z80);
         spec.load_snapshot(fmt, &game).expect("load game");
         spec.enable_audio(44_100);
 
