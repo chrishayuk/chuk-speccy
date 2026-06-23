@@ -365,6 +365,87 @@ it affects timing-precise demos, not games or agent tasks.
 
 ---
 
+## Hardening — code review & placement remediation (2026-06)
+
+A workspace-wide placement + code review (4 parallel reviewers). Grouped by area,
+roughly in priority order. The headline is making `rustz80` a *generic* compiler and
+lifting the game layer into the SDK; the rest is layering hygiene + code quality.
+
+### H1. Make `rustz80` generic; lift the game layer into the SDK
+The leak is deeper than `lib.rs` — it's in `codegen.rs` and `lower.rs` too.
+- [ ] `rustz80` keeps only generic API: `compile_program`/`compile_fn`/`compile_to_tap`,
+  `lower_program` (taking a **prelude/handle config**, not hardcoded `Frame`/`Input`),
+  a parameterised entry-loop codegen (`state_base` a param, no `GAME_STATE`), `to_tap`,
+  `ORG`. Remove `PRELUDE`, `compile_game*`, `has_game`, `find_game_impl`, `struct_layout`,
+  `GAME_STATE`, `codegen_game`, `state_symbols`.
+- [ ] `lower.rs`: `handle_type`/`lower_prelude_call` hardcode the SDK method→prelude-fn
+  map — make it caller-supplied config so the lowerer has no game knowledge.
+- [ ] Move the game layer into `speccy-sdk` behind a **`compile` feature** (`dep:rustz80`,
+  `dep:syn`) so runtime consumers (the 4 frontend bins) stay `syn`-free. CI runs
+  `--all-features`.
+- [ ] Move the `speccy-compile` bin to the SDK (behind `compile`).
+- [ ] **Unify `SymbolMap`**: one `speccy-sdk` type (parse free, emit behind `compile`);
+  delete `speccy-env`'s duplicate copy.
+- [ ] Split `samples/`: `bounce`/`move`/`reach` (`impl Game`) → SDK/games side;
+  `snake`/`pixels` (`fn main`) stay as generic `rustz80` examples. Update path refs.
+- [ ] Update spec 08 (it still assigns `.sym.toml` emission to `rustz80` and cites the
+  removed `demo.rs`).
+
+### H2. Presentation out of the emulator core (`display` vs `spectrum`)
+- [ ] `spectrum` duplicates `display`: `ula::PALETTE` (RGBA) is a copy of
+  `display::AUTHENTIC`; `screen_rgba`/`render_rgba` bake presentation into the core.
+  Route RGBA through `display`; delete the core's copy (it *will* drift).
+
+### H3. Frontend de-duplication
+- [ ] No `frontend` lib → media-load dispatch copy-pasted across all 4 bins and already
+  diverged (`.tzx` missing in `main.rs`); boot constant repeated ~7×. Add
+  `spectrum::load_media` (or a frontend lib) + a `BOOT_FRAMES` const.
+- [ ] Block-glyph renderer (`main.rs`) untested + belongs in `display`; `keycode_char`
+  drops symbol keys (GUI/TUI input asymmetry); test-card / z80-header knowledge in heads
+  belongs near `spectrum`.
+
+### H4. Core layering hygiene (`z80`/`spectrum`)
+- [ ] `StopReason` lives in `z80` but is a run-loop concept it never produces → move to
+  `spectrum`.
+- [ ] App/SDK artifacts in the core: `sdk.rs`'s hand-assembled `CHAT_TERMINAL` + the chat
+  dispatcher/`ChatState` in `host.rs` → move to the SDK/app layer; keep only the generic
+  trap machinery (`HostCalls`/`FnTable`/`HostCtx`/`math_traps`).
+- [ ] Tighten `z80` module visibility (`alu`/`decode` → `pub(crate)`); drop dead
+  `Memory::ram_mut`.
+- [ ] Harden: `Cur::take` bounds, `tape_trap` `wrapping_sub`, factor the thrice-repeated
+  `.tap` block-framing parser, fix the duplicated `screen_indexed` doc.
+- [ ] Tests: the `.z80` v2/v3 page loader + RLE `decompress_z80` are untested.
+
+### H5. `rustz80` code quality
+- [ ] Error UX (the "ergonomic rejection" feature, spec 08 §1.5): replace
+  `Result<_, String>` + `{syn:?}` debug-dumps with span-carrying errors; turn
+  `panic!`/`expect` on undefined call targets / scratch overflow into `Err`; **reject
+  recursion**; add tests for the rejections.
+- [ ] Split `lower.rs` (940 lines) into submodules; collapse the read/store + block
+  duplicate pairs.
+
+### H6. `speccy-env`
+- [ ] `StateView::u16` silently returns 0 for unknown fields (against spec 08 §2's own
+  thesis) → `Option`/assert. `view()` ignores `count` so **array fields aren't
+  reconstructed** — add typed array reconstruction. Replace the fragile hand-rolled TOML
+  parser when `SymbolMap` is unified (H1).
+
+### H7. Python (`zxspec_py` / `chuk-mcp-spectrum`)
+- [ ] **Supervisor concurrency**: viewer + agent + admin share a non-thread-safe
+  `Machine` with unsynchronized mutation → per-session lock (the one real runtime-risk
+  finding).
+- [ ] Fix `test_restore_snapshot_rewinds` (restores a `serialize_full` blob via
+  `load_snapshot("sna")` — passes by luck); tighten `load_sna` to reject over-length blobs.
+- [ ] PyO3 error formatting `{e:?}` → Display; refresh MCP README tool counts; gitignore
+  `*.egg-info/`.
+
+### H8. Misc / low priority
+- [ ] `Fx8_8` is named in spec 08 but not implemented in the SDK.
+- [ ] Naming outliers (defensible, low priority): `z80-tests` lacks the `chuk-speccy-`
+  prefix + a `[lib] name`; `zxspec_py` diverges from the `speccy` brand stem.
+
+---
+
 ## Suggested order
 
 ```
