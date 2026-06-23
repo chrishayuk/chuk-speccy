@@ -3,20 +3,6 @@
 
 use crate::bus::Bus;
 
-/// Why an outer run loop stopped. Mirrors the MCP layer's `StopReason`
-/// (`docs/02-mcp-server-layer-spec.md` §4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopReason {
-    /// Ran the requested quantum (instruction/frame count) to completion.
-    Completed,
-    /// Hit a breakpoint at the given address.
-    Breakpoint(u16),
-    /// Executed HALT and is waiting for an interrupt.
-    Halt,
-    /// Exhausted a T-state budget.
-    Budget,
-}
-
 /// Which 16-bit register stands in for HL this instruction: HL itself, or IX/IY
 /// under a `DD`/`FD` prefix. `(HL)` becomes `(IX+d)`/`(IY+d)` accordingly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

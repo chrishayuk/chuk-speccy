@@ -208,9 +208,6 @@ impl Ula {
             | x_byte
     }
 
-    /// Decode the current screen to a freshly allocated RGBA framebuffer
-    /// (256*192*4). `ram` is the 48K RAM slice (screen at offset 0).
-    ///
     /// Decode the screen to an *indexed* framebuffer: `SCREEN_W * SCREEN_H` bytes,
     /// one logical colour (0–15, bright = +8) per pixel. This is the raw
     /// observation the `display` pipeline themes; the core never bakes RGB.
