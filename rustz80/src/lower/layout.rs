@@ -61,54 +61,88 @@ pub(crate) fn collect_enums(file: &syn::File) -> Result<Enums, String> {
 
 pub(crate) fn collect_structs(file: &syn::File) -> Result<Structs, String> {
     let mut m = Structs::new();
+    let no_consts = HashMap::new();
     for item in &file.items {
         if let syn::Item::Struct(s) = item {
+            // Const-generic structs (`[T; N]` sized by a const param) have a per-instance
+            // layout — handled by the generics machinery, not collected eagerly here.
+            if s.generics.const_params().next().is_some() {
+                continue;
+            }
             let syn::Fields::Named(named) = &s.fields else {
                 return Err(format!(
                     "only named-field structs are supported: {}",
                     s.ident
                 ));
             };
-            let mut fields = Vec::new();
-            for f in &named.named {
-                // Scalar fields are one slot; `[u16; N]` array fields are N slots.
-                // Other shapes would mislay offsets, so reject them clearly.
-                let slots = match &f.ty {
-                    syn::Type::Path(_) => 1,
-                    syn::Type::Array(arr) if is_u16(&arr.elem) => lit_len(&arr.len)?,
-                    syn::Type::Array(_) => {
-                        return Err(format!(
-                            "only `[u16; N]` array struct fields are supported: {}",
-                            s.ident
-                        ))
-                    }
-                    // A tuple field `(u16, u16)` occupies one slot per (scalar) element,
-                    // accessed by `.0` / `.1`.
-                    syn::Type::Tuple(t) => {
-                        if !t.elems.iter().all(|e| matches!(e, syn::Type::Path(_))) {
-                            return Err(format!(
-                                "tuple struct fields must have scalar elements: {}",
-                                s.ident
-                            ));
-                        }
-                        t.elems.len()
-                    }
-                    _ => {
-                        return Err(format!(
-                            "only scalar, `[u16; N]`, or tuple struct fields are supported: {}",
-                            s.ident
-                        ))
-                    }
-                };
-                fields.push(FieldDef {
-                    name: f.ident.as_ref().unwrap().to_string(),
-                    slots,
-                });
-            }
-            m.insert(s.ident.to_string(), fields);
+            m.insert(
+                s.ident.to_string(),
+                struct_field_defs(named, &no_consts, &s.ident.to_string())?,
+            );
         }
     }
     Ok(m)
+}
+
+/// One field type's slot count (`u16`/scalar = 1, `[u16; N]` = N, `(u16, …)` = arity),
+/// resolving a `[u16; N]` length that is a const-generic parameter via `consts`.
+pub(crate) fn field_slots(
+    ty: &syn::Type,
+    consts: &HashMap<String, u16>,
+    owner: &str,
+) -> Result<usize, String> {
+    Ok(match ty {
+        syn::Type::Path(_) => 1,
+        syn::Type::Array(arr) if is_u16(&arr.elem) => array_len(&arr.len, consts)?,
+        syn::Type::Array(_) => {
+            return Err(format!(
+                "only `[u16; N]` array struct fields are supported: {owner}"
+            ))
+        }
+        // A tuple field `(u16, u16)` occupies one slot per (scalar) element, accessed
+        // by `.0` / `.1`.
+        syn::Type::Tuple(t) => {
+            if !t.elems.iter().all(|e| matches!(e, syn::Type::Path(_))) {
+                return Err(format!(
+                    "tuple struct fields must have scalar elements: {owner}"
+                ));
+            }
+            t.elems.len()
+        }
+        _ => {
+            return Err(format!(
+                "only scalar, `[u16; N]`, or tuple struct fields are supported: {owner}"
+            ))
+        }
+    })
+}
+
+/// An array length: a literal, or a const-generic parameter resolved via `consts`.
+fn array_len(e: &syn::Expr, consts: &HashMap<String, u16>) -> Result<usize, String> {
+    if let syn::Expr::Path(p) = e {
+        if let Some(id) = p.path.get_ident() {
+            if let Some(n) = consts.get(&id.to_string()) {
+                return Ok(*n as usize);
+            }
+        }
+    }
+    lit_len(e)
+}
+
+/// The field layout of a named-field struct, resolving const-param array lengths.
+pub(crate) fn struct_field_defs(
+    named: &syn::FieldsNamed,
+    consts: &HashMap<String, u16>,
+    owner: &str,
+) -> Result<Vec<FieldDef>, String> {
+    let mut fields = Vec::new();
+    for f in &named.named {
+        fields.push(FieldDef {
+            name: f.ident.as_ref().unwrap().to_string(),
+            slots: field_slots(&f.ty, consts, owner)?,
+        });
+    }
+    Ok(fields)
 }
 
 /// `Enum::Variant` (a 2-segment path) → its integer value, if known.

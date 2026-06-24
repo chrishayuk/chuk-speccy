@@ -937,6 +937,74 @@ fn const_generics() {
 }
 
 #[test]
+fn const_generic_structs() {
+    // A fixed-capacity stack: the const param sizes the `[u16; N]` field *and* bounds
+    // `push`. Each `Stack<N>` is a distinct instance (layout + methods). Same source
+    // type-checks under rustc.
+    struct Stack<const N: usize> {
+        data: [u16; N],
+        len: u16,
+    }
+    impl<const N: usize> Stack<N> {
+        fn push(&mut self, v: u16) {
+            if self.len < N as u16 {
+                self.data[self.len as usize] = v;
+                self.len = self.len + 1;
+            }
+        }
+        fn sum(&self) -> u16 {
+            let mut s = 0u16;
+            let mut i = 0u16;
+            while i < self.len {
+                s = s + self.data[i as usize];
+                i = i + 1;
+            }
+            s
+        }
+    }
+    fn host() -> u16 {
+        let mut s: Stack<4> = Stack {
+            data: [0; 4],
+            len: 0,
+        };
+        s.push(10);
+        s.push(20);
+        s.push(30);
+        s.push(40);
+        s.push(50); // dropped — capacity 4
+        s.sum()
+    }
+    let src = "
+        struct Stack<const N: usize> { data: [u16; N], len: u16 }
+        impl<const N: usize> Stack<N> {
+            fn push(&mut self, v: u16) {
+                if self.len < N as u16 {
+                    self.data[self.len as usize] = v;
+                    self.len = self.len + 1u16;
+                }
+            }
+            fn sum(&self) -> u16 {
+                let mut s = 0u16;
+                let mut i = 0u16;
+                while i < self.len { s = s + self.data[i as usize]; i = i + 1u16; }
+                s
+            }
+        }
+        fn run() -> u16 {
+            let mut s = Stack { data: [0u16; 4], len: 0u16 };
+            s.push(10u16); s.push(20u16); s.push(30u16); s.push(40u16); s.push(50u16);
+            s.sum()
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 10+20+30+40 = 100
+                                                   // The methods are instantiated per struct instance.
+    for sym in ["Stack$4::push", "Stack$4::sum"] {
+        assert!(prog.symbols.contains_key(sym), "missing instance {sym}");
+    }
+}
+
+#[test]
 fn generics_substitute_width() {
     // The instantiation's width is real: at u8 the body wraps (mod 256), at u16 it
     // does not — proving monomorphization substitutes the type, not just the name.

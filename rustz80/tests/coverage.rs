@@ -37,8 +37,8 @@ fn struct_field_rejections() {
     );
     // A tuple field initialised with the wrong arity.
     bad_prog("struct S { p: (u16, u16) } fn run() -> u16 { let s = S { p: (1u16,) }; 0u16 }");
-    // An array field can't be initialised by a struct literal.
-    bad_prog("struct S { a: [u16; 4] } fn run() -> u16 { let s = S { a: [0u16; 4] }; 0u16 }");
+    // An array field initialised with the wrong number of elements.
+    bad_prog("struct S { a: [u16; 4] } fn run() -> u16 { let s = S { a: [1u16, 2u16] }; s.a[0] }");
     // A method receiver that isn't a struct.
     bad_fn("fn f() -> u16 { let x = 1u16; x.bump(2u16) }");
 }
