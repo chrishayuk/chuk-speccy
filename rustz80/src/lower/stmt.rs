@@ -6,11 +6,33 @@
 use super::expr::{
     lower_expr, lower_field_store, lower_index_store, lower_method_call, path_ident, path_str,
 };
+use super::generics::infer_struct_args;
 use super::layout::{
-    elem_width, field_offset, lit_len, member_name, resolve_enum_path, struct_slots,
+    elem_width, field_offset, lit_len, member_name, resolve_enum_path, struct_slots, FieldDef,
 };
 use super::Ctx;
 use crate::ir::*;
+
+/// Resolve a struct literal to its concrete `(name, field layout)` — a regular struct,
+/// or a const-/generic struct *instance* whose arguments are inferred from the literal
+/// (registering the instance + its methods on first use).
+fn resolve_struct_literal(
+    lit: &syn::ExprStruct,
+    ctx: &mut Ctx,
+) -> Result<(String, Vec<FieldDef>), String> {
+    let sbase = path_str(&lit.path)?;
+    if let Some(f) = ctx.structs.get(&sbase) {
+        return Ok((sbase, f.clone()));
+    }
+    let gs = ctx.mono.borrow().generic_structs.get(&sbase).cloned();
+    let Some(gs) = gs else {
+        return Err(format!("unknown struct {sbase}"));
+    };
+    let args = infer_struct_args(&gs, lit, ctx)?;
+    let mangled = ctx.mono.borrow_mut().instantiate_struct(&sbase, args)?;
+    let fields = ctx.mono.borrow().struct_instances[&mangled].clone();
+    Ok((mangled, fields))
+}
 
 /// An array length — an integer literal, or a const-generic parameter resolved to its
 /// instance value (`let a = [0u16; N]` inside `fn f<const N: usize>()`).
@@ -55,12 +77,9 @@ pub(crate) fn lower_local(
             }
         }
         syn::Expr::Struct(lit) => {
-            let sname = path_str(&lit.path)?;
-            let fields = ctx
-                .structs
-                .get(&sname)
-                .ok_or_else(|| format!("unknown struct {sname}"))?
-                .clone();
+            // Resolve to a concrete struct: a regular struct, or a const-/generic
+            // struct *instance* (`Buf$8`) inferred from this literal.
+            let (sname, fields) = resolve_struct_literal(lit, ctx)?;
             let base = ctx.vars.declare(
                 &name,
                 struct_slots(&fields),
@@ -85,16 +104,28 @@ pub(crate) fn lower_local(
                             body.push(Stmt::Assign(base + off + i, v));
                         }
                     }
+                    // An array field initialised `[v; N]` — fill its `slots` slots.
+                    syn::Expr::Repeat(r) => {
+                        for i in 0..slots {
+                            let v = lower_expr(&r.expr, ctx)?.0;
+                            body.push(Stmt::Assign(base + off + i, v));
+                        }
+                    }
+                    // An array field initialised `[e0, e1, …]`.
+                    syn::Expr::Array(arr) => {
+                        if arr.elems.len() != slots {
+                            return Err(format!("array field `{fname}` expects {slots} values"));
+                        }
+                        for (i, e) in arr.elems.iter().enumerate() {
+                            let v = lower_expr(e, ctx)?.0;
+                            body.push(Stmt::Assign(base + off + i, v));
+                        }
+                    }
                     _ if slots == 1 => {
                         let v = lower_expr(&fv.expr, ctx)?.0;
                         body.push(Stmt::Assign(base + off, v));
                     }
-                    // An array field is filled by index after construction, not here.
-                    _ => {
-                        return Err(format!(
-                            "init array field `{fname}` by index, not a struct literal"
-                        ))
-                    }
+                    _ => return Err(format!("field `{fname}` expects {slots} values")),
                 }
             }
         }

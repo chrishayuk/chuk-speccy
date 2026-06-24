@@ -251,8 +251,17 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   a local `[u16; N]` array and substitutes as a plain value (loop bounds, comparisons).
   Reuses the `Mono` worklist (a generic param is now type *or* const; an instance key
   carries widths and values, e.g. `triangle$4`). Differential-tested + a runnable
-  `examples/const_generics`. (Const generics on *structs* — `Entities<T, const N>`'s
-  `[T; N]` — and struct-element arrays remain, the last pure-Snake blockers.)
+  `examples/const_generics`.
+- [x] **Stage 4d (const-generic structs)** — `struct Buf<const N: usize> { data: [u16;
+  N], len: u16 }` with `impl<const N: usize> Buf<N> { … }`, monomorphized per `N`: each
+  instance gets a **per-instance layout** (the `[u16; N]` field sized by `N`, registered
+  on demand in `Mono::struct_instances`) and **per-instance methods** (`Buf$8::push`,
+  lowered with `self` typed as `Buf$8` and `N` substituted). `N` is inferred at the
+  struct literal from the array field's length; array fields can now be initialised in a
+  literal (`[v; N]` / `[e0, …]`). Differential-tested with a capacity-bounded
+  `Stack<N>` + a runnable `examples/stack` (instances `Stack$4`/`Stack$8`). rustz80 stays
+  ≥90% line/region per file. (Remaining for pure Snake: **struct-element arrays**
+  `[Cell; N]`, `Index`/method element access, `u32`, `Frame::tile`/`text`.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -295,11 +304,12 @@ dial is never multiplied before it's watched close:
   (state-seeded, deterministic), the **demo Snake is off `Vec`/`format!`** (uses
   `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
   Snake that compiles **pure** as one source. Done since: generic *functions* + structs
-  ✓, const-generic *functions* ✓, tuples + tuple struct fields ✓, `for`/`loop` ✓, array
-  struct fields ✓. *Remaining `rustz80` blockers:* **const-generic structs** + **struct-
-  element arrays** (`Entities<T, N>`'s `[T; N]`), method/`Index` element access, `u32`
-  (the `Rng`), and `Frame::tile`/`text` prelude routing — or an SDK redesign of
-  `Entities`/`Rng` to the current subset. `Fx8_8` lands with the kit, not here.
+  ✓, const-generic *functions* + structs ✓ (a fixed-cap `Stack<N>` compiles + runs),
+  tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓. *Remaining
+  `rustz80` blockers:* **struct-element arrays** (`Entities<T, N>`'s `[Cell; N]` — only
+  scalar elements so far), method/`Index` element access, `u32` (the `Rng`), and
+  `Frame::tile`/`text` prelude routing — or an SDK redesign of `Entities`/`Rng` to the
+  current subset. `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;

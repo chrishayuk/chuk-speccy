@@ -63,6 +63,15 @@ fn tuples_multi_return() {
 }
 
 #[test]
+fn const_generic_struct_stack() {
+    let src = include_str!("../samples/showcase/stack.rs");
+    assert_eq!(val(src, "run", &[]), 10036); // Stack<4> capped sum *1000 + Stack<8> sum
+    let prog = rustz80::compile_program(src).unwrap();
+    assert!(prog.symbols.contains_key("Stack$4::push"));
+    assert!(prog.symbols.contains_key("Stack$8::sum"));
+}
+
+#[test]
 fn const_generics_triangle() {
     let src = include_str!("../samples/showcase/const_generics.rs");
     assert_eq!(val(src, "run", &[]), 1036); // triangle::<4>()*100 + triangle::<8>()

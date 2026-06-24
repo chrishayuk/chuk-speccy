@@ -127,11 +127,10 @@ fn field_target(f: &syn::ExprField, ctx: &mut Ctx) -> Result<(usize, usize, bool
         .receiver(&obj)
         .ok_or_else(|| format!("{obj} is not a struct"))?;
     let fields = ctx
-        .structs
-        .get(&sname)
+        .struct_fields(&sname)
         .ok_or_else(|| format!("unknown struct {sname}"))?;
     let name = member_name(&f.member)?;
-    let off = field_offset(fields, &name)?;
+    let off = field_offset(&fields, &name)?;
     let slots = fields
         .iter()
         .find(|d| d.name == name)

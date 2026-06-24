@@ -23,8 +23,11 @@ pub use prelude::PreludeConfig;
 
 use crate::ir::*;
 use expr::lower_expr;
-use generics::{collect_generic_fns, is_generic_fn, is_generic_sig, GArg, Mono};
-use layout::{collect_enums, collect_structs, type_name, Enums, Structs};
+use generics::{
+    collect_generic_fns, collect_generic_methods, collect_generic_structs,
+    impl_is_for_generic_struct, instance_name, is_generic_fn, is_generic_sig, GArg, Mono,
+};
+use layout::{collect_enums, collect_structs, type_name, Enums, FieldDef, Structs};
 use prelude::handle_type;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -71,6 +74,33 @@ impl Ctx<'_> {
         }
         Width::Word
     }
+
+    /// A struct's field layout — a regular struct from the eager map, or a const-/
+    /// generic struct *instance* (`Buf$8`) registered on demand at construction.
+    pub(crate) fn struct_fields(&self, name: &str) -> Option<Vec<FieldDef>> {
+        if let Some(f) = self.structs.get(name) {
+            return Some(f.clone());
+        }
+        self.mono.borrow().struct_instances.get(name).cloned()
+    }
+
+    /// Evaluate an array length to a value — an integer literal, or a const-generic
+    /// parameter resolved to this instance's value.
+    pub(crate) fn eval_len(&self, e: &syn::Expr) -> Result<u16, String> {
+        if let syn::Expr::Path(p) = e {
+            if let Some(id) = p.path.get_ident() {
+                if let Some(n) = self.const_args.get(&id.to_string()) {
+                    return Ok(*n);
+                }
+            }
+        }
+        if let syn::Expr::Lit(l) = e {
+            if let syn::Lit::Int(i) = &l.lit {
+                return i.base10_parse::<u16>().map_err(|e| e.to_string());
+            }
+        }
+        Err("array length must be an integer literal or a const-generic parameter".into())
+    }
 }
 
 /// Lower every `fn` in a file to `(name, Func)`, using the file's struct layouts and
@@ -81,7 +111,12 @@ pub fn lower_program(
 ) -> Result<Vec<(String, Func)>, String> {
     let structs = collect_structs(file)?;
     let enums = collect_enums(file)?;
-    let mono = RefCell::new(Mono::new(collect_generic_fns(file)?));
+    let generic_structs = collect_generic_structs(file)?;
+    let mut generic_fns = collect_generic_fns(file)?;
+    collect_generic_methods(file, &generic_structs, &mut generic_fns)?;
+    let mut mono_state = Mono::new(generic_fns);
+    mono_state.generic_structs = generic_structs;
+    let mono = RefCell::new(mono_state);
     let no_args = HashMap::new();
     let no_const = HashMap::new();
     let mut out = Vec::new();
@@ -93,10 +128,18 @@ pub fn lower_program(
             syn::Item::Fn(f) if is_generic_fn(f) => {}
             syn::Item::Fn(f) => out.push((
                 f.sig.ident.to_string(),
-                lower_with(f, &structs, &enums, prelude, &mono, &no_args, &no_const)?,
+                lower_with(
+                    f, &structs, &enums, prelude, &mono, &no_args, &no_const, None,
+                )?,
             )),
             // `impl T { fn m(&mut self, …) }` — each method becomes a `T::m` function
             // taking `self` as a leading pointer argument.
+            syn::Item::Impl(imp)
+                if impl_is_for_generic_struct(imp, &mono.borrow().generic_structs) =>
+            {
+                // A const-generic struct's methods are instantiated per struct instance
+                // (the worklist), not lowered here.
+            }
             syn::Item::Impl(imp) => {
                 let self_ty = type_name(&imp.self_ty)?;
                 for it in &imp.items {
@@ -148,6 +191,12 @@ pub fn lower_program(
                 }
             }
         }
+        // A generic-struct method lowers with `self` typed as the matching struct
+        // instance (`Buf$8`); a free fn has no `self`.
+        let self_ty = gf
+            .self_ty
+            .as_ref()
+            .map(|base| instance_name(base, &inst.args));
         let func = lower_with(
             &gf.item,
             &structs,
@@ -156,6 +205,7 @@ pub fn lower_program(
             &mono,
             &type_args,
             &const_args,
+            self_ty.as_deref(),
         )?;
         out.push((inst.name, func));
     }
@@ -179,6 +229,7 @@ pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
         &mono,
         &no_args,
         &no_const,
+        None,
     )
 }
 
@@ -215,9 +266,10 @@ fn lower_with<'a>(
     mono: &'a RefCell<Mono>,
     type_args: &'a HashMap<String, Width>,
     const_args: &'a HashMap<String, u16>,
+    self_ty: Option<&str>,
 ) -> Result<Func, String> {
     let mut ctx = new_ctx(structs, enums, prelude, mono, type_args, const_args);
-    let params = lower_inputs(&item.sig.inputs, &mut ctx, None)?;
+    let params = lower_inputs(&item.sig.inputs, &mut ctx, self_ty)?;
     let (body, ret) = lower_fn_block(&item.block, &mut ctx)?;
     Ok(Func {
         params,
