@@ -43,7 +43,7 @@ Supported today (all differential-tested):
 | Types | `u16` (default) and `u8` (wraps at 256). `as u8` truncates, `as u16`/`as usize` widen. |
 | Arithmetic | `+ - * / %`, `wrapping_add/sub/mul`. `*`/`/`/`%` use the appended micro-runtime. |
 | Bitwise | `\|` `&` `^`. |
-| Control flow | `if`/`else if`/`else`, `while`, comparison conditions (`< <= > >= == !=`). |
+| Control flow | `if`/`else if`/`else`, `while`, `for` over integer ranges (`a..b` / `a..=b`, `for _ in`), `loop` / `break` / `continue`, early `return`; comparison conditions (`< <= > >= == !=`). |
 | Arrays | `let a = [0u16; N];` / `[e0, e1, …]`; `a[i]`, `a[i] = v`. Index with `i as usize`. `[u8; N]` are byte-packed-per-slot with byte load/store. |
 | Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar fields only. |
 | Enums + match | `enum Dir { Up = 1, … }` (explicit discriminants or `0,1,2,…`); `match` on integers/variants with `_`. Plus `bool` (`true`/`false`). |
@@ -52,9 +52,9 @@ Supported today (all differential-tested):
 
 Out of scope (use `rustc`-only host code, or wait for later stages): recursion
 (needs stack frames — Stage 4), references / `&mut` params, `>3` params, slices,
-`String`/`Vec`/`alloc`, floats, traits/generics, closures, array/nested struct
-*fields*. Anything unsupported is a **clear compile error** — that error is the
-"this is host-only" budget detector.
+`String`/`Vec`/`alloc`, floats, traits/generics, closures, tuples, nested struct
+*fields* (scalar and `[u16; N]` fields work). Anything unsupported is a **clear
+compile error** — that error is the "this is host-only" budget detector.
 
 ## A whole program
 
@@ -76,6 +76,38 @@ fn main() {
 
 `samples/snake.rs` is a complete game (body in arrays, `match` steering, draw via
 `poke`/`peek`) — the worked example end to end.
+
+## Examples — run the language
+
+Runnable demos in [`examples/`](./examples) each compile a dialect program (in
+[`samples/showcase/`](./samples/showcase)), run it on the real `z80` CPU, print the
+result, and check it against the same algorithm in plain rustc:
+
+```bash
+cargo run -p rustz80 --example sorting        # insertion sort  (arrays, break, for)
+cargo run -p rustz80 --example sieve          # primes < 100    (byte arrays, nested loops)
+cargo run -p rustz80 --example rpn_vm         # a bytecode VM   (arrays + match dispatch)
+cargo run -p rustz80 --example state_machine  # vending machine (struct + enum + methods)
+cargo run -p rustz80 --example rng            # 16-bit LCG      (wrapping_mul, ^)
+cargo run -p rustz80 --example numerics       # gcd / isqrt / fib (while, return, loop)
+cargo run -p rustz80 --example bitmap         # draw to screen RAM, printed as ASCII art
+```
+
+The `bitmap` demo prints what it drew straight from the framebuffer:
+
+```
+########
+##......
+#.#.....
+#..#....
+#...#...
+#....#..
+#.....#.
+#......#
+```
+
+`tests/examples.rs` locks every showcase result, so a codegen regression fails
+`cargo test` even without running the demos.
 
 ## The dial: one `impl Game`, two compilers
 
@@ -108,8 +140,11 @@ cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press 
 
 ## How it works
 
-- **Frontend** (`lower.rs`): `syn::parse_str` → accepted subset → typed IR
-  (`ir.rs`). Unsupported nodes become errors.
+- **Frontend** (`lower/`): `syn::parse_str` → accepted subset → typed IR (`ir.rs`).
+  Unsupported nodes become errors. Split by concern: `vars` (the register file),
+  `layout` (struct/enum layout + parse helpers), `prelude` (handle routing),
+  `generics` (monomorphization), `expr`, and `stmt`; `mod.rs` owns the `Ctx` and the
+  function-level orchestration.
 - **Codegen** (`codegen.rs`): IR → Z80. Locals (incl. params) live in a per-function
   scratch region; expressions evaluate via `HL` + the stack; `*`/`/`/`%` `CALL` an
   appended `__mul16`/`__divmod16`.
@@ -133,4 +168,6 @@ SPECTRUM_ROM="$PWD/testroms/48.rom" \
   through `rustz80` on the emulator and asserts they agree.
 - `tests/snake.rs` — the whole dialect at once: a Snake checked against a Rust replica
   (state checksum + screen bitmap).
+- `tests/examples.rs` — locks each `samples/showcase/` program's result (the demos in
+  `examples/` run the same sources against a rustc oracle).
 - `tests/tap.rs` — `.tap` structure, and ROM-gated boot/animation of `samples/snake.rs`.

@@ -228,6 +228,15 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   `while`/`for`+`continue`, `loop`+`return` rejection-sampling). The dialect
   `samples/snake.rs` is rewritten on `for`/`loop` and still boots + animates on the
   real ROM. (Closes the `loop`/`for` blocker for the pure-Snake seam.)
+- [x] **Stage 4a (generic functions)** — real generic free fns (`fn max<T: Ord +
+  Copy>(…)`) monomorphized per call: the type arg comes from a turbofish or is
+  inferred from the matching argument's width, and the instance's params are declared
+  at that concrete width, so the body lowers like any function (u8 instances mask, u16
+  don't). Generic-calls-generic instantiates transitively off a worklist (`clamp` →
+  `max`/`min`). Lowering-only — instances are extra named functions (`max$u16`). A
+  runnable `examples/generics` shows one source → six instances. (Generic *structs* +
+  const generics — what `Entities<T, N>` needs — are still pending.) Also: `lower.rs`
+  split into a `lower/` module tree.
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -270,8 +279,9 @@ dial is never multiplied before it's watched close:
   (state-seeded, deterministic), the **demo Snake is off `Vec`/`format!`** (uses
   `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
   Snake that compiles **pure** as one source — blocked on the remaining `rustz80`
-  features (**generics** for `Entities`, **tuples**; array struct fields ✓, `for`/`loop`
-  ✓); `Fx8_8` lands with the kit, not here.
+  features (generic **structs** + const generics for `Entities<T, N>`, **tuples**;
+  array struct fields ✓, `for`/`loop` ✓, generic *functions* ✓); `Fx8_8` lands with
+  the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;
@@ -431,8 +441,11 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
   `Result<_, String>` + `{syn:?}` debug-dumps with span-carrying errors; turn
   `panic!`/`expect` on undefined call targets / scratch overflow into `Err`; **reject
   recursion**; add tests for the rejections.
-- [ ] Split `lower.rs` (940 lines) into submodules; collapse the read/store + block
-  duplicate pairs.
+- [x] Split `lower.rs` (had grown past 1300 lines) into a `lower/` module tree —
+  `vars` (register file), `layout` (struct/enum + parse helpers), `prelude` (handle
+  routing), `generics` (monomorphization), `expr`, `stmt`, and `mod.rs` (the `Ctx` +
+  orchestration); none over ~350 lines. *(Collapsing the read/store + block duplicate
+  pairs is still open.)*
 
 ### H6. `speccy-env` — **done**
 - [x] `StateView::u16` now **panics** on an unknown field (a `FromState` typo —

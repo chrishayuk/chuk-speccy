@@ -820,6 +820,70 @@ fn early_return() {
 }
 
 #[test]
+fn generics() {
+    // Real generic Rust — monomorphized per call. `clamp` is generic *and* calls two
+    // other generics, so one `clamp(_u16)` transitively instantiates `max`/`min` too.
+    // The same source type-checks under rustc (bounds satisfied) and compiles here.
+    fn max<T: Ord + Copy>(a: T, b: T) -> T {
+        let mut r = a;
+        if b > a {
+            r = b;
+        }
+        r
+    }
+    fn min<T: Ord + Copy>(a: T, b: T) -> T {
+        let mut r = a;
+        if b < a {
+            r = b;
+        }
+        r
+    }
+    fn clamp<T: Ord + Copy>(x: T, lo: T, hi: T) -> T {
+        min(max(x, lo), hi)
+    }
+    fn host() -> u16 {
+        let a = clamp(50u16, 10, 40); // 40
+        let b = clamp(5u16, 10, 40); // 10
+        let u = clamp(200u8, 50, 150); // 150 (a u8 instance)
+        a + b + u as u16
+    }
+    let src = "
+        fn max<T: Ord + Copy>(a: T, b: T) -> T { let mut r = a; if b > a { r = b; } r }
+        fn min<T: Ord + Copy>(a: T, b: T) -> T { let mut r = a; if b < a { r = b; } r }
+        fn clamp<T: Ord + Copy>(x: T, lo: T, hi: T) -> T { min(max(x, lo), hi) }
+        fn run() -> u16 {
+            let a = clamp(50u16, 10u16, 40u16);
+            let b = clamp(5u16, 10u16, 40u16);
+            let u = clamp(200u8, 50u8, 150u8);
+            a + b + u as u16
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 40 + 10 + 150 = 200
+
+    // The type argument is inferred (no turbofish), and `clamp` was instantiated at
+    // both u16 and u8 — distinct monomorphic copies, each pulling in max/min.
+    for sym in ["clamp$u16", "clamp$u8", "max$u16", "min$u8"] {
+        assert!(prog.symbols.contains_key(sym), "missing instance {sym}");
+    }
+}
+
+#[test]
+fn generics_substitute_width() {
+    // The instantiation's width is real: at u8 the body wraps (mod 256), at u16 it
+    // does not — proving monomorphization substitutes the type, not just the name.
+    // (`add` is only compiled here, not run on host, so the u8 overflow is fine.)
+    let src = "
+        fn add<T: core::ops::Add<Output = T> + Copy>(a: T, b: T) -> T { a + b }
+        fn at_u16() -> u16 { add(200u16, 100u16) }
+        fn at_u8() -> u16 { add(200u8, 100u8) as u16 }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "at_u16"), 300); // u16: no wrap
+    assert_eq!(run_program(&prog, "at_u8"), 44); // u8: 300 wraps to 44
+}
+
+#[test]
 fn control_flow_rejections() {
     // `break`/`continue` outside any loop are rejected (not dangling jumps).
     assert!(rustz80::compile_fn("fn f() -> u16 { break; 0u16 }").is_err());
