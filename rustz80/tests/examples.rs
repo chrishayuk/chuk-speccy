@@ -75,6 +75,15 @@ fn struct_field_struct_array_pool() {
 }
 
 #[test]
+fn const_generic_entities() {
+    let src = include_str!("../samples/showcase/entities.rs");
+    assert_eq!(val(src, "run", &[]), 2530); // Entities$4 (406) + Entities$8 (2124)
+    let prog = rustz80::compile_program(src).unwrap();
+    assert!(prog.symbols.contains_key("Entities$4::add"));
+    assert!(prog.symbols.contains_key("Entities$8::add"));
+}
+
+#[test]
 fn const_generic_struct_stack() {
     let src = include_str!("../samples/showcase/stack.rs");
     assert_eq!(val(src, "run", &[]), 10036); // Stack<4> capped sum *1000 + Stack<8> sum

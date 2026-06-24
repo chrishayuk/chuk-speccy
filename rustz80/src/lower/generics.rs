@@ -111,6 +111,7 @@ impl Mono {
         &mut self,
         name: &str,
         args: Vec<GArg>,
+        structs: &super::layout::Structs,
     ) -> Result<String, String> {
         let mangled = instance_name(name, &args);
         if self.struct_instances.contains_key(&mangled) {
@@ -125,9 +126,9 @@ impl Mono {
         let syn::Fields::Named(named) = &gs.item.fields else {
             return Err(format!("only named-field structs are supported: {name}"));
         };
-        // Element-struct lookup for a const-generic struct's `[Cell; N]` field would
-        // need the regular layout map (the generic combo is a later step); pass empty.
-        let layout = struct_field_defs(named, &consts, &Default::default(), name)?;
+        // A const-generic struct may have a `[Cell; N]` field — element sizes come from
+        // the regular struct layouts (`Entities<Cell, const N>`).
+        let layout = struct_field_defs(named, &consts, structs, name)?;
         self.struct_instances.insert(mangled.clone(), layout);
 
         // Request each method as an instance named `Buf$8::method`.

@@ -989,6 +989,82 @@ fn struct_element_arrays() {
 }
 
 #[test]
+fn const_generic_entities() {
+    // The full `Entities<Cell, const N>` shape: a const-generic struct whose field is an
+    // array of structs (`data: [Cell; N]`), with methods that bound on `N`, store whole
+    // elements, and read element fields. `N` is inferred from the literal's array length.
+    #[derive(Clone, Copy)]
+    struct Cell {
+        x: u16,
+        y: u16,
+    }
+    struct Entities<const N: usize> {
+        data: [Cell; N],
+        len: u16,
+    }
+    impl<const N: usize> Entities<N> {
+        fn add(&mut self, x: u16, y: u16) {
+            if self.len < N as u16 {
+                self.data[self.len as usize] = Cell { x, y };
+                self.len = self.len + 1;
+            }
+        }
+        fn checksum(&self) -> u16 {
+            let mut s = 0u16;
+            let mut i = 0u16;
+            while i < self.len {
+                s = s + self.data[i as usize].x * 100 + self.data[i as usize].y;
+                i = i + 1;
+            }
+            s
+        }
+    }
+    fn host() -> u16 {
+        let mut e = Entities {
+            data: [Cell { x: 0, y: 0 }; 4],
+            len: 0,
+        };
+        e.add(1, 2);
+        e.add(3, 4);
+        e.add(5, 6);
+        e.add(7, 8); // 5th add — capacity is 4, ignored
+        e.checksum()
+    }
+    let src = "
+        struct Cell { x: u16, y: u16 }
+        struct Entities<const N: usize> { data: [Cell; N], len: u16 }
+        impl<const N: usize> Entities<N> {
+            fn add(&mut self, x: u16, y: u16) {
+                if self.len < N as u16 {
+                    self.data[self.len as usize] = Cell { x: x, y: y };
+                    self.len = self.len + 1u16;
+                }
+            }
+            fn checksum(&self) -> u16 {
+                let mut s = 0u16;
+                let mut i = 0u16;
+                while i < self.len {
+                    s = s + self.data[i as usize].x * 100u16 + self.data[i as usize].y;
+                    i = i + 1u16;
+                }
+                s
+            }
+        }
+        fn run() -> u16 {
+            let mut e = Entities { data: [Cell { x: 0u16, y: 0u16 }; 4], len: 0u16 };
+            e.add(1u16, 2u16);
+            e.add(3u16, 4u16);
+            e.add(5u16, 6u16);
+            e.add(7u16, 8u16);
+            e.checksum()
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert!(prog.symbols.contains_key("Entities$4::add"));
+    assert_eq!(run_program(&prog, "run"), host()); // capacity 4: 102+304+506 = 912
+}
+
+#[test]
 fn struct_field_struct_arrays() {
     // A struct whose field is an array of structs (`[Cell; N]`) — the `Entities<Cell,
     // N>` shape. Methods access `self.cells[i].x` (through the receiver pointer) and
