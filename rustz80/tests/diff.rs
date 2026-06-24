@@ -989,6 +989,71 @@ fn struct_element_arrays() {
 }
 
 #[test]
+fn u16_shifts() {
+    // `<<` / `>>` by a constant on a u16 (logical).
+    fn host() -> u16 {
+        let a = 3u16;
+        let b = 0xF0F0u16;
+        (a << 4) | (a >> 1) | (b >> 8) | ((b << 4) & 0xFF00)
+    }
+    let src = "
+        fn run() -> u16 {
+            let a = 3u16;
+            let b = 0xF0F0u16;
+            (a << 4u16) | (a >> 1u16) | (b >> 8u16) | ((b << 4u16) & 0xFF00u16)
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
+fn u32_xorshift() {
+    // A real 32-bit xorshift step (the SDK `Rng` core) — `u32` locals, `^`, and
+    // constant `<<` / `>>` (including a shift past the word boundary, 17). The low 16
+    // bits are returned. Same source under rustc.
+    fn host() -> u16 {
+        let mut x: u32 = 2463534242;
+        x = x ^ (x << 13);
+        x = x ^ (x >> 17);
+        x = x ^ (x << 5);
+        x as u16
+    }
+    let src = "
+        fn run() -> u16 {
+            let mut x: u32 = 2463534242u32;
+            x = x ^ (x << 13u32);
+            x = x ^ (x >> 17u32);
+            x = x ^ (x << 5u32);
+            x as u16
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
+fn u32_bitwise_and_truncate() {
+    // u32 `& | ^` across both words, with `as u16` / `as u8` truncation.
+    fn host() -> u16 {
+        let a: u32 = 0xDEADBEEF;
+        let b: u32 = 0x0F0F0F0F;
+        let c = (a & b) | (a ^ b);
+        (c as u16) ^ ((c >> 16) as u16) ^ ((a as u8) as u16)
+    }
+    let src = "
+        fn run() -> u16 {
+            let a: u32 = 0xDEADBEEFu32;
+            let b: u32 = 0x0F0F0F0Fu32;
+            let c = (a & b) | (a ^ b);
+            (c as u16) ^ ((c >> 16u32) as u16) ^ ((a as u8) as u16)
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
 fn const_generic_entities() {
     // The full `Entities<Cell, const N>` shape: a const-generic struct whose field is an
     // array of structs (`data: [Cell; N]`), with methods that bound on `N`, store whole

@@ -181,8 +181,13 @@ pub(crate) fn lower_local(
         }
         other => {
             let (e, ty) = lower_expr(other, ctx)?;
-            let base = ctx.vars.declare(&name, 1, None, ty);
-            body.push(Stmt::Assign(base, e));
+            if ty == Width::DWord {
+                let base = ctx.vars.declare(&name, 2, None, Width::DWord);
+                body.push(Stmt::Assign32(base, e));
+            } else {
+                let base = ctx.vars.declare(&name, 1, None, ty);
+                body.push(Stmt::Assign(base, e));
+            }
         }
     }
     Ok(())
@@ -294,9 +299,14 @@ pub(crate) fn lower_stmt_expr(
                 body.push(lower_field_store(f, val, ctx)?);
             }
             _ => {
-                let slot = ctx.vars.base(&path_ident(&a.left)?);
-                let e = lower_expr(&a.right, ctx)?.0;
-                body.push(Stmt::Assign(slot, e));
+                let name = path_ident(&a.left)?;
+                let slot = ctx.vars.base(&name);
+                let (e, ew) = lower_expr(&a.right, ctx)?;
+                if ctx.vars.ty(&name) == Width::DWord || ew == Width::DWord {
+                    body.push(Stmt::Assign32(slot, e));
+                } else {
+                    body.push(Stmt::Assign(slot, e));
+                }
             }
         },
         syn::Expr::If(ifx) => {

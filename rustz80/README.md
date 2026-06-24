@@ -40,9 +40,9 @@ Supported today (all differential-tested):
 
 | Feature | Notes |
 |---|---|
-| Types | `u16` (default) and `u8` (wraps at 256). `as u8` truncates, `as u16`/`as usize` widen. |
-| Arithmetic | `+ - * / %`, `wrapping_add/sub/mul`. `*`/`/`/`%` use the appended micro-runtime. |
-| Bitwise | `\|` `&` `^`. |
+| Types | `u16` (default) and `u8` (wraps at 256). `as u8` truncates, `as u16`/`as usize` widen. `u32` (two slots, computed in `HL:DE`) for `^ & \|` + constant shifts + `as u16`/`as u8` — enough for a 32-bit xorshift RNG. |
+| Arithmetic | `+ - * / %`, `wrapping_add/sub/mul`. `*`/`/`/`%` use the appended micro-runtime. (16-bit; `u32` arithmetic beyond bitwise/shift is not done yet.) |
+| Bitwise | `\|` `&` `^`, and `<<` / `>>` by a **constant** amount (`u16` and `u32`). |
 | Control flow | `if`/`else if`/`else`, `while`, `for` over integer ranges (`a..b` / `a..=b`, `for _ in`), `loop` / `break` / `continue`, early `return`; comparison conditions (`< <= > >= == !=`). |
 | Arrays | `let a = [0u16; N];` / `[e0, e1, …]`; `a[i]`, `a[i] = v`. Index with `i as usize`. `[u8; N]` are byte-packed-per-slot. Arrays of structs `let a = [Cell { … }; N]` — element field access `a[i].x` (read/write) + whole-element assign `a[i] = Cell { … }`. |
 | Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar, `[u16; N]`, tuple (`pos: (u16, u16)`, `p.pos.0`), and array-of-structs (`cells: [Cell; N]`, `p.cells[i].x`, `p.cells[i] = Cell { … }`) fields. |
@@ -54,9 +54,10 @@ Supported today (all differential-tested):
 
 Out of scope (use `rustc`-only host code, or wait for later stages): recursion
 (needs stack frames — Stage 4), references / `&mut` params, `>3` params, slices,
-`String`/`Vec`/`alloc`, floats, traits, `u32`, closures, nested struct *fields*.
-Anything unsupported is a **clear compile error** — that error is the "this is
-host-only" budget detector.
+`String`/`Vec`/`alloc`, floats, traits, `u32` *arithmetic* (`+ - * /`) and `u32`
+params/returns (bitwise/shift `u32` works), variable shift amounts, closures, nested
+struct *fields*. Anything unsupported is a **clear compile error** — that error is the
+"this is host-only" budget detector.
 
 ## A whole program
 
@@ -98,6 +99,7 @@ cargo run -p rustz80 --example stack          # const-generic fixed-cap stack (S
 cargo run -p rustz80 --example points         # array of structs [Cell; N], a[i].x access
 cargo run -p rustz80 --example pool           # fixed-cap entity pool (struct field [Cell; N])
 cargo run -p rustz80 --example entities       # Entities<Cell, const N> — two instances ($4, $8)
+cargo run -p rustz80 --example rng32          # 32-bit xorshift RNG (u32 in the HL:DE pair)
 cargo run -p rustz80 --example structs        # generic struct + methods + a tuple field
 cargo run -p rustz80 --example tuples         # multiple return values (HL/DE/BC)
 cargo run -p rustz80 --example report         # per-function code-size report (instances + runtime)
