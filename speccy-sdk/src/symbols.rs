@@ -116,14 +116,21 @@ fn parse_field(line: &str) -> Result<Symbol, String> {
         .and_then(|(_, r)| r.split_once('}'))
         .map(|(b, _)| b)
         .ok_or_else(|| format!("no {{ }} body in {line:?}"))?;
-    let (mut addr, mut width, mut count, mut ty) = (0u16, 2u8, 1u16, "u16".to_string());
+    // `ty` is a quoted string that may itself contain commas (e.g. a tuple
+    // `"(u16, u16)"`), so pull it out before splitting the rest on commas.
+    let ty = inner
+        .split_once("ty")
+        .and_then(|(_, r)| r.split_once('"'))
+        .and_then(|(_, r)| r.split_once('"'))
+        .map(|(t, _)| t.to_string())
+        .unwrap_or_else(|| "u16".to_string());
+    let (mut addr, mut width, mut count) = (0u16, 2u8, 1u16);
     for part in inner.split(',') {
         if let Some((k, v)) = part.split_once('=') {
             match k.trim() {
                 "addr" => addr = parse_int(v)?,
                 "width" => width = parse_int(v)? as u8,
                 "count" => count = parse_int(v)?,
-                "ty" => ty = v.trim().trim_matches('"').to_string(),
                 _ => {}
             }
         }
@@ -168,5 +175,35 @@ mod tests {
         assert_eq!(back.addr_of("cells"), Some(0xB002));
         assert_eq!(back.fields[1].count, 8);
         assert_eq!(back.addr_of("nope"), None);
+    }
+
+    #[test]
+    fn tuple_field_ty_round_trips() {
+        // A tuple field's `ty` contains a comma — it must survive the TOML round-trip
+        // (the parser pulls `ty` out before splitting the rest on commas).
+        let m = SymbolMap {
+            base: 0xB000,
+            size: 6,
+            fields: vec![
+                Symbol {
+                    field: "head".into(),
+                    addr: 0xB000,
+                    width: 2,
+                    count: 2,
+                    ty: "(u16, u16)".into(),
+                },
+                Symbol {
+                    field: "score".into(),
+                    addr: 0xB004,
+                    width: 2,
+                    count: 1,
+                    ty: "u16".into(),
+                },
+            ],
+        };
+        let back = SymbolMap::from_toml(&m.to_toml()).expect("parse");
+        assert_eq!(back, m);
+        assert_eq!(back.fields[0].ty, "(u16, u16)");
+        assert_eq!(back.fields[0].count, 2);
     }
 }

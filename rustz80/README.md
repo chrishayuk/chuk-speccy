@@ -45,7 +45,7 @@ Supported today (all differential-tested):
 | Bitwise | `\|` `&` `^`. |
 | Control flow | `if`/`else if`/`else`, `while`, `for` over integer ranges (`a..b` / `a..=b`, `for _ in`), `loop` / `break` / `continue`, early `return`; comparison conditions (`< <= > >= == !=`). |
 | Arrays | `let a = [0u16; N];` / `[e0, e1, …]`; `a[i]`, `a[i] = v`. Index with `i as usize`. `[u8; N]` are byte-packed-per-slot with byte load/store. |
-| Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar fields only. |
+| Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar, `[u16; N]` array, and tuple fields (`pos: (u16, u16)`, accessed `p.pos.0`). |
 | Enums + match | `enum Dir { Up = 1, … }` (explicit discriminants or `0,1,2,…`); `match` on integers/variants with `_`. Plus `bool` (`true`/`false`). |
 | Functions + methods | Free fns and `impl T { fn m(&mut self, …) }` — up to 3 args in `HL`/`DE`/`BC`, result in `HL`; `self.field` through the receiver. |
 | Generics | Generic *free functions* (`fn max<T: Ord>(…)`), monomorphized per call (turbofish or inferred); the body lowers at the instance's width. Generic *structs* + methods (`struct Pair<T>` / `impl<T> Pair<T>`) too — type arguments are erased to 16-bit (one shared layout, like any struct's fields). |

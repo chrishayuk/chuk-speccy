@@ -1112,6 +1112,47 @@ fn size_report_covers_image() {
 }
 
 #[test]
+fn tuple_struct_fields() {
+    // A struct with a tuple field, accessed by `.0`/`.1` — by value and through a
+    // `&mut self` receiver.
+    struct Sprite {
+        pos: (u16, u16),
+        id: u16,
+    }
+    impl Sprite {
+        fn mv(&mut self, dx: u16, dy: u16) {
+            self.pos.0 = self.pos.0 + dx;
+            self.pos.1 = self.pos.1 + dy;
+        }
+        fn key(&self) -> u16 {
+            self.pos.0 * 100 + self.pos.1 + self.id
+        }
+    }
+    fn host() -> u16 {
+        let mut s = Sprite { pos: (3, 4), id: 7 };
+        s.mv(2, 5); // pos = (5, 9)
+        s.key() // 5*100 + 9 + 7 = 516
+    }
+    let src = "
+        struct Sprite { pos: (u16, u16), id: u16 }
+        impl Sprite {
+            fn mv(&mut self, dx: u16, dy: u16) {
+                self.pos.0 = self.pos.0 + dx;
+                self.pos.1 = self.pos.1 + dy;
+            }
+            fn key(&self) -> u16 { self.pos.0 * 100u16 + self.pos.1 + self.id }
+        }
+        fn run() -> u16 {
+            let mut s = Sprite { pos: (3u16, 4u16), id: 7u16 };
+            s.mv(2u16, 5u16);
+            s.key()
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 516
+}
+
+#[test]
 fn tuple_rejections() {
     // More than three return values has no register convention.
     assert!(rustz80::compile_program(

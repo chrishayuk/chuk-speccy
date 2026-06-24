@@ -82,9 +82,20 @@ pub(crate) fn collect_structs(file: &syn::File) -> Result<Structs, String> {
                             s.ident
                         ))
                     }
+                    // A tuple field `(u16, u16)` occupies one slot per (scalar) element,
+                    // accessed by `.0` / `.1`.
+                    syn::Type::Tuple(t) => {
+                        if !t.elems.iter().all(|e| matches!(e, syn::Type::Path(_))) {
+                            return Err(format!(
+                                "tuple struct fields must have scalar elements: {}",
+                                s.ident
+                            ));
+                        }
+                        t.elems.len()
+                    }
                     _ => {
                         return Err(format!(
-                            "only scalar or `[u16; N]` struct fields are supported: {}",
+                            "only scalar, `[u16; N]`, or tuple struct fields are supported: {}",
                             s.ident
                         ))
                     }
