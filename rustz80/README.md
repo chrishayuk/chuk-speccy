@@ -94,6 +94,7 @@ cargo run -p rustz80 --example rng            # 16-bit LCG      (wrapping_mul, ^
 cargo run -p rustz80 --example numerics       # gcd / isqrt / fib (while, return, loop)
 cargo run -p rustz80 --example generics       # one generic source → 6 monomorphic instances
 cargo run -p rustz80 --example tuples         # multiple return values (HL/DE/BC)
+cargo run -p rustz80 --example report         # per-function code-size report (instances + runtime)
 cargo run -p rustz80 --example bitmap         # draw to screen RAM, printed as ASCII art
 ```
 

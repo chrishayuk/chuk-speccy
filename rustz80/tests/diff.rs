@@ -1091,6 +1091,27 @@ fn tuple_layout() {
 }
 
 #[test]
+fn size_report_covers_image() {
+    let src = "
+        fn id<T>(x: T) -> T { x }
+        fn run() -> u16 { id(1u16) + id(2u8) as u16 }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    let report = prog.size_report();
+
+    // One entry per symbol; sizes tile the whole image with no gaps or overlaps.
+    assert_eq!(report.len(), prog.symbols.len());
+    let total: usize = report.iter().map(|f| f.size as usize).sum();
+    assert_eq!(total, prog.code.len(), "sizes cover the whole image");
+    assert!(report.iter().all(|f| f.size > 0), "every fn emits ≥ 1 byte");
+    // Monomorphic instances are present and flagged.
+    assert!(report.iter().any(|f| f.name == "id$u16" && f.instance));
+    assert!(report.iter().any(|f| f.name == "id$u8" && f.instance));
+    // Entries are in layout order (ascending address).
+    assert!(report.windows(2).all(|w| w[0].addr <= w[1].addr));
+}
+
+#[test]
 fn tuple_rejections() {
     // More than three return values has no register convention.
     assert!(rustz80::compile_program(

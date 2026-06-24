@@ -37,6 +37,42 @@ pub struct Program {
     pub symbols: HashMap<String, u16>,
 }
 
+/// One entry in a [`size_report`]: a named function (or appended runtime routine, or
+/// a monomorphized instance) and the byte span it occupies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FnSize {
+    pub name: String,
+    pub addr: u16,
+    pub size: u16,
+    /// A monomorphized generic instance (its mangled name carries a `$`).
+    pub instance: bool,
+}
+
+impl Program {
+    /// Per-symbol code sizes, in layout order. Each function's size is the gap to the
+    /// next symbol's address (the last reaches the end of `code`) — so it accounts for
+    /// every monomorphized instance and the appended `__mul16`/`__divmod16` runtime.
+    /// Lets you *see* what generics/tuples cost in bytes ([`FnSize::instance`] flags
+    /// the instances). Sizes sum to `code.len()` for a [`compile_program`] image.
+    pub fn size_report(&self) -> Vec<FnSize> {
+        let mut syms: Vec<(&String, u16)> = self.symbols.iter().map(|(n, &a)| (n, a)).collect();
+        syms.sort_by_key(|&(_, a)| a);
+        let end = ORG.wrapping_add(self.code.len() as u16);
+        syms.iter()
+            .enumerate()
+            .map(|(i, &(name, addr))| {
+                let next = syms.get(i + 1).map(|&(_, a)| a).unwrap_or(end);
+                FnSize {
+                    name: name.clone(),
+                    addr,
+                    size: next.wrapping_sub(addr),
+                    instance: name.contains('$'),
+                }
+            })
+            .collect()
+    }
+}
+
 /// Compile a multi-`fn` program. Functions are laid out in source order from
 /// [`ORG`]; calls resolve by name; the mul/div micro-runtime is appended if used.
 pub fn compile_program(src: &str) -> Result<Program, String> {
