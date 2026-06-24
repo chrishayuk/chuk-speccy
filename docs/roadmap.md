@@ -234,9 +234,11 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   at that concrete width, so the body lowers like any function (u8 instances mask, u16
   don't). Generic-calls-generic instantiates transitively off a worklist (`clamp` →
   `max`/`min`). Lowering-only — instances are extra named functions (`max$u16`). A
-  runnable `examples/generics` shows one source → six instances. (Generic *structs* +
-  const generics — what `Entities<T, N>` needs — are still pending.) Also: `lower.rs`
-  split into a `lower/` module tree.
+  runnable `examples/generics` shows one source → six instances. **Generic structs +
+  methods** (`struct Pair<T>` / `impl<T> Pair<T>`) too — type arguments erased to 16-bit
+  (one shared layout, like any struct's fields), so no per-instance struct codegen.
+  (Const generics + struct-element arrays — what `Entities<T, N>` *also* needs — remain
+  pending.) Also: `lower.rs` split into a `lower/` module tree.
 - [x] **Stage 4b (tuples → multiple return values)** — `fn divmod(a, b) -> (u16, u16)
   { (a / b, a % b) }` returns its tuple in `HL`/`DE`/`BC` (up to three), destructured
   at the call site with `let (q, r) = …` (a tuple literal or a call). Lowering-only

@@ -114,11 +114,15 @@ pub(crate) fn resolve_enum_path(path: &syn::Path, enums: &Enums) -> Option<u16> 
         .map(|(_, v)| *v)
 }
 
-/// The simple name of an `impl` target type (`impl Foo` → `Foo`).
+/// The base name of an `impl` target type — the last path segment's ident, so both
+/// `impl Foo` and a generic `impl<T> Pair<T>` (or `Pair<u16>`) resolve to the struct
+/// name. Type arguments are erased: every `T`-typed field is a 16-bit slot, so a
+/// generic struct shares one layout (like any struct's fields), and its methods are
+/// lowered once.
 pub(crate) fn type_name(t: &syn::Type) -> Result<String, String> {
     if let syn::Type::Path(p) = t {
-        if let Some(id) = p.path.get_ident() {
-            return Ok(id.to_string());
+        if let Some(seg) = p.path.segments.last() {
+            return Ok(seg.ident.to_string());
         }
     }
     Err(format!("unsupported impl type: {t:?}"))
