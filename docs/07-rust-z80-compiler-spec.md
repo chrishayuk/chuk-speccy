@@ -7,17 +7,23 @@ small, finishable end — a compiler for a **restricted Rust dialect that is als
 real Rust**, with a `syn` frontend, our own IR + Z80 codegen, and a hand-written
 micro-runtime.
 
-> **Status: built and running.** Implemented in the [`rustz80`](../rustz80) crate
-> with a `syn` frontend, own IR + Z80 codegen, and a mul/div micro-runtime. The
-> dialect's value layer is complete (`u8`/`u16`, arrays, `struct`, `enum`/`match`,
-> functions + calling convention, `*`/`/`/`%`, bitwise ops) plus `poke`/`peek`
-> raw-memory intrinsics and a `.tap` emitter (`speccy-compile`). A **Snake written
-> in the dialect compiles and boots on the real 48K ROM**. Everything is
-> differential-tested against `rustc` on the emulator (`rustz80/tests/`). Remaining:
-> Stage 3b (a `Game`-trait prelude for full one-source ergonomics), Stage 2
-> (peephole/strength-reduce), and the larger-type / generics tail. It stayed
-> *escapable* throughout — the host-Rust SDK (spec 03) ships games independently.
-> See the [`rustz80` README](../rustz80/README.md) to write and compile one.
+> **Status: built and running — now a bounded data-structure language.** Implemented
+> in the [`rustz80`](../rustz80) crate with a `syn` frontend, own IR + Z80 codegen, and
+> a mul/div micro-runtime. The value layer is complete (`u8`/`u16`, arrays, `struct`,
+> `enum`/`match`, functions + calling convention, `*`/`/`/`%`, bitwise) plus `poke`/`peek`
+> intrinsics and a `.tap` emitter (`speccy-compile`). The **dial is closed**: one
+> `impl Game` source compiles under rustc *and* `rustz80` (Stage 3b prelude), and a
+> **Snake written in the dialect boots on the real 48K ROM**. Since then the dialect has
+> grown into bounded data structures: **generics + const-generics** (functions *and*
+> structs, monomorphized — `max$u16`, `Stack$8`), **struct-element arrays** (`[Cell; N]`
+> local, as a struct field, and the **`Entities<Cell, const N>`** combo — fixed-capacity
+> pools), and **`u32`** (two-slot, `HL:DE`) with bitwise + constant shifts — a 32-bit
+> xorshift RNG runs. Everything is differential-tested against `rustc` on the emulator
+> (`rustz80/tests/`); coverage is ≥90% line/region per file. Remaining: Stage 2
+> (peephole/strength-reduce, optional), and the *non-structural* pure-Snake glue (a
+> power-of-two `Rng::below` and a value-args tile/text draw path — SDK-side, see roadmap
+> Stage 4i). It stayed *escapable* throughout — the host-Rust SDK (spec 03) ships games
+> independently. See the [`rustz80` README](../rustz80/README.md) to write and compile one.
 
 ---
 
