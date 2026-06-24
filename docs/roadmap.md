@@ -246,6 +246,13 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   slots); codegen gains a tiny multi-value `gen_return`. Differential-tested (divmod,
   swap-`minmax`, a 3-tuple) + a runnable `examples/tuples`. (Closes the tuples blocker
   for the pure-Snake seam.)
+- [x] **Stage 4c (const generics on functions)** — `fn buf<const N: usize>()`
+  monomorphized per `::<N>`: a const argument (turbofish — it can't be inferred) sizes
+  a local `[u16; N]` array and substitutes as a plain value (loop bounds, comparisons).
+  Reuses the `Mono` worklist (a generic param is now type *or* const; an instance key
+  carries widths and values, e.g. `triangle$4`). Differential-tested + a runnable
+  `examples/const_generics`. (Const generics on *structs* — `Entities<T, const N>`'s
+  `[T; N]` — and struct-element arrays remain, the last pure-Snake blockers.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -287,10 +294,12 @@ dial is never multiplied before it's watched close:
   the subset-clean primitives **`Entities<T, N>`** (fixed-cap vec) and **`Rng`**
   (state-seeded, deterministic), the **demo Snake is off `Vec`/`format!`** (uses
   `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
-  Snake that compiles **pure** as one source — blocked on the remaining `rustz80`
-  features (generic **structs** + const generics for `Entities<T, N>`, and method-based
-  or `Index` element access; array struct fields ✓, `for`/`loop` ✓, generic *functions*
-  ✓, tuples ✓); `Fx8_8` lands with the kit, not here.
+  Snake that compiles **pure** as one source. Done since: generic *functions* + structs
+  ✓, const-generic *functions* ✓, tuples + tuple struct fields ✓, `for`/`loop` ✓, array
+  struct fields ✓. *Remaining `rustz80` blockers:* **const-generic structs** + **struct-
+  element arrays** (`Entities<T, N>`'s `[T; N]`), method/`Index` element access, `u32`
+  (the `Rng`), and `Frame::tile`/`text` prelude routing — or an SDK redesign of
+  `Entities`/`Rng` to the current subset. `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;

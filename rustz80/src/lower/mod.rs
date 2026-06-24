@@ -23,7 +23,7 @@ pub use prelude::PreludeConfig;
 
 use crate::ir::*;
 use expr::lower_expr;
-use generics::{collect_generic_fns, is_generic_fn, is_generic_sig, Mono};
+use generics::{collect_generic_fns, is_generic_fn, is_generic_sig, GArg, Mono};
 use layout::{collect_enums, collect_structs, type_name, Enums, Structs};
 use prelude::handle_type;
 use std::cell::RefCell;
@@ -46,6 +46,9 @@ pub(crate) struct Ctx<'a> {
     /// Type-parameter → concrete width for the instance being lowered (empty for a
     /// non-generic function).
     pub(crate) type_args: &'a HashMap<String, Width>,
+    /// Const-parameter → concrete value for the instance being lowered (used as array
+    /// lengths and as plain values; empty for a non-generic function).
+    pub(crate) const_args: &'a HashMap<String, u16>,
     /// Shared monomorphization registry/worklist (calls register instances here).
     pub(crate) mono: &'a RefCell<Mono>,
 }
@@ -80,6 +83,7 @@ pub fn lower_program(
     let enums = collect_enums(file)?;
     let mono = RefCell::new(Mono::new(collect_generic_fns(file)?));
     let no_args = HashMap::new();
+    let no_const = HashMap::new();
     let mut out = Vec::new();
     for item in &file.items {
         match item {
@@ -89,7 +93,7 @@ pub fn lower_program(
             syn::Item::Fn(f) if is_generic_fn(f) => {}
             syn::Item::Fn(f) => out.push((
                 f.sig.ident.to_string(),
-                lower_with(f, &structs, &enums, prelude, &mono, &no_args)?,
+                lower_with(f, &structs, &enums, prelude, &mono, &no_args, &no_const)?,
             )),
             // `impl T { fn m(&mut self, …) }` — each method becomes a `T::m` function
             // taking `self` as a leading pointer argument.
@@ -105,7 +109,9 @@ pub fn lower_program(
                     let name = format!("{self_ty}::{}", m.sig.ident);
                     out.push((
                         name,
-                        lower_method(m, &self_ty, &structs, &enums, prelude, &mono, &no_args)?,
+                        lower_method(
+                            m, &self_ty, &structs, &enums, prelude, &mono, &no_args, &no_const,
+                        )?,
                     ));
                 }
             }
@@ -128,13 +134,29 @@ pub fn lower_program(
         };
         let Some(inst) = inst else { break };
         let gf = mono.borrow().generics[&inst.generic].clone();
-        let type_args: HashMap<String, Width> = gf
-            .params
-            .iter()
-            .cloned()
-            .zip(inst.type_args.iter().copied())
-            .collect();
-        let func = lower_with(&gf.item, &structs, &enums, prelude, &mono, &type_args)?;
+        // Split the instance's arguments into type-widths and const-values by the
+        // matching parameter's kind.
+        let mut type_args: HashMap<String, Width> = HashMap::new();
+        let mut const_args: HashMap<String, u16> = HashMap::new();
+        for (p, a) in gf.params.iter().zip(&inst.args) {
+            match a {
+                GArg::Width(w) => {
+                    type_args.insert(p.name.clone(), *w);
+                }
+                GArg::Const(n) => {
+                    const_args.insert(p.name.clone(), *n);
+                }
+            }
+        }
+        let func = lower_with(
+            &gf.item,
+            &structs,
+            &enums,
+            prelude,
+            &mono,
+            &type_args,
+            &const_args,
+        )?;
         out.push((inst.name, func));
     }
 
@@ -148,6 +170,7 @@ pub fn lower_program(
 pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
     let mono = RefCell::new(Mono::default());
     let no_args = HashMap::new();
+    let no_const = HashMap::new();
     lower_with(
         item,
         &Structs::new(),
@@ -155,6 +178,7 @@ pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
         &PreludeConfig::default(),
         &mono,
         &no_args,
+        &no_const,
     )
 }
 
@@ -169,8 +193,9 @@ fn lower_method<'a>(
     prelude: &'a PreludeConfig,
     mono: &'a RefCell<Mono>,
     type_args: &'a HashMap<String, Width>,
+    const_args: &'a HashMap<String, u16>,
 ) -> Result<Func, String> {
-    let mut ctx = new_ctx(structs, enums, prelude, mono, type_args);
+    let mut ctx = new_ctx(structs, enums, prelude, mono, type_args, const_args);
     let params = lower_inputs(&m.sig.inputs, &mut ctx, Some(self_ty))?;
     let (body, ret) = lower_fn_block(&m.block, &mut ctx)?;
     Ok(Func {
@@ -181,6 +206,7 @@ fn lower_method<'a>(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lower_with<'a>(
     item: &syn::ItemFn,
     structs: &'a Structs,
@@ -188,8 +214,9 @@ fn lower_with<'a>(
     prelude: &'a PreludeConfig,
     mono: &'a RefCell<Mono>,
     type_args: &'a HashMap<String, Width>,
+    const_args: &'a HashMap<String, u16>,
 ) -> Result<Func, String> {
-    let mut ctx = new_ctx(structs, enums, prelude, mono, type_args);
+    let mut ctx = new_ctx(structs, enums, prelude, mono, type_args, const_args);
     let params = lower_inputs(&item.sig.inputs, &mut ctx, None)?;
     let (body, ret) = lower_fn_block(&item.block, &mut ctx)?;
     Ok(Func {
@@ -200,12 +227,14 @@ fn lower_with<'a>(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn new_ctx<'a>(
     structs: &'a Structs,
     enums: &'a Enums,
     prelude: &'a PreludeConfig,
     mono: &'a RefCell<Mono>,
     type_args: &'a HashMap<String, Width>,
+    const_args: &'a HashMap<String, u16>,
 ) -> Ctx<'a> {
     Ctx {
         vars: Vars::default(),
@@ -215,6 +244,7 @@ fn new_ctx<'a>(
         temp: 0,
         loop_depth: 0,
         type_args,
+        const_args,
         mono,
     }
 }

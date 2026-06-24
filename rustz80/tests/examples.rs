@@ -63,6 +63,15 @@ fn tuples_multi_return() {
 }
 
 #[test]
+fn const_generics_triangle() {
+    let src = include_str!("../samples/showcase/const_generics.rs");
+    assert_eq!(val(src, "run", &[]), 1036); // triangle::<4>()*100 + triangle::<8>()
+    let prog = rustz80::compile_program(src).unwrap();
+    assert!(prog.symbols.contains_key("triangle$4"));
+    assert!(prog.symbols.contains_key("triangle$8"));
+}
+
+#[test]
 fn generic_structs_and_tuple_fields() {
     let src = include_str!("../samples/showcase/structs.rs");
     assert_eq!(val(src, "run", &[]), 838);

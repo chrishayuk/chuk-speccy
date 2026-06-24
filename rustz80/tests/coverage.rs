@@ -70,14 +70,16 @@ fn enum_explicit_discriminants() {
 
 #[test]
 fn generics_rejections() {
-    // const + lifetime params on a generic fn (it must have a type param to be
-    // collected as generic and reach the rejection).
-    bad_prog("fn g<T, const N: usize>(x: T) -> u16 { 0u16 } fn run() -> u16 { g::<u16, 4>(1u16) }");
+    // Lifetime params are rejected (it must have a type/const param to be collected
+    // as generic and reach the rejection).
     bad_prog("fn g<'a, T>(x: T) -> u16 { 0u16 } fn run() -> u16 { g(1u16) }");
     // Can't infer a type argument that no value parameter carries.
     bad_prog("fn g<T>() -> u16 { 0u16 } fn run() -> u16 { g() }");
-    // Wrong number of explicit type arguments.
+    // A const argument can't be inferred — it needs a turbofish.
+    bad_prog("fn g<const N: usize>() -> u16 { let a = [0u16; N]; a[0] } fn run() -> u16 { g() }");
+    // Wrong number of generic arguments, and a kind mismatch.
     bad_prog("fn id<T>(x: T) -> T { x } fn run() -> u16 { id::<u16, u8>(1u16) }");
+    bad_prog("fn id<T>(x: T) -> T { x } fn run() -> u16 { id::<5>(1u16) }"); // type param, const arg
 }
 
 #[test]
@@ -105,9 +107,7 @@ fn more_rejections() {
          fn run() -> u16 { let s = S { x: 0u16 }; s.m(1u16, 2u16, 3u16) }",
     ); // method receiver + 3 args > 3 registers
     bad_fn("fn f() -> u16 { 5u16.bump(1u16) }"); // method on a non-variable receiver
-                                                 // generics.rs
-    bad_prog("fn id<T>(x: T) -> T { x } fn run() -> u16 { id::<5>(1u16) }"); // const turbofish arg
-                                                                             // stmt.rs
+                                                 // stmt.rs
     bad_fn("fn f() -> u16 { let (a, b) = (1u16, 2u16, 3u16); a }"); // tuple-binding arity
     bad_fn("fn f() -> u16 { 'a: for i in 0u16..4u16 { } 0u16 }"); // labeled for
     bad_fn("fn f() -> u16 { while i_am_true() { fn z() {} } 0u16 }"); // item statement in a block

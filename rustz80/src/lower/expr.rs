@@ -30,6 +30,10 @@ pub(crate) fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width
             Some(v) => Ok((Expr::Lit(v), Width::Word)),
             None => {
                 let name = path_ident(expr)?;
+                // A const-generic parameter is substituted by its instance value.
+                if let Some(v) = ctx.const_args.get(&name) {
+                    return Ok((Expr::Lit(*v), Width::Word));
+                }
                 Ok((Expr::Var(ctx.vars.base(&name)), ctx.vars.ty(&name)))
             }
         },
@@ -76,11 +80,11 @@ pub(crate) fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width
                 .collect::<Result<Vec<_>, String>>()?;
             let args: Vec<Expr> = lowered.iter().map(|(e, _)| e.clone()).collect();
 
-            // A call to a generic function instantiates a width-specialized copy.
+            // A call to a generic function instantiates a specialized copy.
             let is_generic = ctx.mono.borrow().generics.contains_key(&name);
             if is_generic {
-                let (type_args, ret_w) = resolve_generic(&name, &turbofish, &lowered, ctx)?;
-                let inst = ctx.mono.borrow_mut().request(&name, type_args);
+                let (gargs, ret_w) = resolve_generic(&name, &turbofish, &lowered, ctx)?;
+                let inst = ctx.mono.borrow_mut().request(&name, gargs);
                 return Ok((Expr::Call(inst, args), ret_w));
             }
             if !turbofish.is_empty() {
