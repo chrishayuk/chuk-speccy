@@ -4,9 +4,48 @@
 //! calls (`wrapping_*`, prelude-handle routing, or `obj.m(a) → Type::m(&obj, a)`).
 
 use super::generics::{call_target, resolve_generic};
-use super::layout::{field_offset, member_name, resolve_enum_path};
+use super::layout::{field_offset, member_name, resolve_enum_path, struct_slots};
 use super::Ctx;
 use crate::ir::*;
+
+/// The byte address of `a[i].field` for a local struct-element array `[Cell; N]`:
+/// `&a + index*(elem_stride) + field_offset` (all in bytes). Errs if `a` isn't a
+/// struct-element array.
+pub(crate) fn elem_field_addr(
+    ix: &syn::ExprIndex,
+    member: &syn::Member,
+    ctx: &mut Ctx,
+) -> Result<Expr, String> {
+    let arr = path_ident(&ix.expr)?;
+    let elem_struct = ctx
+        .vars
+        .elem_struct(&arr)
+        .ok_or_else(|| format!("`{arr}` is not a struct-element array"))?;
+    let base = ctx.vars.base(&arr);
+    let efields = ctx
+        .struct_fields(&elem_struct)
+        .ok_or_else(|| format!("unknown struct {elem_struct}"))?;
+    let foff = field_offset(&efields, &member_name(member)?)?;
+    let stride = (struct_slots(&efields) * 2) as u16;
+    let idx = lower_expr(&ix.index, ctx)?.0;
+    // &a + index*stride
+    let elem = Expr::Bin(
+        BinOp::Add,
+        Box::new(Expr::AddrOf(base)),
+        Box::new(Expr::MulConst(Box::new(idx), stride)),
+        Width::Word,
+    );
+    Ok(if foff == 0 {
+        elem
+    } else {
+        Expr::Bin(
+            BinOp::Add,
+            Box::new(elem),
+            Box::new(Expr::Lit((foff * 2) as u16)),
+            Width::Word,
+        )
+    })
+}
 
 /// Lower an expression, returning its IR and inferred width (`u8`/`u16`).
 pub(crate) fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> {
@@ -159,6 +198,11 @@ fn lower_index_read(ix: &syn::ExprIndex, ctx: &mut Ctx) -> Result<(Expr, Width),
         return Ok((e, Width::Word));
     }
     let arr = path_ident(&ix.expr)?;
+    if ctx.vars.elem_struct(&arr).is_some() {
+        return Err(format!(
+            "a struct-array element isn't a scalar — read a field, e.g. `{arr}[i].x`"
+        ));
+    }
     let base = ctx.vars.base(&arr);
     let w = ctx.vars.ty(&arr);
     let idx = lower_expr(&ix.index, ctx)?.0;
@@ -197,6 +241,13 @@ pub(crate) fn lower_index_store(
 /// Read `obj.field` — a constant slot for a by-value struct, an indirect load
 /// through the pointer for `self`-style receivers.
 fn lower_field_read(f: &syn::ExprField, ctx: &mut Ctx) -> Result<Expr, String> {
+    // `a[i].field` — a field of a struct-array element at a computed address.
+    if let syn::Expr::Index(ix) = &*f.base {
+        return Ok(Expr::LoadAt(
+            Box::new(elem_field_addr(ix, &f.member, ctx)?),
+            Width::Word,
+        ));
+    }
     let (base, off, is_ptr, slots) = field_target(f, ctx)?;
     if slots != 1 {
         return Err("this field is not a scalar (read a tuple field by element: `.0`)".into());
@@ -214,6 +265,14 @@ pub(crate) fn lower_field_store(
     val: Expr,
     ctx: &mut Ctx,
 ) -> Result<Stmt, String> {
+    // `a[i].field = v` — store a field of a struct-array element at a computed address.
+    if let syn::Expr::Index(ix) = &*f.base {
+        return Ok(Stmt::StoreAt(
+            elem_field_addr(ix, &f.member, ctx)?,
+            val,
+            Width::Word,
+        ));
+    }
     let (base, off, is_ptr, slots) = field_target(f, ctx)?;
     if slots != 1 {
         return Err("this field is not a scalar (assign a tuple field by element: `.0`)".into());

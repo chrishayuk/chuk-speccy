@@ -63,6 +63,12 @@ fn tuples_multi_return() {
 }
 
 #[test]
+fn struct_element_array_points() {
+    let src = include_str!("../samples/showcase/points.rs");
+    assert_eq!(val(src, "run", &[]), 310); // sum(x + y*10) over (i, i*i), i in 0..5
+}
+
+#[test]
 fn const_generic_struct_stack() {
     let src = include_str!("../samples/showcase/stack.rs");
     assert_eq!(val(src, "run", &[]), 10036); // Stack<4> capped sum *1000 + Stack<8> sum
