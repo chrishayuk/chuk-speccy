@@ -71,8 +71,11 @@ struct Ctx<'a> {
     structs: &'a Structs,
     enums: &'a Enums,
     prelude: &'a PreludeConfig,
-    /// Counter for synthesised `match` scrutinee temporaries.
+    /// Counter for synthesised `match`/`for` temporaries.
     temp: usize,
+    /// Nesting depth of enclosing loops — so a `break`/`continue` outside any loop is
+    /// rejected cleanly rather than producing dangling jumps.
+    loop_depth: usize,
 }
 
 struct VarInfo {
@@ -229,6 +232,7 @@ fn lower_method(
         enums,
         prelude,
         temp: 0,
+        loop_depth: 0,
     };
     let params = lower_inputs(&m.sig.inputs, &mut ctx, Some(self_ty))?;
     let (body, ret) = lower_fn_block(&m.block, &mut ctx)?;
@@ -327,6 +331,7 @@ fn lower_with(
         enums,
         prelude,
         temp: 0,
+        loop_depth: 0,
     };
     let params = lower_inputs(&item.sig.inputs, &mut ctx, None)?;
     let (body, ret) = lower_fn_block(&item.block, &mut ctx)?;
@@ -494,7 +499,9 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
         }
         syn::Expr::While(w) => {
             let cond = lower_cond(&w.cond, ctx)?;
+            ctx.loop_depth += 1;
             let inner = lower_block(&w.body, ctx)?;
+            ctx.loop_depth -= 1;
             body.push(Stmt::While(cond, inner));
         }
         // `match` lowers to an if-chain over a scrutinee temporary (no codegen change).
@@ -543,8 +550,101 @@ fn lower_stmt_expr(expr: &syn::Expr, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Res
         syn::Expr::MethodCall(m) => {
             body.push(Stmt::Eval(lower_method_call(m, ctx)?.0));
         }
+        // `for var in a..b { … }` — desugared to an init + a counted loop.
+        syn::Expr::ForLoop(fl) => lower_for(fl, ctx, body)?,
+        // `loop { … }` — an unconditional loop (exit via `break`/`return`).
+        syn::Expr::Loop(l) => {
+            if l.label.is_some() {
+                return Err("loop labels are not supported".into());
+            }
+            ctx.loop_depth += 1;
+            let inner = lower_block(&l.body, ctx)?;
+            ctx.loop_depth -= 1;
+            body.push(Stmt::Loop(inner));
+        }
+        syn::Expr::Break(b) => {
+            if b.expr.is_some() {
+                return Err("`break <value>` is not supported".into());
+            }
+            if b.label.is_some() {
+                return Err("labeled `break` is not supported".into());
+            }
+            if ctx.loop_depth == 0 {
+                return Err("`break` outside a loop".into());
+            }
+            body.push(Stmt::Break);
+        }
+        syn::Expr::Continue(c) => {
+            if c.label.is_some() {
+                return Err("labeled `continue` is not supported".into());
+            }
+            if ctx.loop_depth == 0 {
+                return Err("`continue` outside a loop".into());
+            }
+            body.push(Stmt::Continue);
+        }
+        syn::Expr::Return(r) => {
+            let val = match &r.expr {
+                Some(e) => Some(lower_expr(e, ctx)?.0),
+                None => None,
+            };
+            body.push(Stmt::Return(val));
+        }
         other => return Err(format!("unsupported statement expression: {other:?}")),
     }
+    Ok(())
+}
+
+/// Lower `for var in start..end { body }` to: assign the loop variable to `start`,
+/// snapshot the (once-evaluated) `end` bound into a temp, and emit a [`Stmt::ForRange`]
+/// whose step (`var += 1`) is the `continue` target. The loop variable's width is
+/// inferred from the start bound.
+fn lower_for(fl: &syn::ExprForLoop, ctx: &mut Ctx, body: &mut Vec<Stmt>) -> Result<(), String> {
+    if fl.label.is_some() {
+        return Err("loop labels are not supported".into());
+    }
+    // `for _ in …` still needs a counter slot — synthesise a hidden name for it.
+    let var_name = match &*fl.pat {
+        syn::Pat::Wild(_) => {
+            let n = format!("__foridx{}", ctx.temp);
+            ctx.temp += 1;
+            n
+        }
+        p => pat_ident(p)?,
+    };
+    let syn::Expr::Range(range) = &*fl.expr else {
+        return Err("`for` only supports integer ranges (`a..b` / `a..=b`)".into());
+    };
+    let start = range
+        .start
+        .as_ref()
+        .ok_or("`for` range needs a start bound")?;
+    let end_expr = range.end.as_ref().ok_or("`for` range needs an end bound")?;
+    let inclusive = matches!(range.limits, syn::RangeLimits::Closed(_));
+
+    // Evaluate both bounds before declaring the loop variable (they cannot see it).
+    let (start_e, width) = lower_expr(start, ctx)?;
+    let (end_e, _) = lower_expr(end_expr, ctx)?;
+    let end_temp = ctx
+        .vars
+        .declare(&format!("__forend{}", ctx.temp), 1, None, width);
+    ctx.temp += 1;
+    let var = ctx.vars.declare(&var_name, 1, None, width);
+
+    body.push(Stmt::Assign(var, start_e));
+    body.push(Stmt::Assign(end_temp, end_e));
+
+    ctx.loop_depth += 1;
+    let inner = lower_block(&fl.body, ctx)?;
+    ctx.loop_depth -= 1;
+
+    body.push(Stmt::ForRange {
+        var,
+        end: Expr::Var(end_temp),
+        inclusive,
+        width,
+        body: inner,
+    });
     Ok(())
 }
 
