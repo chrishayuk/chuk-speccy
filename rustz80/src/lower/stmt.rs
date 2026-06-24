@@ -30,7 +30,10 @@ fn resolve_struct_literal(
         return Err(format!("unknown struct {sbase}"));
     };
     let args = infer_struct_args(&gs, lit, ctx)?;
-    let mangled = ctx.mono.borrow_mut().instantiate_struct(&sbase, args)?;
+    let mangled = ctx
+        .mono
+        .borrow_mut()
+        .instantiate_struct(&sbase, args, ctx.structs)?;
     let fields = ctx.mono.borrow().struct_instances[&mangled].clone();
     Ok((mangled, fields))
 }

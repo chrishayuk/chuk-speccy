@@ -276,8 +276,17 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   `[Cell; N]` field is initialised in the struct literal (`[Cell { … }; N]` / `[c0, …]`).
   Differential-tested with a `Body`/pool (`push` + `checksum` through `self`, plus
   by-value `b.cells[0].x`) + a runnable `examples/pool` — the **`Entities<Cell, N>` shape
-  for a non-generic capacity**. *(Remaining: the const-generic combo `Entities<Cell,
-  const N>`, `u32`, `Frame::tile`/`text`.)*
+  for a non-generic capacity**.
+- [x] **Stage 4g (the `Entities<Cell, const N>` combo)** — a *const-generic* struct
+  whose field is an array of structs (`data: [Cell; N]`). The only change needed: thread
+  the regular struct layouts into `instantiate_struct`, so a const-generic instance's
+  `[Cell; N]` field sizes correctly (`N` from the const map, `Cell` from the layouts);
+  A3b's `array_base`/`field_target` already work on the per-instance layout. Methods
+  bound on `N`, store whole elements (`self.data[i] = Cell { … }`), and read element
+  fields. Differential-tested (`add`/`checksum`, `N`-bounded, `N` inferred from the
+  literal) + a runnable `examples/entities` (two instances, `Entities$4`/`Entities$8`).
+  **The fixed-capacity entity pool now compiles + runs** — the last *structural* blocker
+  for a pure Snake. *(Remaining: `u32` for the `Rng`, and `Frame::tile`/`text` routing.)*
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -344,11 +353,10 @@ dial is never multiplied before it's watched close:
   Snake that compiles **pure** as one source. Done since: generic *functions* + structs
   ✓, const-generic *functions* + structs ✓ (a fixed-cap `Stack<N>` compiles + runs),
   tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓, struct-element
-  arrays — local *and* as a struct **field** ✓ (`self.cells[i].x` + `self.cells[i] = Cell
-  { … }`, the non-generic `Entities`-shape via `examples/pool`). *Remaining `rustz80`
-  blockers:* the const-generic combo `Entities<Cell, const N> { data: [Cell; N] }`,
-  `Index`/method element-access sugar, `u32` (the `Rng`), and `Frame::tile`/`text`
-  prelude routing — or an SDK redesign of `Entities`/`Rng` to the current subset.
+  arrays — local, as a struct **field**, and the **`Entities<Cell, const N>` combo** ✓
+  (`examples/entities`, instances `Entities$4`/`Entities$8`). *All structural blockers
+  are done.* *Remaining `rustz80` blockers:* `u32` (the `Rng`) and `Frame::tile`/`text`
+  prelude routing — or an SDK redesign of `Rng`/the text helper to the current subset.
   `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
