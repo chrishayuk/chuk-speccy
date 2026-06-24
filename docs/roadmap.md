@@ -234,9 +234,11 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   at that concrete width, so the body lowers like any function (u8 instances mask, u16
   don't). Generic-calls-generic instantiates transitively off a worklist (`clamp` →
   `max`/`min`). Lowering-only — instances are extra named functions (`max$u16`). A
-  runnable `examples/generics` shows one source → six instances. (Generic *structs* +
-  const generics — what `Entities<T, N>` needs — are still pending.) Also: `lower.rs`
-  split into a `lower/` module tree.
+  runnable `examples/generics` shows one source → six instances. **Generic structs +
+  methods** (`struct Pair<T>` / `impl<T> Pair<T>`) too — type arguments erased to 16-bit
+  (one shared layout, like any struct's fields), so no per-instance struct codegen.
+  (Const generics + struct-element arrays — what `Entities<T, N>` *also* needs — remain
+  pending.) Also: `lower.rs` split into a `lower/` module tree.
 - [x] **Stage 4b (tuples → multiple return values)** — `fn divmod(a, b) -> (u16, u16)
   { (a / b, a % b) }` returns its tuple in `HL`/`DE`/`BC` (up to three), destructured
   at the call site with `let (q, r) = …` (a tuple literal or a call). Lowering-only
@@ -444,15 +446,19 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
   `.z80` v2/v3 page loader + RLE `decompress_z80` tests. *(Deferred.)*
 
 ### H5. `rustz80` code quality
-- [ ] Error UX (the "ergonomic rejection" feature, spec 08 §1.5): replace
-  `Result<_, String>` + `{syn:?}` debug-dumps with span-carrying errors; turn
-  `panic!`/`expect` on undefined call targets / scratch overflow into `Err`; **reject
-  recursion**; add tests for the rejections.
+- [~] Error UX (the "ergonomic rejection" feature, spec 08 §1.5): every unsupported
+  node is a clean `Err` and `tests/coverage.rs` now exercises the rejection arms
+  (unsupported expr/stmt/pattern/type, arity errors, const/lifetime generics, tuple
+  misuse, …). *(Still open: span-carrying errors instead of `{syn:?}` dumps; turn the
+  remaining codegen `panic!`/`expect` into `Err`; reject recursion.)*
 - [x] Split `lower.rs` (had grown past 1300 lines) into a `lower/` module tree —
   `vars` (register file), `layout` (struct/enum + parse helpers), `prelude` (handle
   routing), `generics` (monomorphization), `expr`, `stmt`, and `mod.rs` (the `Ctx` +
   orchestration); none over ~350 lines. *(Collapsing the read/store + block duplicate
   pairs is still open.)*
+- [x] **Test coverage** — `tests/coverage.rs` + the differential/example suites bring
+  `rustz80` to **97% line / 95% region** coverage (`cargo llvm-cov`), every source file
+  ≥ 90% on both.
 
 ### H6. `speccy-env` — **done**
 - [x] `StateView::u16` now **panics** on an unknown field (a `FromState` typo —

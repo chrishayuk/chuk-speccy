@@ -110,17 +110,18 @@ pub fn has_game(src: &str) -> bool {
 }
 
 /// Assign each field an address from [`GAME_STATE`] (consecutive `u16` slots; an
-/// array field of `N` slots reserves `N` elements).
-fn build_symbols(layout: &[(String, usize)]) -> SymbolMap {
+/// array or tuple field of `N` slots reserves `N` elements). `ty` records the source
+/// type so a consumer can tell a `[u16; N]` array from a `(u16, u16)` tuple.
+fn build_symbols(layout: &[(String, usize, String)]) -> SymbolMap {
     let mut fields = Vec::with_capacity(layout.len());
     let mut slot = 0usize;
-    for (name, slots) in layout {
+    for (name, slots, ty) in layout {
         fields.push(Symbol {
             field: name.clone(),
             addr: GAME_STATE + (slot as u16) * 2,
             width: 2,
             count: *slots as u16,
-            ty: "u16".to_string(),
+            ty: ty.clone(),
         });
         slot += *slots;
     }
@@ -146,9 +147,10 @@ fn find_game_impl(file: &syn::File) -> Option<String> {
     None
 }
 
-/// The game-state struct's layout as `(field_name, slot_count)` in declaration
-/// order — a scalar is 1 slot, a `[u16; N]` array field is `N` slots.
-fn struct_layout(file: &syn::File, name: &str) -> Option<Vec<(String, usize)>> {
+/// The game-state struct's layout as `(field_name, slot_count, type_string)` in
+/// declaration order — a scalar is 1 slot, a `[u16; N]` array field is `N` slots, and
+/// a `(u16, …)` tuple field is one slot per element.
+fn struct_layout(file: &syn::File, name: &str) -> Option<Vec<(String, usize, String)>> {
     for item in &file.items {
         if let syn::Item::Struct(s) = item {
             if s.ident == name {
@@ -158,9 +160,10 @@ fn struct_layout(file: &syn::File, name: &str) -> Option<Vec<(String, usize)>> {
                         let fname = f.ident.as_ref().unwrap().to_string();
                         let slots = match &f.ty {
                             syn::Type::Array(arr) => array_len(&arr.len)?,
+                            syn::Type::Tuple(t) => t.elems.len(),
                             _ => 1,
                         };
-                        out.push((fname, slots));
+                        out.push((fname, slots, type_string(&f.ty)));
                     }
                     return Some(out);
                 }
@@ -178,4 +181,55 @@ fn array_len(e: &syn::Expr) -> Option<usize> {
         }
     }
     None
+}
+
+/// A compact source-type string for the symbol map's `ty`: `u16` / `[u16; 8]` /
+/// `(u16, u16)` / a named type. Good enough to round-trip and to distinguish an
+/// array field from a tuple field.
+fn type_string(t: &syn::Type) -> String {
+    match t {
+        syn::Type::Path(p) => p
+            .path
+            .segments
+            .last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_else(|| "u16".into()),
+        syn::Type::Array(arr) => {
+            let len = array_len(&arr.len).unwrap_or(0);
+            format!("[{}; {}]", type_string(&arr.elem), len)
+        }
+        syn::Type::Tuple(tup) => {
+            let parts: Vec<String> = tup.elems.iter().map(type_string).collect();
+            format!("({})", parts.join(", "))
+        }
+        _ => "u16".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbol_map_handles_tuple_and_array_fields() {
+        // The state layout reflects tuple fields (one slot per element) and arrays,
+        // with a `ty` that distinguishes them — and the whole map round-trips.
+        let src = "struct State { score: u16, head: (u16, u16), body: [u16; 8] }";
+        let file: syn::File = syn::parse_str(src).unwrap();
+        let layout = struct_layout(&file, "State").expect("layout");
+        let map = build_symbols(&layout);
+
+        assert_eq!(map.base, GAME_STATE);
+        assert_eq!(map.size, (1 + 2 + 8) * 2); // 11 slots → 22 bytes
+
+        let head = map.fields.iter().find(|f| f.field == "head").unwrap();
+        assert_eq!((head.count, head.ty.as_str()), (2, "(u16, u16)"));
+        assert_eq!(head.addr, GAME_STATE + 2); // after `score` (1 slot)
+
+        let body = map.fields.iter().find(|f| f.field == "body").unwrap();
+        assert_eq!((body.count, body.ty.as_str()), (8, "[u16; 8]"));
+        assert_eq!(body.addr, GAME_STATE + 6); // after score(1) + head(2) = 3 slots
+
+        assert_eq!(SymbolMap::from_toml(&map.to_toml()).unwrap(), map);
+    }
 }

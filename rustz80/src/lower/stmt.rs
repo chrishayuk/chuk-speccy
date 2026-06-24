@@ -56,18 +56,33 @@ pub(crate) fn lower_local(
             );
             for fv in &lit.fields {
                 let fname = member_name(&fv.member)?;
-                if fields
+                let off = field_offset(&fields, &fname)?;
+                let slots = fields
                     .iter()
                     .find(|f| f.name == fname)
-                    .is_some_and(|f| f.slots != 1)
-                {
-                    return Err(format!(
-                        "init array field `{fname}` by index, not a struct literal"
-                    ));
+                    .map_or(1, |f| f.slots);
+                match &fv.expr {
+                    // A tuple field is initialised by a tuple literal — one value per slot.
+                    syn::Expr::Tuple(t) => {
+                        if t.elems.len() != slots {
+                            return Err(format!("tuple field `{fname}` expects {slots} values"));
+                        }
+                        for (i, e) in t.elems.iter().enumerate() {
+                            let v = lower_expr(e, ctx)?.0;
+                            body.push(Stmt::Assign(base + off + i, v));
+                        }
+                    }
+                    _ if slots == 1 => {
+                        let v = lower_expr(&fv.expr, ctx)?.0;
+                        body.push(Stmt::Assign(base + off, v));
+                    }
+                    // An array field is filled by index after construction, not here.
+                    _ => {
+                        return Err(format!(
+                            "init array field `{fname}` by index, not a struct literal"
+                        ))
+                    }
                 }
-                let off = field_offset(&fields, &fname)?;
-                let v = lower_expr(&fv.expr, ctx)?.0;
-                body.push(Stmt::Assign(base + off, v));
             }
         }
         other => {

@@ -193,6 +193,33 @@ fn run_program(prog: &rustz80::Program, entry: &str) -> u16 {
     cpu.regs.hl()
 }
 
+/// Like [`run_program`] but return the first three result registers `[HL, DE, BC]` —
+/// to inspect a tuple return's register layout.
+fn run_program_regs(prog: &rustz80::Program, entry: &str) -> [u16; 3] {
+    let mut bus = Ram {
+        mem: vec![0u8; 0x1_0000],
+    };
+    let target = prog.symbols[entry];
+    bus.mem[0x7000] = 0xCD;
+    bus.mem[0x7001] = target as u8;
+    bus.mem[0x7002] = (target >> 8) as u8;
+    bus.mem[0x7003] = 0x76;
+    let org = rustz80::ORG as usize;
+    bus.mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
+    let mut cpu = z80::Cpu::new();
+    cpu.reset();
+    cpu.regs.pc = 0x7000;
+    cpu.regs.sp = 0xFFF0;
+    for _ in 0..1_000_000 {
+        if cpu.halted {
+            break;
+        }
+        cpu.step(&mut bus);
+    }
+    assert!(cpu.halted, "program did not return");
+    [cpu.regs.hl(), cpu.regs.de(), cpu.regs.bc()]
+}
+
 #[test]
 fn function_calls() {
     // 1 + 2 args + the calling convention (HL/DE/BC), checked against rustc.
@@ -884,6 +911,45 @@ fn generics_substitute_width() {
 }
 
 #[test]
+fn generic_structs() {
+    // A generic struct + generic methods. The same source type-checks under rustc and
+    // compiles here (type arguments erased to 16-bit, like any struct's fields).
+    struct Pair<T> {
+        a: T,
+        b: T,
+    }
+    impl<T: Copy + core::ops::Add<Output = T>> Pair<T> {
+        fn sum(&self) -> T {
+            self.a + self.b
+        }
+        fn bump(&mut self, d: T) {
+            self.a = self.a + d;
+        }
+    }
+    fn host() -> u16 {
+        let mut p = Pair { a: 30u16, b: 12u16 };
+        p.bump(3); // a = 33
+        let q = Pair { a: 5u16, b: 7u16 };
+        p.sum() + q.sum() // 45 + 12 = 57
+    }
+    let src = "
+        struct Pair<T> { a: T, b: T }
+        impl<T> Pair<T> {
+            fn sum(&self) -> T { self.a + self.b }
+            fn bump(&mut self, d: T) { self.a = self.a + d; }
+        }
+        fn run() -> u16 {
+            let mut p = Pair { a: 30u16, b: 12u16 };
+            p.bump(3u16);
+            let q = Pair { a: 5u16, b: 7u16 };
+            p.sum() + q.sum()
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 57
+}
+
+#[test]
 fn tuples() {
     // Multiple return values via tuples (in HL/DE/BC), destructured at the call site.
     fn divmod(a: u16, b: u16) -> (u16, u16) {
@@ -928,6 +994,162 @@ fn tuples() {
     let prog = rustz80::compile_program(src).expect("compile");
     // 14206 + 73 + 123 = 14402
     assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
+fn monomorphization() {
+    // Two type parameters → a combined instance key; the same instantiation called
+    // twice is emitted once (dedup); distinct types make distinct instances.
+    fn id<T>(x: T) -> T {
+        x
+    }
+    fn first<A, B>(a: A, _b: B) -> A {
+        a
+    }
+    fn host() -> u16 {
+        id(10u16) + id(5u8) as u16 + first(7u16, 2u8) + first(7u16, 2u8)
+    }
+    let src = "
+        fn id<T>(x: T) -> T { x }
+        fn first<A, B>(a: A, b: B) -> A { a }
+        fn run() -> u16 {
+            id(10u16) + id(5u8) as u16 + first(7u16, 2u8) + first(7u16, 2u8)
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 10 + 5 + 7 + 7 = 29
+
+    let instances: Vec<&String> = prog.symbols.keys().filter(|k| k.contains('$')).collect();
+    // id at u16 and u8, first at (u16, u8) once — exactly three instances.
+    assert_eq!(instances.len(), 3, "instances: {instances:?}");
+    for sym in ["id$u16", "id$u8", "first$u16_u8"] {
+        assert!(prog.symbols.contains_key(sym), "missing {sym}");
+    }
+    // `first` called twice with the same types ⇒ a single instance (dedup).
+    assert_eq!(
+        prog.symbols
+            .keys()
+            .filter(|k| k.starts_with("first"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn generic_methods() {
+    // Methods on a generic struct, including a method calling another on `self`.
+    struct Acc<T> {
+        v: T,
+    }
+    impl<T: Copy + core::ops::Add<Output = T> + core::ops::Mul<Output = T>> Acc<T> {
+        fn add(&mut self, d: T) {
+            self.v = self.v + d;
+        }
+        fn doubled(&self) -> T {
+            self.v + self.v
+        }
+        fn add_then_double(&mut self, d: T) -> T {
+            self.add(d);
+            self.doubled()
+        }
+    }
+    fn host() -> u16 {
+        let mut a = Acc { v: 10u16 };
+        a.add_then_double(5) // (10+5)*2 = 30
+    }
+    let src = "
+        struct Acc<T> { v: T }
+        impl<T> Acc<T> {
+            fn add(&mut self, d: T) { self.v = self.v + d; }
+            fn doubled(&self) -> T { self.v + self.v }
+            fn add_then_double(&mut self, d: T) -> T { self.add(d); self.doubled() }
+        }
+        fn run() -> u16 {
+            let mut a = Acc { v: 10u16 };
+            a.add_then_double(5u16)
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 30
+}
+
+#[test]
+fn tuple_layout() {
+    // A tuple return lands in HL/DE/BC in order — verify the register layout directly.
+    let src = "
+        fn pair() -> (u16, u16) { (42u16, 7u16) }
+        fn triple() -> (u16, u16, u16) { (11u16, 22u16, 33u16) }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    let [hl, de, _] = run_program_regs(&prog, "pair");
+    assert_eq!((hl, de), (42, 7), "2-tuple → (HL, DE)");
+    assert_eq!(
+        run_program_regs(&prog, "triple"),
+        [11, 22, 33],
+        "3-tuple → (HL, DE, BC)"
+    );
+}
+
+#[test]
+fn size_report_covers_image() {
+    let src = "
+        fn id<T>(x: T) -> T { x }
+        fn run() -> u16 { id(1u16) + id(2u8) as u16 }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    let report = prog.size_report();
+
+    // One entry per symbol; sizes tile the whole image with no gaps or overlaps.
+    assert_eq!(report.len(), prog.symbols.len());
+    let total: usize = report.iter().map(|f| f.size as usize).sum();
+    assert_eq!(total, prog.code.len(), "sizes cover the whole image");
+    assert!(report.iter().all(|f| f.size > 0), "every fn emits ≥ 1 byte");
+    // Monomorphic instances are present and flagged.
+    assert!(report.iter().any(|f| f.name == "id$u16" && f.instance));
+    assert!(report.iter().any(|f| f.name == "id$u8" && f.instance));
+    // Entries are in layout order (ascending address).
+    assert!(report.windows(2).all(|w| w[0].addr <= w[1].addr));
+}
+
+#[test]
+fn tuple_struct_fields() {
+    // A struct with a tuple field, accessed by `.0`/`.1` — by value and through a
+    // `&mut self` receiver.
+    struct Sprite {
+        pos: (u16, u16),
+        id: u16,
+    }
+    impl Sprite {
+        fn mv(&mut self, dx: u16, dy: u16) {
+            self.pos.0 = self.pos.0 + dx;
+            self.pos.1 = self.pos.1 + dy;
+        }
+        fn key(&self) -> u16 {
+            self.pos.0 * 100 + self.pos.1 + self.id
+        }
+    }
+    fn host() -> u16 {
+        let mut s = Sprite { pos: (3, 4), id: 7 };
+        s.mv(2, 5); // pos = (5, 9)
+        s.key() // 5*100 + 9 + 7 = 516
+    }
+    let src = "
+        struct Sprite { pos: (u16, u16), id: u16 }
+        impl Sprite {
+            fn mv(&mut self, dx: u16, dy: u16) {
+                self.pos.0 = self.pos.0 + dx;
+                self.pos.1 = self.pos.1 + dy;
+            }
+            fn key(&self) -> u16 { self.pos.0 * 100u16 + self.pos.1 + self.id }
+        }
+        fn run() -> u16 {
+            let mut s = Sprite { pos: (3u16, 4u16), id: 7u16 };
+            s.mv(2u16, 5u16);
+            s.key()
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 516
 }
 
 #[test]

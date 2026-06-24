@@ -63,6 +63,12 @@ fn tuples_multi_return() {
 }
 
 #[test]
+fn generic_structs_and_tuple_fields() {
+    let src = include_str!("../samples/showcase/structs.rs");
+    assert_eq!(val(src, "run", &[]), 838);
+}
+
+#[test]
 fn generics_clamp() {
     let src = include_str!("../samples/showcase/generic.rs");
     assert_eq!(val(src, "run", &[]), 200);

@@ -106,8 +106,17 @@ fn bin_op(op: &syn::BinOp) -> Result<BinOp, String> {
     })
 }
 
-/// Resolve a field access `obj.field` to `(obj base slot, field offset, is_ptr)`.
-fn field_target(f: &syn::ExprField, ctx: &mut Ctx) -> Result<(usize, usize, bool), String> {
+/// Resolve a field access to `(obj base slot, slot offset, is_ptr, slot count)`.
+/// Handles `obj.field` and a tuple element of a struct field, `obj.field.N`.
+fn field_target(f: &syn::ExprField, ctx: &mut Ctx) -> Result<(usize, usize, bool, usize), String> {
+    // `obj.field.N` — a tuple element (one slot) at the field's offset + N.
+    if let syn::Expr::Field(inner) = &*f.base {
+        let syn::Member::Unnamed(idx) = &f.member else {
+            return Err("nested struct fields are not supported".into());
+        };
+        let (base, off, is_ptr, _) = field_target(inner, ctx)?;
+        return Ok((base, off + idx.index as usize, is_ptr, 1));
+    }
     let obj = path_ident(&f.base)?;
     let (base, sname, is_ptr) = ctx
         .vars
@@ -117,15 +126,21 @@ fn field_target(f: &syn::ExprField, ctx: &mut Ctx) -> Result<(usize, usize, bool
         .structs
         .get(&sname)
         .ok_or_else(|| format!("unknown struct {sname}"))?;
-    let off = field_offset(fields, &member_name(&f.member)?)?;
-    Ok((base, off, is_ptr))
+    let name = member_name(&f.member)?;
+    let off = field_offset(fields, &name)?;
+    let slots = fields
+        .iter()
+        .find(|d| d.name == name)
+        .map(|d| d.slots)
+        .unwrap_or(1);
+    Ok((base, off, is_ptr, slots))
 }
 
 /// Lower an index read `base[idx]`: a local array (`arr[i]`) or an array *field*
 /// reached through a struct receiver (`self.arr[i]`).
 fn lower_index_read(ix: &syn::ExprIndex, ctx: &mut Ctx) -> Result<(Expr, Width), String> {
     if let syn::Expr::Field(f) = &*ix.expr {
-        let (base, off, is_ptr) = field_target(f, ctx)?;
+        let (base, off, is_ptr, _) = field_target(f, ctx)?;
         let idx = lower_expr(&ix.index, ctx)?.0;
         let e = if is_ptr {
             // `self.arr[i]` → *(self + off*2 + i*2)
@@ -154,7 +169,7 @@ pub(crate) fn lower_index_store(
     ctx: &mut Ctx,
 ) -> Result<Stmt, String> {
     if let syn::Expr::Field(f) = &*ix.expr {
-        let (base, off, is_ptr) = field_target(f, ctx)?;
+        let (base, off, is_ptr, _) = field_target(f, ctx)?;
         let idx = lower_expr(&ix.index, ctx)?.0;
         let val = lower_expr(rhs, ctx)?.0;
         return Ok(if is_ptr {
@@ -179,7 +194,10 @@ pub(crate) fn lower_index_store(
 /// Read `obj.field` — a constant slot for a by-value struct, an indirect load
 /// through the pointer for `self`-style receivers.
 fn lower_field_read(f: &syn::ExprField, ctx: &mut Ctx) -> Result<Expr, String> {
-    let (base, off, is_ptr) = field_target(f, ctx)?;
+    let (base, off, is_ptr, slots) = field_target(f, ctx)?;
+    if slots != 1 {
+        return Err("this field is not a scalar (read a tuple field by element: `.0`)".into());
+    }
     if is_ptr {
         Ok(Expr::Deref(Box::new(Expr::Var(base)), off * 2))
     } else {
@@ -193,7 +211,10 @@ pub(crate) fn lower_field_store(
     val: Expr,
     ctx: &mut Ctx,
 ) -> Result<Stmt, String> {
-    let (base, off, is_ptr) = field_target(f, ctx)?;
+    let (base, off, is_ptr, slots) = field_target(f, ctx)?;
+    if slots != 1 {
+        return Err("this field is not a scalar (assign a tuple field by element: `.0`)".into());
+    }
     if is_ptr {
         Ok(Stmt::Store(Expr::Var(base), off * 2, val))
     } else {
