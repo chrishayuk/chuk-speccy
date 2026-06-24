@@ -326,6 +326,22 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                 BinOp::Or => gen_bitwise(a, l, r, 0xB3, 0xB2), // OR E / OR D
                 BinOp::And => gen_bitwise(a, l, r, 0xA3, 0xA2), // AND E / AND D
                 BinOp::Xor => gen_bitwise(a, l, r, 0xAB, 0xAA), // XOR E / XOR D
+                // Shift by a constant amount (RHS is always a literal).
+                BinOp::Shl => {
+                    gen_expr(a, l);
+                    for _ in 0..lit_u8(r) {
+                        a.byte(0x29); // ADD HL,HL  (logical << 1)
+                    }
+                }
+                BinOp::Shr => {
+                    gen_expr(a, l);
+                    for _ in 0..lit_u8(r) {
+                        a.byte(0xCB);
+                        a.byte(0x3C); // SRL H
+                        a.byte(0xCB);
+                        a.byte(0x1D); // RR L   (logical >> 1)
+                    }
+                }
             }
             if *w == Width::Byte {
                 a.byte(0x26); // LD H, 0   (wrap to u8)
@@ -346,6 +362,7 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                     a.byte(0x26); // LD H, 0    -> HL = zero-extended byte
                     a.byte(0x00);
                 }
+                Width::DWord => unreachable!("u32 array elements are unsupported"),
             }
         }
         Expr::Call(name, args) => {
@@ -418,9 +435,100 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                     a.byte(0x26); // LD H, 0  (zero-extend)
                     a.byte(0x00);
                 }
+                Width::DWord => unreachable!("u32 array/field elements are unsupported"),
             }
         }
+        // `x as u16` — the low word of a `u32` value (the high word is discarded).
+        Expr::Trunc32(e) => gen_expr32(a, e),
+        Expr::Lit32(_) | Expr::Var32(_) | Expr::Bin32(..) | Expr::Shift32 { .. } => {
+            unreachable!("u32 node used in a 16-bit context (u32 params/returns unsupported)")
+        }
     }
+}
+
+/// The first literal operand as a `u8` shift amount (the lowering guarantees a literal).
+fn lit_u8(e: &Expr) -> u8 {
+    match e {
+        Expr::Lit(k) => *k as u8,
+        _ => unreachable!("shift amount must be a constant"),
+    }
+}
+
+/// Evaluate a `u32` expression into the `HL:DE` pair (`HL` = low word, `DE` = high word).
+fn gen_expr32(a: &mut Asm, e: &Expr) {
+    match e {
+        Expr::Lit32(n) => {
+            a.byte(0x21); // LD HL, low16
+            a.word(*n as u16);
+            a.byte(0x11); // LD DE, high16
+            a.word((*n >> 16) as u16);
+        }
+        Expr::Var32(slot) => {
+            let addr = slot_addr(a.base, *slot);
+            a.byte(0x2A); // LD HL,(addr)      low word
+            a.word(addr);
+            a.byte(0xED);
+            a.byte(0x5B); // LD DE,(addr+2)    high word
+            a.word(addr.wrapping_add(2));
+        }
+        Expr::Trunc32(e) => gen_expr32(a, e),
+        Expr::Bin32(op, l, r) => {
+            gen_expr32(a, l);
+            a.byte(0xD5); // PUSH DE   (l.high)
+            a.byte(0xE5); // PUSH HL   (l.low)
+            gen_expr32(a, r); // HL = r.low, DE = r.high
+            a.byte(0xC1); // POP BC    (l.low)
+            gen_bitwise_bc(a, op, false); // HL = r.low OP l.low
+            a.byte(0xEB); // EX DE,HL  -> HL = r.high
+            a.byte(0xC1); // POP BC    (l.high)
+            gen_bitwise_bc(a, op, true); // HL = r.high OP l.high; EX back below
+            a.byte(0xEB); // EX DE,HL  -> HL = low, DE = high
+        }
+        Expr::Shift32 { left, e, k } => {
+            gen_expr32(a, e); // HL:DE = lo:hi
+            for _ in 0..*k {
+                if *left {
+                    // DE:HL << 1  (low first, carry up)
+                    a.byte(0xCB);
+                    a.byte(0x25); // SLA L
+                    a.byte(0xCB);
+                    a.byte(0x14); // RL H
+                    a.byte(0xCB);
+                    a.byte(0x13); // RL E
+                    a.byte(0xCB);
+                    a.byte(0x12); // RL D
+                } else {
+                    // DE:HL >> 1  (high first, carry down)
+                    a.byte(0xCB);
+                    a.byte(0x3A); // SRL D
+                    a.byte(0xCB);
+                    a.byte(0x1B); // RR E
+                    a.byte(0xCB);
+                    a.byte(0x1C); // RR H
+                    a.byte(0xCB);
+                    a.byte(0x1D); // RR L
+                }
+            }
+        }
+        _ => unreachable!("not a u32 expression"),
+    }
+}
+
+/// `HL = HL <op> BC` for one 16-bit word of a `u32` bitwise op (`| & ^`), word-wise
+/// through the accumulator. `_high` is documentation only — the op is the same per word.
+fn gen_bitwise_bc(a: &mut Asm, op: &BinOp, _high: bool) {
+    let (oc, ob) = match op {
+        BinOp::Or => (0xB1, 0xB0),  // OR C / OR B
+        BinOp::And => (0xA1, 0xA0), // AND C / AND B
+        BinOp::Xor => (0xA9, 0xA8), // XOR C / XOR B
+        _ => unreachable!("u32 supports only | & ^"),
+    };
+    a.byte(0x7D); // LD A,L
+    a.byte(oc); // <op> C   -> A = L <op> C
+    a.byte(0x6F); // LD L,A
+    a.byte(0x7C); // LD A,H
+    a.byte(ob); // <op> B   -> A = H <op> B
+    a.byte(0x67); // LD H,A
 }
 
 /// `HL *= k` for a compile-time constant: a power of two shifts (`ADD HL,HL`), else
@@ -570,6 +678,15 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
                 a.byte(0x23); // INC HL
                 a.byte(0x72); // LD (HL),D   (high byte)
             }
+        }
+        Stmt::Assign32(slot, e) => {
+            gen_expr32(a, e); // HL = low word, DE = high word
+            let addr = slot_addr(a.base, *slot);
+            a.byte(0x22); // LD (addr),HL     low word
+            a.word(addr);
+            a.byte(0xED);
+            a.byte(0x53); // LD (addr+2),DE   high word
+            a.word(addr.wrapping_add(2));
         }
         Stmt::Eval(e) => {
             gen_expr(a, e); // result left in HL, discarded

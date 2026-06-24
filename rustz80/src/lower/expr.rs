@@ -47,6 +47,12 @@ pub(crate) fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width
     match expr {
         syn::Expr::Lit(l) => match &l.lit {
             syn::Lit::Int(i) => {
+                if i.suffix() == "u32" {
+                    return Ok((
+                        Expr::Lit32(i.base10_parse::<u32>().map_err(|e| e.to_string())?),
+                        Width::DWord,
+                    ));
+                }
                 let w = if i.suffix() == "u8" {
                     Width::Byte
                 } else {
@@ -68,14 +74,33 @@ pub(crate) fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width
                 if let Some(v) = ctx.const_args.get(&name) {
                     return Ok((Expr::Lit(*v), Width::Word));
                 }
-                Ok((Expr::Var(ctx.vars.base(&name)), ctx.vars.ty(&name)))
+                let base = ctx.vars.base(&name);
+                match ctx.vars.ty(&name) {
+                    Width::DWord => Ok((Expr::Var32(base), Width::DWord)),
+                    w => Ok((Expr::Var(base), w)),
+                }
             }
         },
         syn::Expr::Paren(p) => lower_expr(&p.expr, ctx),
-        // `e as u8` truncates to a byte; `as u16`/`as usize` is a no-op (16-bit).
+        // `e as u8` truncates to a byte; `as u16`/`as usize` is a no-op (16-bit); a `u32`
+        // narrows to its low word/byte (`Trunc32`).
         syn::Expr::Cast(c) => {
-            let (e, _) = lower_expr(&c.expr, ctx)?;
-            if ctx.width_of_type(&c.ty) == Width::Byte {
+            let (e, ew) = lower_expr(&c.expr, ctx)?;
+            let tw = ctx.width_of_type(&c.ty);
+            if ew == Width::DWord {
+                return Ok(match tw {
+                    Width::Byte => (
+                        Expr::Trunc(Box::new(Expr::Trunc32(Box::new(e)))),
+                        Width::Byte,
+                    ),
+                    Width::Word => (Expr::Trunc32(Box::new(e)), Width::Word),
+                    Width::DWord => (e, Width::DWord),
+                });
+            }
+            if tw == Width::DWord {
+                return Err("`as u32` (widening to u32) is not supported yet".into());
+            }
+            if tw == Width::Byte {
                 Ok((Expr::Trunc(Box::new(e)), Width::Byte))
             } else {
                 Ok((e, Width::Word))
@@ -83,12 +108,7 @@ pub(crate) fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width
         }
         syn::Expr::Field(f) => Ok((lower_field_read(f, ctx)?, Width::Word)),
         syn::Expr::Index(ix) => lower_index_read(ix, ctx),
-        syn::Expr::Binary(b) => {
-            let op = bin_op(&b.op)?;
-            let (le, lw) = lower_expr(&b.left, ctx)?;
-            let (re, _) = lower_expr(&b.right, ctx)?;
-            Ok((Expr::Bin(op, Box::new(le), Box::new(re), lw), lw))
-        }
+        syn::Expr::Binary(b) => lower_binary(b, ctx),
         syn::Expr::MethodCall(m) => lower_method_call(m, ctx),
         syn::Expr::Call(c) => {
             let (name, turbofish) = call_target(&c.func)?;
@@ -140,8 +160,54 @@ fn bin_op(op: &syn::BinOp) -> Result<BinOp, String> {
         syn::BinOp::BitOr(_) => BinOp::Or,
         syn::BinOp::BitAnd(_) => BinOp::And,
         syn::BinOp::BitXor(_) => BinOp::Xor,
+        syn::BinOp::Shl(_) => BinOp::Shl,
+        syn::BinOp::Shr(_) => BinOp::Shr,
         other => return Err(format!("unsupported arithmetic op: {other:?}")),
     })
+}
+
+/// A shift amount — must be an integer literal (variable shifts are unsupported).
+fn lit_shift_amount(e: &syn::Expr) -> Result<u8, String> {
+    if let syn::Expr::Lit(l) = e {
+        if let syn::Lit::Int(i) = &l.lit {
+            return i.base10_parse::<u8>().map_err(|e| e.to_string());
+        }
+    }
+    Err("shift amount must be an integer literal".into())
+}
+
+/// Lower a binary expression. Shifts take a constant RHS (16- or 32-bit by the LHS
+/// type); `| & ^` on a `u32` operand produce a 32-bit op; `u32` arithmetic (`+ - * /`)
+/// is not supported yet.
+fn lower_binary(b: &syn::ExprBinary, ctx: &mut Ctx) -> Result<(Expr, Width), String> {
+    let op = bin_op(&b.op)?;
+    if matches!(op, BinOp::Shl | BinOp::Shr) {
+        let (le, lw) = lower_expr(&b.left, ctx)?;
+        let k = lit_shift_amount(&b.right)?;
+        if lw == Width::DWord {
+            return Ok((
+                Expr::Shift32 {
+                    left: matches!(op, BinOp::Shl),
+                    e: Box::new(le),
+                    k,
+                },
+                Width::DWord,
+            ));
+        }
+        return Ok((
+            Expr::Bin(op, Box::new(le), Box::new(Expr::Lit(k as u16)), lw),
+            lw,
+        ));
+    }
+    let (le, lw) = lower_expr(&b.left, ctx)?;
+    let (re, rw) = lower_expr(&b.right, ctx)?;
+    if lw == Width::DWord || rw == Width::DWord {
+        if !matches!(op, BinOp::Or | BinOp::And | BinOp::Xor) {
+            return Err("u32 supports only `| & ^` and constant shifts (no `+ - * /` yet)".into());
+        }
+        return Ok((Expr::Bin32(op, Box::new(le), Box::new(re)), Width::DWord));
+    }
+    Ok((Expr::Bin(op, Box::new(le), Box::new(re), lw), lw))
 }
 
 /// What a field access resolves to: the receiver's base slot, the field's slot offset,

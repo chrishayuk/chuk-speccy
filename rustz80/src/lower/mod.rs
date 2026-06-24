@@ -70,6 +70,9 @@ impl Ctx<'_> {
                 if s == "u8" {
                     return Width::Byte;
                 }
+                if s == "u32" {
+                    return Width::DWord;
+                }
             }
         }
         Width::Word

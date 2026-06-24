@@ -20,7 +20,9 @@ fn bad_prog(src: &str) {
 #[test]
 fn expr_rejections() {
     bad_fn("fn f() -> u16 { 1.5f32 as u16 }"); // unsupported literal
-    bad_fn("fn f() -> u16 { let a = 1u16; a << 2u16 }"); // unsupported arithmetic op
+    bad_fn("fn f() -> u16 { let a = 1u16; let b = 2u16; a << b }"); // variable shift amount
+    bad_fn("fn f() -> u16 { let a = 1u32; let b = 2u32; a + b }"); // u32 arithmetic (only |&^ + shifts)
+    bad_fn("fn f() -> u16 { let a = 1u16; a as u32 }"); // widening to u32 unsupported
     bad_fn("fn f() -> u16 { nope::<u16>() }"); // turbofish on a non-generic call
     bad_fn("fn f(a: u16, b: u16, c: u16, d: u16) -> u16 { a }"); // > 3 params
     bad_fn("fn f() -> u16 { g(1u16, 2u16, 3u16, 4u16) }"); // > 3 call args

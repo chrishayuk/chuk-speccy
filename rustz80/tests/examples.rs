@@ -75,6 +75,12 @@ fn struct_field_struct_array_pool() {
 }
 
 #[test]
+fn xorshift_rng32() {
+    let src = include_str!("../samples/showcase/rng32.rs");
+    assert_eq!(val(src, "run", &[]), 11509); // 8 xorshift32 steps, sum of low words
+}
+
+#[test]
 fn const_generic_entities() {
     let src = include_str!("../samples/showcase/entities.rs");
     assert_eq!(val(src, "run", &[]), 2530); // Entities$4 (406) + Entities$8 (2124)

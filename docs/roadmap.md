@@ -286,7 +286,19 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   fields. Differential-tested (`add`/`checksum`, `N`-bounded, `N` inferred from the
   literal) + a runnable `examples/entities` (two instances, `Entities$4`/`Entities$8`).
   **The fixed-capacity entity pool now compiles + runs** — the last *structural* blocker
-  for a pure Snake. *(Remaining: `u32` for the `Rng`, and `Frame::tile`/`text` routing.)*
+  for a pure Snake.
+- [x] **Stage 4h (`u32` — the RNG core + shifts)** — a `u32` is a two-slot value computed
+  in the `HL:DE` pair by a dedicated `gen_expr32`; new IR (`Lit32`/`Var32`/`Bin32`/
+  `Shift32`/`Trunc32` + `Assign32`). Supports `^ & |`, constant `<<` / `>>` (incl. across
+  the word boundary), and `as u16`/`as u8` truncation — and adds `<<` / `>>` for `u16`
+  too (previously rejected). Differential-tested with a real **xorshift32** step (`x ^= x
+  << 13; x ^= x >> 17; x ^= x << 5`) + bitwise/truncate + `u16` shifts; a runnable
+  `examples/rng32`. *(Deferred: `u32` `+ - * /` / `%` — needed by `Rng::below(n) = next %
+  n`; `u32` params/returns; variable shift amounts.)*
+- [ ] **Stage 4i (pure Snake finish)** — the only blockers left are *non-structural*:
+  `u32` `%` (for `Rng::below`) **or** a power-of-two `below` in the dialect `Rng`; and
+  `Frame::tile`/`text`, which need **references** (`&Tile`) / **strings** (`&str`) — a
+  distinct feature, or a by-value `draw_tile(cx, cy, rows…)` intrinsic over `poke`.
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -354,10 +366,12 @@ dial is never multiplied before it's watched close:
   ✓, const-generic *functions* + structs ✓ (a fixed-cap `Stack<N>` compiles + runs),
   tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓, struct-element
   arrays — local, as a struct **field**, and the **`Entities<Cell, const N>` combo** ✓
-  (`examples/entities`, instances `Entities$4`/`Entities$8`). *All structural blockers
-  are done.* *Remaining `rustz80` blockers:* `u32` (the `Rng`) and `Frame::tile`/`text`
-  prelude routing — or an SDK redesign of `Rng`/the text helper to the current subset.
-  `Fx8_8` lands with the kit, not here.
+  (`examples/entities`, instances `Entities$4`/`Entities$8`), `u32` bitwise/shift ✓ (a
+  32-bit **xorshift** RNG runs — `examples/rng32`). *All structural blockers are done.*
+  *Remaining `rustz80` blockers (non-structural):* `u32` `%` for `Rng::below` (or a
+  power-of-two `below`), and `Frame::tile`/`text` which need references (`&Tile`) /
+  strings (`&str`) — or an SDK redesign of those to the current subset. `Fx8_8` lands
+  with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;

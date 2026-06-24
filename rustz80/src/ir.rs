@@ -11,14 +11,19 @@ pub enum BinOp {
     Or,
     And,
     Xor,
+    /// Left/right shift by a constant amount (the RHS is always a [`Expr::Lit`]).
+    Shl,
+    Shr,
 }
 
-/// Element width for array access. Both kinds occupy a 2-byte slot per element
-/// (1 element per slot); only the load/store size differs (`u8` zero-extends).
+/// Value width. `u8`/`u16` occupy one 2-byte slot (only load/store size differs — `u8`
+/// zero-extends); `u32` (`DWord`) occupies two slots and is computed in the `HL:DE`
+/// pair (`HL` = low word, `DE` = high word) by the dedicated 32-bit codegen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Width {
     Byte,
     Word,
+    DWord,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +72,18 @@ pub enum Expr {
     /// Load a value (zero-extended for `Width::Byte`) at the byte address in `expr` —
     /// used to read a field of a struct-array element at a computed address.
     LoadAt(Box<Expr>, Width),
+
+    // --- 32-bit (`u32`) nodes — evaluated into the `HL:DE` pair by `gen_expr32` ---
+    /// A `u32` literal.
+    Lit32(u32),
+    /// A `u32` local, by slot index (occupies `slot` and `slot + 1`).
+    Var32(usize),
+    /// A `u32` bitwise op (`| & ^` only).
+    Bin32(BinOp, Box<Expr>, Box<Expr>),
+    /// A `u32` shift by a constant: `e << k` (`left`) or `e >> k`.
+    Shift32 { left: bool, e: Box<Expr>, k: u8 },
+    /// Truncate a `u32` to its low `u16` (`x as u16`) — the bridge back to 16-bit.
+    Trunc32(Box<Expr>),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -99,6 +116,8 @@ pub enum Stmt {
     /// Store a value at the byte address in the first `Expr` (the low byte only for
     /// `Width::Byte`) — write a field of a struct-array element at a computed address.
     StoreAt(Expr, Expr, Width),
+    /// Store a `u32` expression (evaluated in `HL:DE`) into a two-slot local.
+    Assign32(usize, Expr),
     /// Evaluate an expression for its side effect, discarding the result
     /// (e.g. a `void` function call as a statement).
     Eval(Expr),
