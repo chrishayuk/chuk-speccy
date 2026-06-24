@@ -140,8 +140,11 @@ cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press 
 
 ## How it works
 
-- **Frontend** (`lower.rs`): `syn::parse_str` → accepted subset → typed IR
-  (`ir.rs`). Unsupported nodes become errors.
+- **Frontend** (`lower/`): `syn::parse_str` → accepted subset → typed IR (`ir.rs`).
+  Unsupported nodes become errors. Split by concern: `vars` (the register file),
+  `layout` (struct/enum layout + parse helpers), `prelude` (handle routing),
+  `generics` (monomorphization), `expr`, and `stmt`; `mod.rs` owns the `Ctx` and the
+  function-level orchestration.
 - **Codegen** (`codegen.rs`): IR → Z80. Locals (incl. params) live in a per-function
   scratch region; expressions evaluate via `HL` + the stack; `*`/`/`/`%` `CALL` an
   appended `__mul16`/`__divmod16`.
