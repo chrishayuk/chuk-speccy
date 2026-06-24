@@ -11,6 +11,17 @@ repository.workspace = true
 
 [dependencies]
 syn = { version = "2", features = ["full", "extra-traits"] }
+# Only the `rustz80-cell` micro-VM runner needs the CPU; the compiler library itself
+# stays dependency-free (syn only). Opt in with `--features cell`.
+z80 = { package = "chuk-speccy-z80", version = "0.1.0", path = "../z80", optional = true }
+
+[features]
+# The headless deterministic runner (`rustz80-cell`): compile + run on a flat-RAM Z80.
+cell = ["dep:z80"]
+
+[[bin]]
+name = "rustz80-cell"
+required-features = ["cell"]
 
 [dev-dependencies]
 # Run the compiled bytes on the real CPU to differential-test against rustc.
