@@ -122,6 +122,41 @@ The `bitmap` demo prints what it drew straight from the framebuffer:
 `tests/examples.rs` locks every showcase result, so a codegen regression fails
 `cargo test` even without running the demos.
 
+## Run headless — `rustz80-cell`
+
+Compile and **run** a program on a flat-RAM Z80 — no ROM, no ULA, no I/O, no syscalls —
+and get back a structured report: the result (`HL`), T-states spent against a budget,
+code size, the symbol layout, the memory it touched, and whether it returned or hit the
+budget. Deterministic, bounded, side-effect-free — a *micro-VM* you can hand a snippet
+and measure (it's behind the `cell` feature, which pulls in the CPU):
+
+```bash
+cargo run -p rustz80 --features cell --bin rustz80-cell -- run samples/showcase/rng32.rs
+```
+```
+entry      run @ 0x8000
+result     11509 (0x2cf5)
+cycles     16215 / 2000000 T-states
+halt       returned
+code       471 bytes, 1 functions
+symbols    run@0x8000
+memory     0x9000-0x9007 (8B), 0xffea-0xffef (6B)
+```
+
+`--entry NAME` picks the function (default `run`, else `main`), `--args a,b,c` passes
+`u16`s in `HL`/`DE`/`BC` (decimal or `0x..`), `--cycles N` sets the budget, and `--json`
+emits one machine-readable line:
+
+```bash
+cargo run -p rustz80 --features cell --bin rustz80-cell -- run samples/showcase/entities.rs --json
+# {"entry":"run","result":2530,"cycles":14742,"halt":"returned","code_bytes":812,
+#  "functions":6,"symbols":{"run":32768,"Entities$8::add":33158,...},"memory_touched":[[36864,36939],...]}
+```
+
+The runner is library API ([`rustz80::cell::run`] → a `Report`); the binary is a thin
+shim. An infinite loop stops at the budget and reports `BUDGET EXCEEDED` rather than
+hanging.
+
 ## The dial: one `impl Game`, two compilers
 
 The headline. Write an ordinary [`speccy-sdk`](../speccy-sdk/README.md) `Game` and the

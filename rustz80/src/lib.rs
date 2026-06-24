@@ -15,6 +15,8 @@
 //! Not an LLVM backend, no real `core`: codegen uses `HL` as the accumulator, `DE`
 //! as secondary, and a fixed RAM scratch region as the "register file".
 
+#[cfg(feature = "cell")]
+pub mod cell;
 mod codegen;
 mod ir;
 mod lower;

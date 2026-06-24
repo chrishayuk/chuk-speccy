@@ -313,7 +313,7 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
 
-### B3. `rustz80` as a deterministic agent microVM (idea — high value)
+### B3. `rustz80` as a deterministic agent microVM — **runner built**
 The const-generics + struct-element-array work has quietly changed `rustz80`'s
 category: it is no longer just a "Rust-shaped Z80 game compiler" but a **bounded,
 Rust-shaped data-structure compiler for a tiny deterministic VM** — fixed-capacity
@@ -322,18 +322,22 @@ compound state, and a symbol-map-visible layout. No heap, no OS, no syscalls —
 bounded memory and deterministic execution. That is the minimum language layer for a
 **microVM agents can safely program against**: *restricted Rust in → monomorphized
 bounded Z80 out → deterministic execution → typed symbols/state out.*
-- [ ] **A non-Spectrum headless runner** — `rustz80-cell run scratch.rs --entry run
-  --cycles 10000` over a flat-RAM `z80::Bus` (no ROM, no ULA), returning a structured
-  result: `HL` (result), cycles used, `code_bytes`, the symbol map, a `memory_diff`
-  (touched regions), and `halt` (returned vs. budget-exceeded). The pieces exist (the
-  `examples/common/cpu.rs` runner is exactly this minus the CLI/report); promote it to a
-  `chuk-speccy-sdk` bin + a small report type. A "safe executable thought bubble" for
-  agents: deterministic, bounded, inspectable, no side effects.
-- [ ] **Cycle/byte budgets as first-class output** — surfaces the 1982-budget line as a
-  measurement (already have `Program::size_report`), so an agent sees the cost of what
-  it wrote.
-- [ ] Pair with the typed symbol map (B2/E) so the runner can also *read back* named
-  state fields after a run, not just `HL`.
+- [x] **A non-Spectrum headless runner** — `rustz80-cell run scratch.rs [--entry run]
+  [--cycles N] [--args a,b,c] [--json]` over a flat-RAM `z80::Bus` (no ROM, no ULA, no
+  I/O), returning a structured `Report`: `result` (`HL`), `cycles` used vs. budget,
+  `code_bytes` + function count, the symbol map, `memory_touched` (coalesced write
+  ranges), and `halt` (returned vs. budget-exceeded). Lives in `rustz80::cell` (library
+  API + a thin `rustz80-cell` bin) behind the `cell` feature so the compiler stays
+  dependency-free; an infinite loop stops at the budget instead of hanging. A "safe
+  executable thought bubble" for agents: deterministic, bounded, inspectable, no side
+  effects. Tested (`tests/cell.rs`).
+- [x] **Cycle/byte budgets as first-class output** — `cycles` (from the `tick` clock)
+  and `code_bytes`/`functions` (from `Program::size_report`) are in every `Report`, so
+  an agent sees the cost of what it wrote.
+- [x] **Reads back the symbol map** — the `Report` carries the full name → address
+  layout (incl. monomorphic instances + the runtime), and `memory_touched` shows which
+  regions the run wrote. *(Next: decode named **state fields** by type via the B2/E
+  symbol map — read `score`/`Entities.len` after a run, not just `HL`.)*
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
