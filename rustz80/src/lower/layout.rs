@@ -6,11 +6,14 @@ use crate::ir::Width;
 use std::collections::HashMap;
 
 /// One struct field's layout: its name and slot count (1 for a scalar, `N` for a
-/// `[u16; N]` array field). Offsets are the running sum of `slots`.
+/// `[u16; N]` array field, `N × sizeof(Cell)` for a `[Cell; N]` struct-element array).
+/// Offsets are the running sum of `slots`. `elem_struct` names the element struct of a
+/// `[Cell; N]` field, so element access (`s.field[i].x`) knows its stride + sub-layout.
 #[derive(Clone)]
 pub(crate) struct FieldDef {
     pub(crate) name: String,
     pub(crate) slots: usize,
+    pub(crate) elem_struct: Option<String>,
 }
 
 /// Struct layouts: name → fields in declaration order. A field occupies `slots`
@@ -75,29 +78,43 @@ pub(crate) fn collect_structs(file: &syn::File) -> Result<Structs, String> {
                     s.ident
                 ));
             };
-            m.insert(
-                s.ident.to_string(),
-                struct_field_defs(named, &no_consts, &s.ident.to_string())?,
-            );
+            // Compute with the structs sized so far (element structs must precede).
+            let name = s.ident.to_string();
+            let fields = struct_field_defs(named, &no_consts, &m, &name)?;
+            m.insert(name, fields);
         }
     }
     Ok(m)
 }
 
-/// One field type's slot count (`u16`/scalar = 1, `[u16; N]` = N, `(u16, …)` = arity),
-/// resolving a `[u16; N]` length that is a const-generic parameter via `consts`.
-pub(crate) fn field_slots(
-    ty: &syn::Type,
+/// Lay out one named field: `(slots, elem_struct)`. A `[u16; N]` field is `N` slots; a
+/// `[Cell; N]` field is `N × sizeof(Cell)` slots with `elem_struct = Some("Cell")`
+/// (`structs` supplies element sizes — the element struct must be defined earlier); a
+/// tuple `(u16, …)` is one slot per element; everything else is a single slot. A
+/// `[u16; N]` length may be a const-generic parameter, resolved via `consts`.
+fn field_def(
+    f: &syn::Field,
     consts: &HashMap<String, u16>,
+    structs: &Structs,
     owner: &str,
-) -> Result<usize, String> {
-    Ok(match ty {
-        syn::Type::Path(_) => 1,
-        syn::Type::Array(arr) if is_u16(&arr.elem) => array_len(&arr.len, consts)?,
-        syn::Type::Array(_) => {
-            return Err(format!(
-                "only `[u16; N]` array struct fields are supported: {owner}"
-            ))
+) -> Result<FieldDef, String> {
+    let name = f.ident.as_ref().unwrap().to_string();
+    let (slots, elem_struct) = match &f.ty {
+        syn::Type::Path(_) => (1, None),
+        syn::Type::Array(arr) if is_u16(&arr.elem) => (array_len(&arr.len, consts)?, None),
+        // `[Cell; N]` — an array of structs.
+        syn::Type::Array(arr) => {
+            let elem = match &*arr.elem {
+                syn::Type::Path(p) => p.path.get_ident().map(|i| i.to_string()),
+                _ => None,
+            };
+            let elem = elem.ok_or_else(|| {
+                format!("array field `{owner}.{name}` element must be `u16` or a struct")
+            })?;
+            let esize = structs.get(&elem).map(|f| struct_slots(f)).ok_or_else(|| {
+                format!("array field element `{elem}` of `{owner}.{name}` must be `u16` or a previously-defined struct")
+            })?;
+            (array_len(&arr.len, consts)? * esize, Some(elem))
         }
         // A tuple field `(u16, u16)` occupies one slot per (scalar) element, accessed
         // by `.0` / `.1`.
@@ -107,13 +124,18 @@ pub(crate) fn field_slots(
                     "tuple struct fields must have scalar elements: {owner}"
                 ));
             }
-            t.elems.len()
+            (t.elems.len(), None)
         }
         _ => {
             return Err(format!(
-                "only scalar, `[u16; N]`, or tuple struct fields are supported: {owner}"
+                "only scalar, array, or tuple struct fields are supported: {owner}"
             ))
         }
+    };
+    Ok(FieldDef {
+        name,
+        slots,
+        elem_struct,
     })
 }
 
@@ -129,20 +151,19 @@ fn array_len(e: &syn::Expr, consts: &HashMap<String, u16>) -> Result<usize, Stri
     lit_len(e)
 }
 
-/// The field layout of a named-field struct, resolving const-param array lengths.
+/// The field layout of a named-field struct, resolving const-param array lengths and
+/// struct-element array sizes (`structs` supplies element sizes).
 pub(crate) fn struct_field_defs(
     named: &syn::FieldsNamed,
     consts: &HashMap<String, u16>,
+    structs: &Structs,
     owner: &str,
 ) -> Result<Vec<FieldDef>, String> {
-    let mut fields = Vec::new();
-    for f in &named.named {
-        fields.push(FieldDef {
-            name: f.ident.as_ref().unwrap().to_string(),
-            slots: field_slots(&f.ty, consts, owner)?,
-        });
-    }
-    Ok(fields)
+    named
+        .named
+        .iter()
+        .map(|f| field_def(f, consts, structs, owner))
+        .collect()
 }
 
 /// `Enum::Variant` (a 2-segment path) → its integer value, if known.

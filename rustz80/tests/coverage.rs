@@ -47,6 +47,35 @@ fn struct_field_rejections() {
     );
     // `a[i].x` on a non-struct-element array.
     bad_fn("fn f() -> u16 { let a = [0u16; 2]; a[0].x }");
+    // A `[Cell; N]` field not initialised with an array.
+    bad_prog("struct C { x: u16 } struct S { c: [C; 2] } fn run() -> u16 { let s = S { c: 5u16 }; 0u16 }");
+    // A `[Cell; N]` field whose elements aren't struct literals.
+    bad_prog("struct C { x: u16 } struct S { c: [C; 2] } fn run() -> u16 { let s = S { c: [(1u16,); 2] }; 0u16 }");
+    // A multi-slot (tuple) field initialised with a scalar.
+    bad_prog("struct S { p: (u16, u16) } fn run() -> u16 { let s = S { p: 5u16 }; 0u16 }");
+    // Assigning a struct-array element something other than a struct literal.
+    bad_prog(
+        "struct C { x: u16 } fn run() -> u16 { let mut a = [C { x: 0u16 }; 2]; a[0] = 5u16; 0u16 }",
+    );
+}
+
+#[test]
+fn struct_array_field_init_forms() {
+    // Array fields initialised by an explicit list `[c0, c1]` (struct elements) and
+    // `[e0, e1, …]` (scalars), and by-value element access.
+    let prog = compile_program(
+        "struct Cell { x: u16, y: u16 }
+         struct Pair { cells: [Cell; 2], nums: [u16; 3] }
+         fn run() -> u16 {
+             let p = Pair {
+                 cells: [Cell { x: 1u16, y: 2u16 }, Cell { x: 3u16, y: 4u16 }],
+                 nums: [10u16, 20u16, 30u16],
+             };
+             p.cells[0].x + p.cells[1].y + p.nums[2]
+         }",
+    )
+    .expect("compile");
+    assert_eq!(run_fn(&prog, "run", 0), 35); // 1 + 4 + 30
 }
 
 #[test]

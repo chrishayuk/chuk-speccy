@@ -45,7 +45,7 @@ Supported today (all differential-tested):
 | Bitwise | `\|` `&` `^`. |
 | Control flow | `if`/`else if`/`else`, `while`, `for` over integer ranges (`a..b` / `a..=b`, `for _ in`), `loop` / `break` / `continue`, early `return`; comparison conditions (`< <= > >= == !=`). |
 | Arrays | `let a = [0u16; N];` / `[e0, e1, …]`; `a[i]`, `a[i] = v`. Index with `i as usize`. `[u8; N]` are byte-packed-per-slot. Arrays of structs `let a = [Cell { … }; N]` — element field access `a[i].x` (read/write) + whole-element assign `a[i] = Cell { … }`. |
-| Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar, `[u16; N]` array, and tuple fields (`pos: (u16, u16)`, accessed `p.pos.0`). |
+| Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar, `[u16; N]`, tuple (`pos: (u16, u16)`, `p.pos.0`), and array-of-structs (`cells: [Cell; N]`, `p.cells[i].x`, `p.cells[i] = Cell { … }`) fields. |
 | Enums + match | `enum Dir { Up = 1, … }` (explicit discriminants or `0,1,2,…`); `match` on integers/variants with `_`. Plus `bool` (`true`/`false`). |
 | Functions + methods | Free fns and `impl T { fn m(&mut self, …) }` — up to 3 args in `HL`/`DE`/`BC`, result in `HL`; `self.field` through the receiver. |
 | Generics | Generic *free functions* (`fn max<T: Ord>(…)`, `fn buf<const N: usize>()`), monomorphized per call — a type argument (turbofish or inferred) sets the instance's width, a const argument (turbofish) sizes arrays and substitutes as a value. Generic *structs* + methods (`struct Pair<T>`): type args erased to 16-bit. **Const-generic structs** (`struct Buf<const N: usize> { data: [u16; N], … }`) are monomorphized per `N` — a per-instance layout + methods (`Buf$8::push`), `N` inferred at the struct literal from the array field's length. |
@@ -54,10 +54,10 @@ Supported today (all differential-tested):
 
 Out of scope (use `rustc`-only host code, or wait for later stages): recursion
 (needs stack frames — Stage 4), references / `&mut` params, `>3` params, slices,
-`String`/`Vec`/`alloc`, floats, traits, a struct *field* that is an array of structs
-(`struct E { data: [Cell; N] }` — a *local* `[Cell; N]` works), closures, nested
-struct *fields*. Anything unsupported is a **clear compile error** — that error is the
-"this is host-only" budget detector.
+`String`/`Vec`/`alloc`, floats, traits, a `[Cell; N]` field on a *const-generic* struct
+(the `Entities<Cell, N>` combo — non-generic `struct E { data: [Cell; N] }` works),
+closures, nested struct *fields*. Anything unsupported is a **clear compile error** — that
+error is the "this is host-only" budget detector.
 
 ## A whole program
 
@@ -97,6 +97,7 @@ cargo run -p rustz80 --example generics       # one generic source → 6 monomor
 cargo run -p rustz80 --example const_generics # const-param array sizes (triangle$4, triangle$8)
 cargo run -p rustz80 --example stack          # const-generic fixed-cap stack (Stack$4, Stack$8)
 cargo run -p rustz80 --example points         # array of structs [Cell; N], a[i].x access
+cargo run -p rustz80 --example pool           # fixed-cap entity pool (struct field [Cell; N])
 cargo run -p rustz80 --example structs        # generic struct + methods + a tuple field
 cargo run -p rustz80 --example tuples         # multiple return values (HL/DE/BC)
 cargo run -p rustz80 --example report         # per-function code-size report (instances + runtime)

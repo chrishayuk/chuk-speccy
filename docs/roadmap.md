@@ -267,11 +267,42 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   two stride shifts, else `__mul16`). `a[i].x` read/write and whole-element `a[i] = Cell
   { … }`; array fields can now also be initialised in a struct literal. Differential-
   tested (`[Cell; 4]` filled at runtime indices, a field overwrite, runtime-index reads)
-  + a runnable `examples/points`. *(A struct **field** that is `[Cell; N]` — the
-  in-`Entities` case — is the remaining slice; then `u32` + `Frame::tile`/`text`.)*
+  + a runnable `examples/points`.
+- [x] **Stage 4f (struct-field struct arrays)** — a struct *field* that is an array of
+  structs: `struct Body { cells: [Cell; N], len: u16 }` with `impl Body { … }`.
+  `field_target` now carries the field's element struct; a unified `array_base` yields
+  the field's byte base (`self_ptr + off` through the receiver, or the slot address by
+  value), so `self.cells[i].x` (read/write) and `self.cells[i] = Cell { … }` work, and a
+  `[Cell; N]` field is initialised in the struct literal (`[Cell { … }; N]` / `[c0, …]`).
+  Differential-tested with a `Body`/pool (`push` + `checksum` through `self`, plus
+  by-value `b.cells[0].x`) + a runnable `examples/pool` — the **`Entities<Cell, N>` shape
+  for a non-generic capacity**. *(Remaining: the const-generic combo `Entities<Cell,
+  const N>`, `u32`, `Frame::tile`/`text`.)*
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
+
+### B3. `rustz80` as a deterministic agent microVM (idea — high value)
+The const-generics + struct-element-array work has quietly changed `rustz80`'s
+category: it is no longer just a "Rust-shaped Z80 game compiler" but a **bounded,
+Rust-shaped data-structure compiler for a tiny deterministic VM** — fixed-capacity
+generic containers (`Stack<N>`), struct arrays / object pools (`Entities`-shape), typed
+compound state, and a symbol-map-visible layout. No heap, no OS, no syscalls — just
+bounded memory and deterministic execution. That is the minimum language layer for a
+**microVM agents can safely program against**: *restricted Rust in → monomorphized
+bounded Z80 out → deterministic execution → typed symbols/state out.*
+- [ ] **A non-Spectrum headless runner** — `rustz80-cell run scratch.rs --entry run
+  --cycles 10000` over a flat-RAM `z80::Bus` (no ROM, no ULA), returning a structured
+  result: `HL` (result), cycles used, `code_bytes`, the symbol map, a `memory_diff`
+  (touched regions), and `halt` (returned vs. budget-exceeded). The pieces exist (the
+  `examples/common/cpu.rs` runner is exactly this minus the CLI/report); promote it to a
+  `chuk-speccy-sdk` bin + a small report type. A "safe executable thought bubble" for
+  agents: deterministic, bounded, inspectable, no side effects.
+- [ ] **Cycle/byte budgets as first-class output** — surfaces the 1982-budget line as a
+  measurement (already have `Program::size_report`), so an agent sees the cost of what
+  it wrote.
+- [ ] Pair with the typed symbol map (B2/E) so the runner can also *read back* named
+  state fields after a run, not just `HL`.
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
@@ -312,12 +343,13 @@ dial is never multiplied before it's watched close:
   `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
   Snake that compiles **pure** as one source. Done since: generic *functions* + structs
   ✓, const-generic *functions* + structs ✓ (a fixed-cap `Stack<N>` compiles + runs),
-  tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓, **local
-  struct-element arrays** `[Cell; N]` ✓ (`a[i].x` + `a[i] = Cell { … }`). *Remaining
-  `rustz80` blockers:* a struct **field** that is `[Cell; N]` (the in-`Entities` case —
-  `self.data[i].x`), `Index`/method element access sugar, `u32` (the `Rng`), and
-  `Frame::tile`/`text` prelude routing — or an SDK redesign of `Entities`/`Rng` to the
-  current subset. `Fx8_8` lands with the kit, not here.
+  tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓, struct-element
+  arrays — local *and* as a struct **field** ✓ (`self.cells[i].x` + `self.cells[i] = Cell
+  { … }`, the non-generic `Entities`-shape via `examples/pool`). *Remaining `rustz80`
+  blockers:* the const-generic combo `Entities<Cell, const N> { data: [Cell; N] }`,
+  `Index`/method element-access sugar, `u32` (the `Rng`), and `Frame::tile`/`text`
+  prelude routing — or an SDK redesign of `Entities`/`Rng` to the current subset.
+  `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;
