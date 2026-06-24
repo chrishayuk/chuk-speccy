@@ -295,10 +295,20 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   << 13; x ^= x >> 17; x ^= x << 5`) + bitwise/truncate + `u16` shifts; a runnable
   `examples/rng32`. *(Deferred: `u32` `+ - * /` / `%` — needed by `Rng::below(n) = next %
   n`; `u32` params/returns; variable shift amounts.)*
-- [ ] **Stage 4i (pure Snake finish)** — the only blockers left are *non-structural*:
-  `u32` `%` (for `Rng::below`) **or** a power-of-two `below` in the dialect `Rng`; and
-  `Frame::tile`/`text`, which need **references** (`&Tile`) / **strings** (`&str`) — a
-  distinct feature, or a by-value `draw_tile(cx, cy, rows…)` intrinsic over `poke`.
+- [ ] **Stage 4i (pure Snake finish)** — the only blockers left are *non-structural*,
+  and mostly **SDK-side, not compiler-side**:
+  - `Rng::below` needs `u32` `%` — or just a power-of-two `below` mask in the dialect `Rng`.
+  - **`Frame::tile`/`text` are an SDK concern, not a `rustz80` one.** Prelude routing is
+    already generic (`PreludeConfig`: `(handle, method) → fn`); the SDK supplies the
+    dialect prelude fns + routes (e.g. `__frame_pixel`), and `Frame::pixel`/`clear` work
+    exactly this way. Adding `tile`/`text` is the same SDK pattern — *if* their args are
+    expressible. `pixel(x,y,on)` passes values (fine); `tile(&Tile)`/`text(&str)` pass a
+    **reference/string**, which the handle convention (≤3 value args, receiver dropped)
+    can't carry. Resolve SDK-side with value args — pass the tile **data by address**
+    (`__frame_tile(addr, cx, cy)` reads 8 bytes + pokes; tile bytes live as a `const`),
+    `text` likewise from `(addr, len, cx, cy)`. The one *general* (non-game) compiler
+    feature that would help: lower a `&str`/`const [u8; N]` literal to a const data blob +
+    its address — cleaner than full references, and reusable beyond games.
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
