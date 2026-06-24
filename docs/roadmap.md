@@ -237,6 +237,13 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   runnable `examples/generics` shows one source → six instances. (Generic *structs* +
   const generics — what `Entities<T, N>` needs — are still pending.) Also: `lower.rs`
   split into a `lower/` module tree.
+- [x] **Stage 4b (tuples → multiple return values)** — `fn divmod(a, b) -> (u16, u16)
+  { (a / b, a % b) }` returns its tuple in `HL`/`DE`/`BC` (up to three), destructured
+  at the call site with `let (q, r) = …` (a tuple literal or a call). Lowering-only
+  for the destructure (`Stmt::AssignTuple` distributes the result registers into
+  slots); codegen gains a tiny multi-value `gen_return`. Differential-tested (divmod,
+  swap-`minmax`, a 3-tuple) + a runnable `examples/tuples`. (Closes the tuples blocker
+  for the pure-Snake seam.)
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -279,9 +286,9 @@ dial is never multiplied before it's watched close:
   (state-seeded, deterministic), the **demo Snake is off `Vec`/`format!`** (uses
   `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
   Snake that compiles **pure** as one source — blocked on the remaining `rustz80`
-  features (generic **structs** + const generics for `Entities<T, N>`, **tuples**;
-  array struct fields ✓, `for`/`loop` ✓, generic *functions* ✓); `Fx8_8` lands with
-  the kit, not here.
+  features (generic **structs** + const generics for `Entities<T, N>`, and method-based
+  or `Index` element access; array struct fields ✓, `for`/`loop` ✓, generic *functions*
+  ✓, tuples ✓); `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;

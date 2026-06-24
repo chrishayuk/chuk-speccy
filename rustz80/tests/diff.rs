@@ -884,6 +884,64 @@ fn generics_substitute_width() {
 }
 
 #[test]
+fn tuples() {
+    // Multiple return values via tuples (in HL/DE/BC), destructured at the call site.
+    fn divmod(a: u16, b: u16) -> (u16, u16) {
+        (a / b, a % b)
+    }
+    fn minmax(a: u16, b: u16) -> (u16, u16) {
+        let mut lo = a;
+        let mut hi = b;
+        if a > b {
+            lo = b;
+            hi = a;
+        }
+        (lo, hi)
+    }
+    fn three() -> (u16, u16, u16) {
+        (1, 2, 3)
+    }
+    fn host() -> u16 {
+        let (q, r) = divmod(1000, 7); // (142, 6)
+        let (x, y) = (7u16, 3u16); // tuple-literal destructure
+        let (lo, hi) = minmax(x, y); // (3, 7)
+        let (a, b, c) = three(); // 3-tuple return
+        q * 100 + r + hi * 10 + lo + a * 100 + b * 10 + c
+    }
+    let src = "
+        fn divmod(a: u16, b: u16) -> (u16, u16) { (a / b, a % b) }
+        fn minmax(a: u16, b: u16) -> (u16, u16) {
+            let mut lo = a;
+            let mut hi = b;
+            if a > b { lo = b; hi = a; }
+            (lo, hi)
+        }
+        fn three() -> (u16, u16, u16) { (1u16, 2u16, 3u16) }
+        fn run() -> u16 {
+            let (q, r) = divmod(1000u16, 7u16);
+            let (x, y) = (7u16, 3u16);
+            let (lo, hi) = minmax(x, y);
+            let (a, b, c) = three();
+            q * 100u16 + r + hi * 10u16 + lo + a * 100u16 + b * 10u16 + c
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    // 14206 + 73 + 123 = 14402
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
+fn tuple_rejections() {
+    // More than three return values has no register convention.
+    assert!(rustz80::compile_program(
+        "fn f() -> (u16, u16, u16, u16) { (1u16, 2u16, 3u16, 4u16) } fn run() -> u16 { 0u16 }"
+    )
+    .is_err());
+    // A tuple binding needs a tuple literal or a function call as its RHS.
+    assert!(rustz80::compile_fn("fn f() -> u16 { let (a, b) = 5u16; a + b }").is_err());
+}
+
+#[test]
 fn control_flow_rejections() {
     // `break`/`continue` outside any loop are rejected (not dangling jumps).
     assert!(rustz80::compile_fn("fn f() -> u16 { break; 0u16 }").is_err());

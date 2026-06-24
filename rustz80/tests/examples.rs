@@ -52,6 +52,17 @@ fn numerics_trio() {
 }
 
 #[test]
+fn tuples_multi_return() {
+    let src = include_str!("../samples/showcase/tuples.rs");
+    assert_eq!(val(src, "run", &[]), 9286);
+    // The tuple return lands in HL/DE/BC — read them back. divmod returns 2 (HL/DE);
+    // stats returns 3 (HL/DE/BC).
+    let [q, r, _] = cpu::run_regs(src, "divmod", &[47, 5]);
+    assert_eq!((q, r), (9, 2));
+    assert_eq!(cpu::run_regs(src, "stats", &[7, 2, 5]), [2, 7, 14]);
+}
+
+#[test]
 fn generics_clamp() {
     let src = include_str!("../samples/showcase/generic.rs");
     assert_eq!(val(src, "run", &[]), 200);

@@ -27,10 +27,10 @@ impl z80::Bus for Ram {
     fn tick(&mut self, _: u32) {}
 }
 
-/// Compile `src`, call `entry` with `args` (passed in `HL`/`DE`/`BC`, the rustz80
-/// calling convention — up to three), run to completion, and return both the result
-/// in `HL` and the final 64 KiB memory image (for programs that `poke` into RAM).
-pub fn run(src: &str, entry: &str, args: &[u16]) -> (u16, Vec<u8>) {
+/// Compile `src`, call `entry` with `args` in the calling-convention registers
+/// (`HL`/`DE`/`BC`, up to three), run to the trampoline's `HALT`, and hand back the
+/// halted CPU + final memory. The typed wrappers below read what they need off it.
+fn exec(src: &str, entry: &str, args: &[u16]) -> (z80::Cpu, Vec<u8>) {
     let prog = rustz80::compile_program(src).unwrap_or_else(|e| panic!("compile failed: {e}"));
     let target = *prog
         .symbols
@@ -72,12 +72,26 @@ pub fn run(src: &str, entry: &str, args: &[u16]) -> (u16, Vec<u8>) {
         cpu.halted,
         "`{entry}` did not return within the step budget"
     );
-    (cpu.regs.hl(), bus.mem)
+    (cpu, bus.mem)
+}
+
+/// Compile `src`, call `entry` with `args` (in `HL`/`DE`/`BC`), run to completion, and
+/// return the result in `HL` plus the final 64 KiB memory (for `poke`-based programs).
+pub fn run(src: &str, entry: &str, args: &[u16]) -> (u16, Vec<u8>) {
+    let (cpu, mem) = exec(src, entry, args);
+    (cpu.regs.hl(), mem)
 }
 
 /// `run` for a value-returning entry — just the `HL` result.
 pub fn run_value(src: &str, entry: &str, args: &[u16]) -> u16 {
-    run(src, entry, args).0
+    exec(src, entry, args).0.regs.hl()
+}
+
+/// Run a tuple-returning entry and read back the first three result registers
+/// `[HL, DE, BC]` — i.e. several values returned at once.
+pub fn run_regs(src: &str, entry: &str, args: &[u16]) -> [u16; 3] {
+    let (cpu, _) = exec(src, entry, args);
+    [cpu.regs.hl(), cpu.regs.de(), cpu.regs.bc()]
 }
 
 /// Render the Spectrum bitmap (`0x4000..0x5800`) as ASCII art over a `cols×rows`
