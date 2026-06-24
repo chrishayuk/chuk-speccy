@@ -446,15 +446,19 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
   `.z80` v2/v3 page loader + RLE `decompress_z80` tests. *(Deferred.)*
 
 ### H5. `rustz80` code quality
-- [ ] Error UX (the "ergonomic rejection" feature, spec 08 §1.5): replace
-  `Result<_, String>` + `{syn:?}` debug-dumps with span-carrying errors; turn
-  `panic!`/`expect` on undefined call targets / scratch overflow into `Err`; **reject
-  recursion**; add tests for the rejections.
+- [~] Error UX (the "ergonomic rejection" feature, spec 08 §1.5): every unsupported
+  node is a clean `Err` and `tests/coverage.rs` now exercises the rejection arms
+  (unsupported expr/stmt/pattern/type, arity errors, const/lifetime generics, tuple
+  misuse, …). *(Still open: span-carrying errors instead of `{syn:?}` dumps; turn the
+  remaining codegen `panic!`/`expect` into `Err`; reject recursion.)*
 - [x] Split `lower.rs` (had grown past 1300 lines) into a `lower/` module tree —
   `vars` (register file), `layout` (struct/enum + parse helpers), `prelude` (handle
   routing), `generics` (monomorphization), `expr`, `stmt`, and `mod.rs` (the `Ctx` +
   orchestration); none over ~350 lines. *(Collapsing the read/store + block duplicate
   pairs is still open.)*
+- [x] **Test coverage** — `tests/coverage.rs` + the differential/example suites bring
+  `rustz80` to **97% line / 95% region** coverage (`cargo llvm-cov`), every source file
+  ≥ 90% on both.
 
 ### H6. `speccy-env` — **done**
 - [x] `StateView::u16` now **panics** on an unknown field (a `FromState` typo —

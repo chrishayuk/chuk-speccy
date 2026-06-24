@@ -93,6 +93,7 @@ cargo run -p rustz80 --example state_machine  # vending machine (struct + enum +
 cargo run -p rustz80 --example rng            # 16-bit LCG      (wrapping_mul, ^)
 cargo run -p rustz80 --example numerics       # gcd / isqrt / fib (while, return, loop)
 cargo run -p rustz80 --example generics       # one generic source → 6 monomorphic instances
+cargo run -p rustz80 --example structs        # generic struct + methods + a tuple field
 cargo run -p rustz80 --example tuples         # multiple return values (HL/DE/BC)
 cargo run -p rustz80 --example report         # per-function code-size report (instances + runtime)
 cargo run -p rustz80 --example bitmap         # draw to screen RAM, printed as ASCII art
@@ -170,9 +171,15 @@ SPECTRUM_ROM="$PWD/testroms/48.rom" \
 ```
 
 - `tests/diff.rs` — the oracle: each `check!` runs one Rust block under `rustc` and
-  through `rustz80` on the emulator and asserts they agree.
+  through `rustz80` on the emulator and asserts they agree; plus multi-`fn` programs
+  for generics, tuples, structs/methods, and control flow.
 - `tests/snake.rs` — the whole dialect at once: a Snake checked against a Rust replica
   (state checksum + screen bitmap).
 - `tests/examples.rs` — locks each `samples/showcase/` program's result (the demos in
   `examples/` run the same sources against a rustc oracle).
+- `tests/coverage.rs` — the error/rejection arms, prelude routing, the frame-loop
+  generator, and array-struct fields through `self` — the paths the above don't reach.
 - `tests/tap.rs` — `.tap` structure, and ROM-gated boot/animation of `samples/snake.rs`.
+
+Coverage (`cargo llvm-cov -p rustz80 --all-features -- --include-ignored`): **97% of
+lines, 95% of regions**, every source file ≥ 90% on both.
