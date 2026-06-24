@@ -896,6 +896,47 @@ fn generics() {
 }
 
 #[test]
+fn const_generics() {
+    // A const generic parameter sizes a local array and bounds the loops; each
+    // `::<N>` instantiates a specialized copy. The same source type-checks under rustc.
+    fn sum_to<const N: usize>() -> u16 {
+        let mut a = [0u16; N];
+        let mut i = 0usize;
+        while i < N {
+            a[i] = (i + 1) as u16;
+            i = i + 1;
+        }
+        let mut s = 0u16;
+        let mut j = 0usize;
+        while j < N {
+            s = s + a[j];
+            j = j + 1;
+        }
+        s
+    }
+    fn host() -> u16 {
+        sum_to::<4>() + sum_to::<6>()
+    }
+    let src = "
+        fn sum_to<const N: usize>() -> u16 {
+            let mut a = [0u16; N];
+            let mut i = 0usize;
+            while i < N { a[i] = (i + 1) as u16; i = i + 1; }
+            let mut s = 0u16;
+            let mut j = 0usize;
+            while j < N { s = s + a[j]; j = j + 1; }
+            s
+        }
+        fn run() -> u16 { sum_to::<4>() + sum_to::<6>() }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 10 + 21 = 31
+                                                   // Distinct const instances, named by value.
+    assert!(prog.symbols.contains_key("sum_to$4"));
+    assert!(prog.symbols.contains_key("sum_to$6"));
+}
+
+#[test]
 fn generics_substitute_width() {
     // The instantiation's width is real: at u8 the body wraps (mod 256), at u16 it
     // does not — proving monomorphization substitutes the type, not just the name.

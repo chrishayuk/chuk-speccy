@@ -48,15 +48,15 @@ Supported today (all differential-tested):
 | Structs | `struct P { x: u16, y: u16 }` + literals + `p.x` read/write. Scalar, `[u16; N]` array, and tuple fields (`pos: (u16, u16)`, accessed `p.pos.0`). |
 | Enums + match | `enum Dir { Up = 1, … }` (explicit discriminants or `0,1,2,…`); `match` on integers/variants with `_`. Plus `bool` (`true`/`false`). |
 | Functions + methods | Free fns and `impl T { fn m(&mut self, …) }` — up to 3 args in `HL`/`DE`/`BC`, result in `HL`; `self.field` through the receiver. |
-| Generics | Generic *free functions* (`fn max<T: Ord>(…)`), monomorphized per call (turbofish or inferred); the body lowers at the instance's width. Generic *structs* + methods (`struct Pair<T>` / `impl<T> Pair<T>`) too — type arguments are erased to 16-bit (one shared layout, like any struct's fields). |
+| Generics | Generic *free functions* (`fn max<T: Ord>(…)`, `fn buf<const N: usize>()`), monomorphized per call — a type argument (turbofish or inferred) sets the instance's width, a const argument (turbofish) sizes arrays and substitutes as a value. Generic *structs* + methods (`struct Pair<T>` / `impl<T> Pair<T>`) too — type arguments erased to 16-bit (one shared layout, like any struct's fields). |
 | Tuples | Multiple return values: `fn divmod(…) -> (u16, u16)` (in `HL`/`DE`/`BC`) destructured with `let (q, r) = …` — a tuple literal or a call. |
 | Raw I/O | `poke(addr, val)` / `peek(addr)` (memory) and `inport(port)` (I/O ports, e.g. the keyboard at `0xFE`). |
 
 Out of scope (use `rustc`-only host code, or wait for later stages): recursion
 (needs stack frames — Stage 4), references / `&mut` params, `>3` params, slices,
-`String`/`Vec`/`alloc`, floats, traits, const generics, closures, nested struct
-*fields* (scalar and `[u16; N]` fields work). Anything unsupported is a **clear
-compile error** — that error is the "this is host-only" budget detector.
+`String`/`Vec`/`alloc`, floats, traits, generic *structs* with const params, closures,
+nested struct *fields* (scalar, `[u16; N]`, and tuple fields work). Anything unsupported
+is a **clear compile error** — that error is the "this is host-only" budget detector.
 
 ## A whole program
 
@@ -93,6 +93,7 @@ cargo run -p rustz80 --example state_machine  # vending machine (struct + enum +
 cargo run -p rustz80 --example rng            # 16-bit LCG      (wrapping_mul, ^)
 cargo run -p rustz80 --example numerics       # gcd / isqrt / fib (while, return, loop)
 cargo run -p rustz80 --example generics       # one generic source → 6 monomorphic instances
+cargo run -p rustz80 --example const_generics # const-param array sizes (triangle$4, triangle$8)
 cargo run -p rustz80 --example structs        # generic struct + methods + a tuple field
 cargo run -p rustz80 --example tuples         # multiple return values (HL/DE/BC)
 cargo run -p rustz80 --example report         # per-function code-size report (instances + runtime)

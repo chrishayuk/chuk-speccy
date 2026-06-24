@@ -12,6 +12,19 @@ use super::layout::{
 use super::Ctx;
 use crate::ir::*;
 
+/// An array length — an integer literal, or a const-generic parameter resolved to its
+/// instance value (`let a = [0u16; N]` inside `fn f<const N: usize>()`).
+fn array_len(e: &syn::Expr, ctx: &Ctx) -> Result<usize, String> {
+    if let syn::Expr::Path(p) = e {
+        if let Some(id) = p.path.get_ident() {
+            if let Some(n) = ctx.const_args.get(&id.to_string()) {
+                return Ok(*n as usize);
+            }
+        }
+    }
+    lit_len(e)
+}
+
 pub(crate) fn lower_local(
     local: &syn::Local,
     ctx: &mut Ctx,
@@ -25,7 +38,7 @@ pub(crate) fn lower_local(
     let name = pat_ident(&local.pat)?;
     match &*init.expr {
         syn::Expr::Repeat(r) => {
-            let n = lit_len(&r.len)?;
+            let n = array_len(&r.len, ctx)?;
             let elem = elem_width(&r.expr);
             let base = ctx.vars.declare(&name, n, None, elem);
             for i in 0..n {
