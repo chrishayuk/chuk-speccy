@@ -69,6 +69,12 @@ fn struct_element_array_points() {
 }
 
 #[test]
+fn struct_field_struct_array_pool() {
+    let src = include_str!("../samples/showcase/pool.rs");
+    assert_eq!(val(src, "run", &[]), 913); // checksum (912) + items[0].x (1)
+}
+
+#[test]
 fn const_generic_struct_stack() {
     let src = include_str!("../samples/showcase/stack.rs");
     assert_eq!(val(src, "run", &[]), 10036); // Stack<4> capped sum *1000 + Stack<8> sum

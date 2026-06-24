@@ -4,7 +4,8 @@
 //! `match` to an if-chain over a scrutinee temp — no codegen support needed for either.
 
 use super::expr::{
-    lower_expr, lower_field_store, lower_index_store, lower_method_call, path_ident, path_str,
+    array_base, lower_expr, lower_field_store, lower_index_store, lower_method_call, path_ident,
+    path_str,
 };
 use super::generics::infer_struct_args;
 use super::layout::{
@@ -109,10 +110,36 @@ pub(crate) fn lower_local(
             for fv in &lit.fields {
                 let fname = member_name(&fv.member)?;
                 let off = field_offset(&fields, &fname)?;
-                let slots = fields
-                    .iter()
-                    .find(|f| f.name == fname)
-                    .map_or(1, |f| f.slots);
+                let fd = fields.iter().find(|f| f.name == fname);
+                let slots = fd.map_or(1, |f| f.slots);
+                // A `[Cell; N]` struct-element field — `[Cell { … }; N]` or `[c0, c1, …]`;
+                // store each element's sub-fields.
+                if let Some(es) = fd.and_then(|f| f.elem_struct.clone()) {
+                    let efields = ctx
+                        .struct_fields(&es)
+                        .ok_or_else(|| format!("unknown struct {es}"))?;
+                    let esize = struct_slots(&efields).max(1);
+                    let elems: Vec<&syn::Expr> = match &fv.expr {
+                        syn::Expr::Repeat(r) => vec![&*r.expr; slots / esize],
+                        syn::Expr::Array(arr) => arr.elems.iter().collect(),
+                        _ => {
+                            return Err(format!(
+                                "array field `{fname}` must be `[{es} {{ … }}; N]` or `[…]`"
+                            ))
+                        }
+                    };
+                    for (e, ev) in elems.iter().enumerate() {
+                        let syn::Expr::Struct(slit) = ev else {
+                            return Err(format!("element of `{fname}` must be a `{es}` literal"));
+                        };
+                        for fv2 in &slit.fields {
+                            let foff = field_offset(&efields, &member_name(&fv2.member)?)?;
+                            let v = lower_expr(&fv2.expr, ctx)?.0;
+                            body.push(Stmt::Assign(base + off + e * esize + foff, v));
+                        }
+                    }
+                    continue;
+                }
                 match &fv.expr {
                     // A tuple field is initialised by a tuple literal — one value per slot.
                     syn::Expr::Tuple(t) => {
@@ -211,43 +238,41 @@ fn lower_index_assign(
     ctx: &mut Ctx,
     body: &mut Vec<Stmt>,
 ) -> Result<(), String> {
-    if let syn::Expr::Path(_) = &*ix.expr {
-        let arr = path_ident(&ix.expr)?;
-        if let Some(elem_struct) = ctx.vars.elem_struct(&arr) {
-            let syn::Expr::Struct(slit) = rhs else {
-                return Err(format!(
-                    "assign a struct-array element with a struct literal: `{arr}[i] = {elem_struct} {{ … }}`"
-                ));
-            };
-            let base = ctx.vars.base(&arr);
-            let efields = ctx
-                .struct_fields(&elem_struct)
-                .ok_or_else(|| format!("unknown struct {elem_struct}"))?;
-            let stride = (struct_slots(&efields) * 2) as u16;
-            let idx = lower_expr(&ix.index, ctx)?.0;
-            for fv in &slit.fields {
-                let foff = field_offset(&efields, &member_name(&fv.member)?)?;
-                let v = lower_expr(&fv.expr, ctx)?.0;
-                let elem = Expr::Bin(
+    // A struct-element array (local `a` or struct field `self.cells`) assigned a struct
+    // literal: store each field at the element's computed address.
+    if let Ok((base_addr, elem_struct)) = array_base(&ix.expr, ctx) {
+        let syn::Expr::Struct(slit) = rhs else {
+            return Err(format!(
+                "assign a struct-array element with a struct literal (`{elem_struct} {{ … }}`)"
+            ));
+        };
+        let efields = ctx
+            .struct_fields(&elem_struct)
+            .ok_or_else(|| format!("unknown struct {elem_struct}"))?;
+        let stride = (struct_slots(&efields) * 2) as u16;
+        let idx = lower_expr(&ix.index, ctx)?.0;
+        for fv in &slit.fields {
+            let foff = field_offset(&efields, &member_name(&fv.member)?)?;
+            let v = lower_expr(&fv.expr, ctx)?.0;
+            let elem = Expr::Bin(
+                BinOp::Add,
+                Box::new(base_addr.clone()),
+                Box::new(Expr::MulConst(Box::new(idx.clone()), stride)),
+                Width::Word,
+            );
+            let addr = if foff == 0 {
+                elem
+            } else {
+                Expr::Bin(
                     BinOp::Add,
-                    Box::new(Expr::AddrOf(base)),
-                    Box::new(Expr::MulConst(Box::new(idx.clone()), stride)),
+                    Box::new(elem),
+                    Box::new(Expr::Lit((foff * 2) as u16)),
                     Width::Word,
-                );
-                let addr = if foff == 0 {
-                    elem
-                } else {
-                    Expr::Bin(
-                        BinOp::Add,
-                        Box::new(elem),
-                        Box::new(Expr::Lit((foff * 2) as u16)),
-                        Width::Word,
-                    )
-                };
-                body.push(Stmt::StoreAt(addr, v, Width::Word));
-            }
-            return Ok(());
+                )
+            };
+            body.push(Stmt::StoreAt(addr, v, Width::Word));
         }
+        return Ok(());
     }
     body.push(lower_index_store(ix, rhs, ctx)?);
     Ok(())

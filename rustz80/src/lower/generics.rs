@@ -125,7 +125,9 @@ impl Mono {
         let syn::Fields::Named(named) = &gs.item.fields else {
             return Err(format!("only named-field structs are supported: {name}"));
         };
-        let layout = struct_field_defs(named, &consts, name)?;
+        // Element-struct lookup for a const-generic struct's `[Cell; N]` field would
+        // need the regular layout map (the generic combo is a later step); pass empty.
+        let layout = struct_field_defs(named, &consts, &Default::default(), name)?;
         self.struct_instances.insert(mangled.clone(), layout);
 
         // Request each method as an instance named `Buf$8::method`.
