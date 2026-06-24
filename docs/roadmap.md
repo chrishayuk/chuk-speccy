@@ -7,7 +7,7 @@ across eight specs ([README index](./README.md)); this tracks delivery against t
 ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonomy
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
-(Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), a `.tap` emitter, and **the dial closed**: one `impl Game` source compiles under rustc (speccy-sdk) **and** rustz80 (a bootable tape that runs on the real ROM).
+(Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), a `.tap` emitter, and **the dial closed**: one `impl Game` source compiles under rustc (speccy-sdk) **and** rustz80 (a bootable tape that runs on the real ROM). The dialect has since grown into a **bounded data-structure language**: generics + const-generics, struct arrays / fixed-capacity pools (`Entities<Cell, const N>`), and a `u32` 32-bit xorshift RNG — all monomorphized, no heap, deterministic.
 Plus **bit-exact `serialize_full` reset** (the RL gate), surfaced through PyO3 + MCP,
 and the crates published (`chuk-speccy-*` libs, `speccy`/`rustz80` CLIs). Headline
 next: the **authoring plane** ([spec 08](./08-speccy-kit-authoring-plane-spec.md)) —
@@ -144,7 +144,7 @@ over one shared `Supervisor`.
   with_math=True)` / `install_math_traps`).
 - [ ] **L3** showpiece: one app calling an MCP server through a trap.
 
-### B2. `rustz80` — restricted Rust → Z80 compiler (spec 07) — **Stage 0 built**
+### B2. `rustz80` — restricted Rust → Z80 compiler (spec 07) — **bounded data structures built (Stages 0–4h)**
 The pure-`.tap` backend of the SDK dial: author a game in **imperative Rust** and
 compile it to a real Spectrum binary — no C, no external toolchain. A compiler for
 a restricted Rust dialect that is *also real Rust*, so the **same source compiles
@@ -377,10 +377,11 @@ dial is never multiplied before it's watched close:
   tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓, struct-element
   arrays — local, as a struct **field**, and the **`Entities<Cell, const N>` combo** ✓
   (`examples/entities`, instances `Entities$4`/`Entities$8`), `u32` bitwise/shift ✓ (a
-  32-bit **xorshift** RNG runs — `examples/rng32`). *All structural blockers are done.*
-  *Remaining `rustz80` blockers (non-structural):* `u32` `%` for `Rng::below` (or a
-  power-of-two `below`), and `Frame::tile`/`text` which need references (`&Tile`) /
-  strings (`&str`) — or an SDK redesign of those to the current subset. `Fx8_8` lands
+  32-bit **xorshift** RNG runs — `examples/rng32`). **All structural compiler blockers
+  are done.** *What's left is SDK-side, not compiler-side* (see Stage 4i): a power-of-two
+  `Rng::below` (or `u32 %`), and a value-args drawing path — `Frame::tile`/`text` are an
+  SDK concern routed through the generic `PreludeConfig` (like `Frame::pixel`), gated only
+  by passing tile/string **data by address** rather than `&Tile`/`&str`. `Fx8_8` lands
   with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
