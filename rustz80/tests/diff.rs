@@ -937,6 +937,58 @@ fn const_generics() {
 }
 
 #[test]
+fn struct_element_arrays() {
+    // A local array of structs: `[Cell; N]`. Elements are multi-slot, addressed
+    // `&a + i*stride (+ field_off)`. Same source type-checks under rustc.
+    #[derive(Clone, Copy)]
+    struct Cell {
+        x: u16,
+        y: u16,
+    }
+    fn host() -> u16 {
+        let mut a = [Cell { x: 0, y: 0 }; 4];
+        let mut i = 0u16;
+        while i < 4 {
+            a[i as usize] = Cell {
+                x: i + 1,
+                y: (i + 1) * 10,
+            };
+            i = i + 1;
+        }
+        a[0].x = 99; // overwrite one field
+        let mut total = 0u16;
+        let mut j = 0u16;
+        while j < 4 {
+            total = total + a[j as usize].x + a[j as usize].y;
+            j = j + 1;
+        }
+        total
+    }
+    let src = "
+        struct Cell { x: u16, y: u16 }
+        fn run() -> u16 {
+            let mut a = [Cell { x: 0u16, y: 0u16 }; 4];
+            let mut i = 0u16;
+            while i < 4u16 {
+                a[i as usize] = Cell { x: i + 1u16, y: (i + 1u16) * 10u16 };
+                i = i + 1u16;
+            }
+            a[0].x = 99u16;
+            let mut total = 0u16;
+            let mut j = 0u16;
+            while j < 4u16 {
+                total = total + a[j as usize].x + a[j as usize].y;
+                j = j + 1u16;
+            }
+            total
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    // a = {99,10},{2,20},{3,30},{4,40}  → 109 + 22 + 33 + 44 = 208
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
 fn const_generic_structs() {
     // A fixed-capacity stack: the const param sizes the `[u16; N]` field *and* bounds
     // `push`. Each `Stack<N>` is a distinct instance (layout + methods). Same source

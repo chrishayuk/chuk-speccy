@@ -41,6 +41,29 @@ fn struct_field_rejections() {
     bad_prog("struct S { a: [u16; 4] } fn run() -> u16 { let s = S { a: [1u16, 2u16] }; s.a[0] }");
     // A method receiver that isn't a struct.
     bad_fn("fn f() -> u16 { let x = 1u16; x.bump(2u16) }");
+    // A struct-array element isn't a scalar — can't read the whole element.
+    bad_prog(
+        "struct C { x: u16 } fn run() -> u16 { let a = [C { x: 0u16 }; 2]; let c = a[0]; 0u16 }",
+    );
+    // `a[i].x` on a non-struct-element array.
+    bad_fn("fn f() -> u16 { let a = [0u16; 2]; a[0].x }");
+}
+
+#[test]
+fn by_value_struct_array_field() {
+    // A by-value struct local with a `[u16; N]` field, accessed `s.arr[i]` (read/write)
+    // — the non-pointer index path.
+    let prog = compile_program(
+        "struct S { arr: [u16; 4], tag: u16 }
+         fn run() -> u16 {
+             let mut s = S { arr: [0u16; 4], tag: 7u16 };
+             s.arr[0] = 5u16;
+             s.arr[3] = 9u16;
+             s.arr[0] + s.arr[3] + s.tag
+         }",
+    )
+    .expect("compile");
+    assert_eq!(run_fn(&prog, "run", 0), 21); // 5 + 9 + 7
 }
 
 #[test]

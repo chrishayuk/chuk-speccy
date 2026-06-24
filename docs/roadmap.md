@@ -260,8 +260,15 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   struct literal from the array field's length; array fields can now be initialised in a
   literal (`[v; N]` / `[e0, …]`). Differential-tested with a capacity-bounded
   `Stack<N>` + a runnable `examples/stack` (instances `Stack$4`/`Stack$8`). rustz80 stays
-  ≥90% line/region per file. (Remaining for pure Snake: **struct-element arrays**
-  `[Cell; N]`, `Index`/method element access, `u32`, `Frame::tile`/`text`.)
+  ≥90% line/region per file.
+- [x] **Stage 4e (struct-element arrays)** — `let a = [Cell { … }; N]`: array elements
+  are now multi-slot, so element access computes an address `&a + index*stride
+  (+ field_off)` via three general IR nodes (`MulConst`/`LoadAt`/`StoreAt`; a power-of-
+  two stride shifts, else `__mul16`). `a[i].x` read/write and whole-element `a[i] = Cell
+  { … }`; array fields can now also be initialised in a struct literal. Differential-
+  tested (`[Cell; 4]` filled at runtime indices, a field overwrite, runtime-index reads)
+  + a runnable `examples/points`. *(A struct **field** that is `[Cell; N]` — the
+  in-`Entities` case — is the remaining slice; then `u32` + `Frame::tile`/`text`.)*
 - [ ] **Stage 2+**: peephole + const-fold/strength-reduce; recognise `impl Game`
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
@@ -305,9 +312,10 @@ dial is never multiplied before it's watched close:
   `Entities`/`Rng`, `Frame::text_u16`) and exposes the env surface. *Remaining:* a
   Snake that compiles **pure** as one source. Done since: generic *functions* + structs
   ✓, const-generic *functions* + structs ✓ (a fixed-cap `Stack<N>` compiles + runs),
-  tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓. *Remaining
-  `rustz80` blockers:* **struct-element arrays** (`Entities<T, N>`'s `[Cell; N]` — only
-  scalar elements so far), method/`Index` element access, `u32` (the `Rng`), and
+  tuples + tuple struct fields ✓, `for`/`loop` ✓, array struct fields ✓, **local
+  struct-element arrays** `[Cell; N]` ✓ (`a[i].x` + `a[i] = Cell { … }`). *Remaining
+  `rustz80` blockers:* a struct **field** that is `[Cell; N]` (the in-`Entities` case —
+  `self.data[i].x`), `Index`/method element access sugar, `u32` (the `Rng`), and
   `Frame::tile`/`text` prelude routing — or an SDK redesign of `Entities`/`Rng` to the
   current subset. `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).

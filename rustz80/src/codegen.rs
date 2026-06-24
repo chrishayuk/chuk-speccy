@@ -400,6 +400,49 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.byte(0x56); // LD D,(HL)
             a.byte(0xEB); // EX DE,HL   -> HL = u16 element
         }
+        Expr::MulConst(e, k) => {
+            gen_expr(a, e);
+            gen_mul_const(a, *k);
+        }
+        Expr::LoadAt(addr, w) => {
+            gen_expr(a, addr); // HL = byte address
+            match w {
+                Width::Word => {
+                    a.byte(0x5E); // LD E,(HL)
+                    a.byte(0x23); // INC HL
+                    a.byte(0x56); // LD D,(HL)
+                    a.byte(0xEB); // EX DE,HL
+                }
+                Width::Byte => {
+                    a.byte(0x6E); // LD L,(HL)
+                    a.byte(0x26); // LD H, 0  (zero-extend)
+                    a.byte(0x00);
+                }
+            }
+        }
+    }
+}
+
+/// `HL *= k` for a compile-time constant: a power of two shifts (`ADD HL,HL`), else
+/// the `__mul16` micro-runtime.
+fn gen_mul_const(a: &mut Asm, k: u16) {
+    if k == 1 {
+        return;
+    }
+    if k == 0 {
+        a.byte(0x21); // LD HL, 0
+        a.word(0);
+        return;
+    }
+    if k.is_power_of_two() {
+        for _ in 0..k.trailing_zeros() {
+            a.byte(0x29); // ADD HL,HL
+        }
+    } else {
+        a.byte(0x11); // LD DE, k
+        a.word(k);
+        a.call("__mul16"); // HL = HL * k
+        a.needs_mul = true;
     }
 }
 
@@ -516,6 +559,17 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             a.byte(0x73); // LD (HL),E
             a.byte(0x23); // INC HL
             a.byte(0x72); // LD (HL),D
+        }
+        Stmt::StoreAt(addr, value, w) => {
+            gen_expr(a, value);
+            a.byte(0xE5); // PUSH HL  (value)
+            gen_expr(a, addr); // HL = byte address
+            a.byte(0xD1); // POP DE   (DE = value)
+            a.byte(0x73); // LD (HL),E   (low byte)
+            if *w == Width::Word {
+                a.byte(0x23); // INC HL
+                a.byte(0x72); // LD (HL),D   (high byte)
+            }
         }
         Stmt::Eval(e) => {
             gen_expr(a, e); // result left in HL, discarded

@@ -13,6 +13,9 @@ struct VarInfo {
     is_ptr: bool, // a pointer to a struct (e.g. `self`) vs a by-value struct local
     /// A prelude handle type (`"Frame"`/`"Input"`) — methods route to intrinsics.
     handle: Option<String>,
+    /// For a struct-element array (`[Cell; N]`), the element struct's name — so element
+    /// access (`a[i].x`) knows the element stride + field layout.
+    elem_struct: Option<String>,
 }
 
 /// Name → variable info. `next` is the next free slot.
@@ -39,6 +42,7 @@ impl Vars {
                 ty,
                 is_ptr: false,
                 handle: None,
+                elem_struct: None,
             },
         );
         self.next += size;
@@ -55,6 +59,7 @@ impl Vars {
                 ty: Width::Word,
                 is_ptr: true,
                 handle: None,
+                elem_struct: None,
             },
         );
         self.next += 1;
@@ -71,6 +76,7 @@ impl Vars {
                 ty: Width::Word,
                 is_ptr: false,
                 handle: Some(handle.to_string()),
+                elem_struct: None,
             },
         );
         self.next += 1;
@@ -94,5 +100,32 @@ impl Vars {
     /// The variable's value type (scalar) or element type (array).
     pub(crate) fn ty(&self, name: &str) -> Width {
         self.map.get(name).map(|v| v.ty).unwrap_or(Width::Word)
+    }
+    /// Declare a struct-element array (`[Cell; N]`): `slots` total slots, remembering
+    /// the element struct so `a[i].field` can compute the element address.
+    pub(crate) fn declare_struct_array(
+        &mut self,
+        name: &str,
+        slots: usize,
+        elem_struct: &str,
+    ) -> usize {
+        let base = self.next;
+        self.map.insert(
+            name.to_string(),
+            VarInfo {
+                base,
+                sty: None,
+                ty: Width::Word,
+                is_ptr: false,
+                handle: None,
+                elem_struct: Some(elem_struct.to_string()),
+            },
+        );
+        self.next += slots;
+        base
+    }
+    /// The element struct of a struct-element array var, if it is one.
+    pub(crate) fn elem_struct(&self, name: &str) -> Option<String> {
+        self.map.get(name).and_then(|v| v.elem_struct.clone())
     }
 }

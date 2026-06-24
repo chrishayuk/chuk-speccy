@@ -61,6 +61,12 @@ pub enum Expr {
         off: usize,
         index: Box<Expr>,
     },
+    /// Multiply by a compile-time constant (`expr * k`) — used to scale an index by a
+    /// struct element's byte stride. Powers of two shift; else the mul micro-runtime.
+    MulConst(Box<Expr>, u16),
+    /// Load a value (zero-extended for `Width::Byte`) at the byte address in `expr` —
+    /// used to read a field of a struct-array element at a computed address.
+    LoadAt(Box<Expr>, Width),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).
@@ -90,6 +96,9 @@ pub enum Stmt {
         index: Box<Expr>,
         value: Expr,
     },
+    /// Store a value at the byte address in the first `Expr` (the low byte only for
+    /// `Width::Byte`) — write a field of a struct-array element at a computed address.
+    StoreAt(Expr, Expr, Width),
     /// Evaluate an expression for its side effect, discarding the result
     /// (e.g. a `void` function call as a statement).
     Eval(Expr),
