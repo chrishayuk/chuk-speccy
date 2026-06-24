@@ -5,7 +5,74 @@
 //! `s.field` lowers to a plain slot access — codegen needs no struct awareness.
 
 use crate::ir::*;
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+
+// --- Generics: monomorphization ------------------------------------------------
+//
+// A generic free fn (`fn max<T>(a: T, b: T) -> T`) is *not* lowered eagerly. Each
+// call instantiates a width-specialized copy: the type parameter resolves to a
+// concrete `Width` (from a turbofish or inferred from the argument widths), the
+// instance's params are declared at that width, and the body lowers exactly as a
+// normal function. Codegen is untouched — instances are just extra named functions.
+
+/// A generic free function awaiting instantiation.
+#[derive(Clone)]
+struct GenericFn {
+    item: syn::ItemFn,
+    /// Type-parameter names, in declaration order.
+    params: Vec<String>,
+    /// For each type-parameter name, the index of the first value parameter whose
+    /// type *is* that parameter — used to infer a type argument from the call args.
+    source: HashMap<String, usize>,
+    /// The return type, when it is itself a type parameter (so the call's result
+    /// width follows the instantiation).
+    ret_param: Option<String>,
+}
+
+/// One requested monomorphic instance.
+struct Instance {
+    generic: String,
+    type_args: Vec<Width>,
+    name: String,
+}
+
+/// Shared monomorphization state: the generic registry, a worklist of instances to
+/// lower, and the set already requested (so each instance is emitted once).
+#[derive(Default)]
+struct Mono {
+    generics: HashMap<String, GenericFn>,
+    queue: Vec<Instance>,
+    seen: HashSet<String>,
+}
+
+impl Mono {
+    /// Request an instance (idempotent); returns its mangled symbol name.
+    fn request(&mut self, generic: &str, type_args: Vec<Width>) -> String {
+        let name = instance_name(generic, &type_args);
+        if self.seen.insert(name.clone()) {
+            self.queue.push(Instance {
+                generic: generic.to_string(),
+                type_args,
+                name: name.clone(),
+            });
+        }
+        name
+    }
+}
+
+fn width_tag(w: Width) -> &'static str {
+    match w {
+        Width::Byte => "u8",
+        Width::Word => "u16",
+    }
+}
+
+/// A unique symbol name for one instantiation, e.g. `max$u16` / `add3$u8`.
+fn instance_name(generic: &str, args: &[Width]) -> String {
+    let tags: Vec<&str> = args.iter().map(|w| width_tag(*w)).collect();
+    format!("{generic}${}", tags.join("_"))
+}
 
 /// One struct field's layout: its name and slot count (1 for a scalar, `N` for a
 /// `[u16; N]` array field). Offsets are the running sum of `slots`.
@@ -76,6 +143,31 @@ struct Ctx<'a> {
     /// Nesting depth of enclosing loops — so a `break`/`continue` outside any loop is
     /// rejected cleanly rather than producing dangling jumps.
     loop_depth: usize,
+    /// Type-parameter → concrete width for the instance being lowered (empty for a
+    /// non-generic function).
+    type_args: &'a HashMap<String, Width>,
+    /// Shared monomorphization registry/worklist (calls register instances here).
+    mono: &'a RefCell<Mono>,
+}
+
+impl Ctx<'_> {
+    /// The width of a type annotation, resolving a generic parameter to its concrete
+    /// width for this instantiation (`u8` → byte; a type-param or anything else →
+    /// its bound width, else word).
+    fn width_of_type(&self, t: &syn::Type) -> Width {
+        if let syn::Type::Path(p) = t {
+            if let Some(id) = p.path.get_ident() {
+                let s = id.to_string();
+                if let Some(w) = self.type_args.get(&s) {
+                    return *w;
+                }
+                if s == "u8" {
+                    return Width::Byte;
+                }
+            }
+        }
+        Width::Word
+    }
 }
 
 struct VarInfo {
@@ -171,14 +263,21 @@ pub fn lower_program(
 ) -> Result<Vec<(String, Func)>, String> {
     let structs = collect_structs(file)?;
     let enums = collect_enums(file)?;
+    let mono = RefCell::new(Mono {
+        generics: collect_generic_fns(file)?,
+        ..Mono::default()
+    });
+    let no_args = HashMap::new();
     let mut out = Vec::new();
     for item in &file.items {
         match item {
             // `poke`/`peek` are host-only prelude intrinsics — skip their bodies.
             syn::Item::Fn(f) if is_intrinsic(&f.sig.ident.to_string()) => {}
+            // Generic functions are lowered on demand, once per instantiation (below).
+            syn::Item::Fn(f) if is_generic_fn(f) => {}
             syn::Item::Fn(f) => out.push((
                 f.sig.ident.to_string(),
-                lower_with(f, &structs, &enums, prelude)?,
+                lower_with(f, &structs, &enums, prelude, &mono, &no_args)?,
             )),
             // `impl T { fn m(&mut self, …) }` — each method becomes a `T::m` function
             // taking `self` as a leading pointer argument.
@@ -188,8 +287,14 @@ pub fn lower_program(
                     let syn::ImplItem::Fn(m) = it else {
                         return Err("only methods are supported in impl blocks".into());
                     };
+                    if is_generic_sig(&m.sig) {
+                        return Err("generic methods are not supported (use a free fn)".into());
+                    }
                     let name = format!("{self_ty}::{}", m.sig.ident);
-                    out.push((name, lower_method(m, &self_ty, &structs, &enums, prelude)?));
+                    out.push((
+                        name,
+                        lower_method(m, &self_ty, &structs, &enums, prelude, &mono, &no_args)?,
+                    ));
                 }
             }
             syn::Item::Struct(_) | syn::Item::Enum(_) => {} // already collected
@@ -201,6 +306,26 @@ pub fn lower_program(
             }
         }
     }
+
+    // Drain the instantiation worklist: lowering each instance may request more
+    // (a generic fn calling another), so loop until the queue is empty.
+    loop {
+        let inst = {
+            let mut m = mono.borrow_mut();
+            m.queue.pop()
+        };
+        let Some(inst) = inst else { break };
+        let gf = mono.borrow().generics[&inst.generic].clone();
+        let type_args: HashMap<String, Width> = gf
+            .params
+            .iter()
+            .cloned()
+            .zip(inst.type_args.iter().copied())
+            .collect();
+        let func = lower_with(&gf.item, &structs, &enums, prelude, &mono, &type_args)?;
+        out.push((inst.name, func));
+    }
+
     if out.is_empty() {
         return Err("no functions found".into());
     }
@@ -209,22 +334,28 @@ pub fn lower_program(
 
 /// Lower a standalone function (no struct/enum context — used by `compile_fn`).
 pub fn lower(item: &syn::ItemFn) -> Result<Func, String> {
+    let mono = RefCell::new(Mono::default());
+    let no_args = HashMap::new();
     lower_with(
         item,
         &Structs::new(),
         &Enums::new(),
         &PreludeConfig::default(),
+        &mono,
+        &no_args,
     )
 }
 
 /// Lower an `impl` method. The receiver (`&self`/`&mut self`) becomes a leading
 /// pointer parameter; `self.field` reads/writes through it.
-fn lower_method(
+fn lower_method<'a>(
     m: &syn::ImplItemFn,
     self_ty: &str,
-    structs: &Structs,
-    enums: &Enums,
-    prelude: &PreludeConfig,
+    structs: &'a Structs,
+    enums: &'a Enums,
+    prelude: &'a PreludeConfig,
+    mono: &'a RefCell<Mono>,
+    type_args: &'a HashMap<String, Width>,
 ) -> Result<Func, String> {
     let mut ctx = Ctx {
         vars: Vars::default(),
@@ -233,6 +364,8 @@ fn lower_method(
         prelude,
         temp: 0,
         loop_depth: 0,
+        type_args,
+        mono,
     };
     let params = lower_inputs(&m.sig.inputs, &mut ctx, Some(self_ty))?;
     let (body, ret) = lower_fn_block(&m.block, &mut ctx)?;
@@ -319,11 +452,13 @@ fn collect_structs(file: &syn::File) -> Result<Structs, String> {
     Ok(m)
 }
 
-fn lower_with(
+fn lower_with<'a>(
     item: &syn::ItemFn,
-    structs: &Structs,
-    enums: &Enums,
-    prelude: &PreludeConfig,
+    structs: &'a Structs,
+    enums: &'a Enums,
+    prelude: &'a PreludeConfig,
+    mono: &'a RefCell<Mono>,
+    type_args: &'a HashMap<String, Width>,
 ) -> Result<Func, String> {
     let mut ctx = Ctx {
         vars: Vars::default(),
@@ -332,6 +467,8 @@ fn lower_with(
         prelude,
         temp: 0,
         loop_depth: 0,
+        type_args,
+        mono,
     };
     let params = lower_inputs(&item.sig.inputs, &mut ctx, None)?;
     let (body, ret) = lower_fn_block(&item.block, &mut ctx)?;
@@ -364,7 +501,10 @@ fn lower_inputs(
                 let name = pat_ident(&pt.pat)?;
                 match handle_type(&pt.ty, ctx.prelude) {
                     Some(h) => ctx.vars.declare_handle(&name, &h),
-                    None => ctx.vars.declare(&name, 1, None, ty_of_type(&pt.ty)),
+                    None => {
+                        let w = ctx.width_of_type(&pt.ty);
+                        ctx.vars.declare(&name, 1, None, w)
+                    }
                 };
             }
         }
@@ -736,7 +876,7 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> 
         // `e as u8` truncates to a byte; `as u16`/`as usize` is a no-op (16-bit).
         syn::Expr::Cast(c) => {
             let (e, _) = lower_expr(&c.expr, ctx)?;
-            if ty_of_type(&c.ty) == Width::Byte {
+            if ctx.width_of_type(&c.ty) == Width::Byte {
                 Ok((Expr::Trunc(Box::new(e)), Width::Byte))
             } else {
                 Ok((e, Width::Word))
@@ -752,7 +892,7 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> 
         }
         syn::Expr::MethodCall(m) => lower_method_call(m, ctx),
         syn::Expr::Call(c) => {
-            let name = path_ident(&c.func)?;
+            let (name, turbofish) = call_target(&c.func)?;
             // `peek(addr)` intrinsic — read a byte from raw memory.
             if name == "peek" {
                 let addr = c.args.first().ok_or("peek(addr) needs an address")?;
@@ -768,15 +908,105 @@ fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width), String> 
             if c.args.len() > 3 {
                 return Err("more than 3 call arguments not supported yet".into());
             }
-            let args = c
+            let lowered = c
                 .args
                 .iter()
-                .map(|a| Ok(lower_expr(a, ctx)?.0))
-                .collect::<Result<_, String>>()?;
-            Ok((Expr::Call(name, args), Width::Word)) // Stage 1f assumes u16 returns
+                .map(|a| lower_expr(a, ctx))
+                .collect::<Result<Vec<_>, String>>()?;
+            let args: Vec<Expr> = lowered.iter().map(|(e, _)| e.clone()).collect();
+
+            // A call to a generic function instantiates a width-specialized copy.
+            let is_generic = ctx.mono.borrow().generics.contains_key(&name);
+            if is_generic {
+                let (type_args, ret_w) = resolve_generic(&name, &turbofish, &lowered, ctx)?;
+                let inst = ctx.mono.borrow_mut().request(&name, type_args);
+                return Ok((Expr::Call(inst, args), ret_w));
+            }
+            if !turbofish.is_empty() {
+                return Err(format!("`{name}` is not a generic function"));
+            }
+            Ok((Expr::Call(name, args), Width::Word)) // non-generic calls assume u16 returns
         }
         other => Err(format!("unsupported expression: {other:?}")),
     }
+}
+
+/// Extract a call's target name and any turbofish type arguments (`f::<u8>(…)`),
+/// tolerating a path with generic arguments (which `path_ident` rejects).
+fn call_target(func: &syn::Expr) -> Result<(String, Vec<syn::Type>), String> {
+    let syn::Expr::Path(p) = func else {
+        return Err(format!("unsupported call target: {func:?}"));
+    };
+    let seg = p.path.segments.last().ok_or("empty call path")?;
+    let name = seg.ident.to_string();
+    let types = match &seg.arguments {
+        syn::PathArguments::None => Vec::new(),
+        syn::PathArguments::AngleBracketed(ab) => ab
+            .args
+            .iter()
+            .map(|a| match a {
+                syn::GenericArgument::Type(t) => Ok(t.clone()),
+                _ => Err("only type arguments are supported in `::<…>`".to_string()),
+            })
+            .collect::<Result<_, _>>()?,
+        syn::PathArguments::Parenthesized(_) => {
+            return Err("Fn-trait call syntax is not supported".into())
+        }
+    };
+    Ok((name, types))
+}
+
+/// Resolve a generic call to its concrete type-argument widths and result width.
+/// Widths come from the turbofish if present, else are inferred from the argument
+/// whose parameter has that type. `lowered` is the call's already-lowered args.
+fn resolve_generic(
+    name: &str,
+    turbofish: &[syn::Type],
+    lowered: &[(Expr, Width)],
+    ctx: &Ctx,
+) -> Result<(Vec<Width>, Width), String> {
+    let m = ctx.mono.borrow();
+    let gf = &m.generics[name];
+
+    let type_args: Vec<Width> = if turbofish.is_empty() {
+        // Infer each type parameter from the first argument declared with that type.
+        gf.params
+            .iter()
+            .map(|p| {
+                let idx = gf.source.get(p).ok_or_else(|| {
+                    format!(
+                        "cannot infer type argument `{p}` of `{name}` — add a turbofish `::<…>`"
+                    )
+                })?;
+                let (_, w) = lowered
+                    .get(*idx)
+                    .ok_or_else(|| format!("too few arguments to `{name}`"))?;
+                Ok(*w)
+            })
+            .collect::<Result<_, String>>()?
+    } else {
+        if turbofish.len() != gf.params.len() {
+            return Err(format!(
+                "`{name}` takes {} type argument(s), got {}",
+                gf.params.len(),
+                turbofish.len()
+            ));
+        }
+        turbofish.iter().map(|t| ctx.width_of_type(t)).collect()
+    };
+
+    // The result width follows a generic return type, else the concrete annotation.
+    let ret_w = match &gf.ret_param {
+        Some(p) => {
+            let pos = gf.params.iter().position(|x| x == p).unwrap();
+            type_args[pos]
+        }
+        None => match &gf.item.sig.output {
+            syn::ReturnType::Type(_, t) => ctx.width_of_type(t),
+            syn::ReturnType::Default => Width::Word,
+        },
+    };
+    Ok((type_args, ret_w))
 }
 
 fn bin_op(op: &syn::BinOp) -> Result<BinOp, String> {
@@ -793,14 +1023,77 @@ fn bin_op(op: &syn::BinOp) -> Result<BinOp, String> {
     })
 }
 
-/// A type annotation's width (`u8` → byte, everything else → word).
-fn ty_of_type(t: &syn::Type) -> Width {
+/// Does this signature declare any type parameter (i.e. is it generic)?
+fn is_generic_sig(sig: &syn::Signature) -> bool {
+    sig.generics.type_params().next().is_some()
+}
+
+fn is_generic_fn(f: &syn::ItemFn) -> bool {
+    is_generic_sig(&f.sig)
+}
+
+/// If `t` is exactly one of the named type parameters, return its name.
+fn type_param_of(t: &syn::Type, params: &[String]) -> Option<String> {
     if let syn::Type::Path(p) = t {
-        if p.path.is_ident("u8") {
-            return Width::Byte;
+        if let Some(id) = p.path.get_ident() {
+            let s = id.to_string();
+            if params.contains(&s) {
+                return Some(s);
+            }
         }
     }
-    Width::Word
+    None
+}
+
+/// Collect generic free functions for on-demand monomorphization. Only type
+/// parameters are supported (lifetimes/const generics are rejected); bounds and
+/// `where` clauses are ignored (rustc already checked them).
+fn collect_generic_fns(file: &syn::File) -> Result<HashMap<String, GenericFn>, String> {
+    let mut map = HashMap::new();
+    for item in &file.items {
+        let syn::Item::Fn(f) = item else { continue };
+        if !is_generic_fn(f) {
+            continue;
+        }
+        if f.sig.generics.lifetimes().next().is_some()
+            || f.sig.generics.const_params().next().is_some()
+        {
+            return Err(format!(
+                "`{}`: only type parameters are supported on generic functions",
+                f.sig.ident
+            ));
+        }
+        let params: Vec<String> = f
+            .sig
+            .generics
+            .type_params()
+            .map(|tp| tp.ident.to_string())
+            .collect();
+
+        // Map each type parameter to the first value parameter declared with it.
+        let mut source = HashMap::new();
+        for (i, arg) in f.sig.inputs.iter().enumerate() {
+            if let syn::FnArg::Typed(pt) = arg {
+                if let Some(p) = type_param_of(&pt.ty, &params) {
+                    source.entry(p).or_insert(i);
+                }
+            }
+        }
+        let ret_param = match &f.sig.output {
+            syn::ReturnType::Type(_, t) => type_param_of(t, &params),
+            syn::ReturnType::Default => None,
+        };
+        map.insert(
+            f.sig.ident.to_string(),
+            GenericFn {
+                item: f.clone(),
+                params,
+                source,
+                ret_param,
+            },
+        );
+    }
+    Ok(map)
 }
 
 /// Resolve a field access `obj.field` to `(obj base slot, field offset, is_ptr)`.

@@ -52,6 +52,16 @@ fn numerics_trio() {
 }
 
 #[test]
+fn generics_clamp() {
+    let src = include_str!("../samples/showcase/generic.rs");
+    assert_eq!(val(src, "run", &[]), 200);
+    // One generic source, monomorphized at both u16 and u8.
+    let prog = rustz80::compile_program(src).unwrap();
+    assert!(prog.symbols.contains_key("clamp$u16"));
+    assert!(prog.symbols.contains_key("clamp$u8"));
+}
+
+#[test]
 fn draw_to_screen() {
     let src = include_str!("../samples/showcase/draw.rs");
     let (_hl, mem) = cpu::run(src, "draw", &[]);
