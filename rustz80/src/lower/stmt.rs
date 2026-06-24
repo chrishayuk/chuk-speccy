@@ -18,6 +18,10 @@ pub(crate) fn lower_local(
     body: &mut Vec<Stmt>,
 ) -> Result<(), String> {
     let init = local.init.as_ref().ok_or("`let` needs an initializer")?;
+    // `let (a, b) = …` — a tuple destructure (a tuple literal or a multi-value return).
+    if let syn::Pat::Tuple(pt) = &local.pat {
+        return lower_tuple_let(pt, &init.expr, ctx, body);
+    }
     let name = pat_ident(&local.pat)?;
     match &*init.expr {
         syn::Expr::Repeat(r) => {
@@ -70,6 +74,50 @@ pub(crate) fn lower_local(
             let (e, ty) = lower_expr(other, ctx)?;
             let base = ctx.vars.declare(&name, 1, None, ty);
             body.push(Stmt::Assign(base, e));
+        }
+    }
+    Ok(())
+}
+
+/// Lower `let (a, b, …) = init`. The RHS is either a tuple literal (each component
+/// assigned to its own slot) or a function call returning a tuple (one
+/// [`Stmt::AssignTuple`] distributing `HL`/`DE`/`BC` into the slots).
+fn lower_tuple_let(
+    pt: &syn::PatTuple,
+    init: &syn::Expr,
+    ctx: &mut Ctx,
+    body: &mut Vec<Stmt>,
+) -> Result<(), String> {
+    let names: Vec<String> = pt.elems.iter().map(pat_ident).collect::<Result<_, _>>()?;
+    if names.len() > 3 {
+        return Err("tuple bindings support up to 3 values".into());
+    }
+    match init {
+        syn::Expr::Tuple(t) => {
+            if t.elems.len() != names.len() {
+                return Err("tuple binding has the wrong number of values".into());
+            }
+            // Evaluate all components before binding (Rust evaluates the RHS first).
+            let vals: Vec<(Expr, Width)> = t
+                .elems
+                .iter()
+                .map(|e| lower_expr(e, ctx))
+                .collect::<Result<_, _>>()?;
+            for (name, (v, ty)) in names.iter().zip(vals) {
+                let base = ctx.vars.declare(name, 1, None, ty);
+                body.push(Stmt::Assign(base, v));
+            }
+        }
+        call => {
+            let (e, _) = lower_expr(call, ctx)?;
+            if !matches!(e, Expr::Call(..)) {
+                return Err("a tuple binding needs a tuple literal or a function call".into());
+            }
+            let slots: Vec<usize> = names
+                .iter()
+                .map(|n| ctx.vars.declare(n, 1, None, Width::Word))
+                .collect();
+            body.push(Stmt::AssignTuple(slots, e));
         }
     }
     Ok(())

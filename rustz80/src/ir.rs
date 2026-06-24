@@ -93,6 +93,10 @@ pub enum Stmt {
     /// Evaluate an expression for its side effect, discarding the result
     /// (e.g. a `void` function call as a statement).
     Eval(Expr),
+    /// Destructure a multi-value return into slots: evaluate the call (which leaves
+    /// its tuple in `HL`/`DE`/`BC`) and store each register into `slots[i]`.
+    /// `let (a, b) = f(…)`.
+    AssignTuple(Vec<usize>, Expr),
     /// `if cond { then } else { els }`.
     If(Cond, Vec<Stmt>, Vec<Stmt>),
     /// `while cond { body }`.
@@ -127,5 +131,7 @@ pub struct Func {
     pub params: usize,
     pub n_locals: usize,
     pub body: Vec<Stmt>,
-    pub ret: Option<Expr>,
+    /// Return values, in the result convention `HL`/`DE`/`BC`: empty for a void fn,
+    /// one entry for a scalar, two or three for a tuple return.
+    pub ret: Vec<Expr>,
 }

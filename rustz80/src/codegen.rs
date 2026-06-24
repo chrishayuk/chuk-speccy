@@ -259,12 +259,30 @@ fn emit_func(a: &mut Asm, f: &Func) {
     for s in &f.body {
         gen_stmt(a, s);
     }
-    if let Some(e) = &f.ret {
-        gen_expr(a, e);
-    }
+    gen_return(a, &f.ret);
     a.place(end);
     a.func_end = None;
     a.byte(0xC9); // RET
+}
+
+/// Emit a function's return values into the result convention `HL`/`DE`/`BC`: none
+/// for a void fn, `HL` for a scalar, two/three registers for a tuple. Each value is
+/// pushed, then popped into its register in reverse so the first lands in `HL`.
+fn gen_return(a: &mut Asm, rets: &[Expr]) {
+    match rets.len() {
+        0 => {}
+        1 => gen_expr(a, &rets[0]),
+        n => {
+            for e in rets {
+                gen_expr(a, e);
+                a.byte(0xE5); // PUSH HL
+            }
+            const POP: [u8; 3] = [0xE1, 0xD1, 0xC1]; // HL, DE, BC
+            for i in (0..n).rev() {
+                a.byte(POP[i]);
+            }
+        }
+    }
 }
 
 /// Evaluate `e`, leaving the result in `HL`.
@@ -501,6 +519,18 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
         }
         Stmt::Eval(e) => {
             gen_expr(a, e); // result left in HL, discarded
+        }
+        Stmt::AssignTuple(slots, call) => {
+            gen_expr(a, call); // leaves the returned tuple in HL/DE/BC
+                               // Store each register to its slot — `LD (nn),HL/DE/BC` don't clobber
+                               // the other registers, so order is free.
+            const ST: [&[u8]; 3] = [&[0x22], &[0xED, 0x53], &[0xED, 0x43]];
+            for (i, slot) in slots.iter().enumerate() {
+                for &b in ST[i] {
+                    a.byte(b);
+                }
+                a.word(slot_addr(a.base, *slot));
+            }
         }
         Stmt::If(cond, then, els) => {
             let else_l = a.label();

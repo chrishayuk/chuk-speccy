@@ -260,22 +260,29 @@ fn lower_inputs(
     Ok(params)
 }
 
-/// Lower a function body: statements + an optional tail expression.
-fn lower_fn_block(block: &syn::Block, ctx: &mut Ctx) -> Result<(Vec<Stmt>, Option<Expr>), String> {
+/// Lower a function body: statements + an optional tail expression. The tail may be
+/// a tuple `(a, b)` — a multi-value return placed in `HL`/`DE`/`BC`.
+fn lower_fn_block(block: &syn::Block, ctx: &mut Ctx) -> Result<(Vec<Stmt>, Vec<Expr>), String> {
     let mut body = Vec::new();
-    let mut ret = None;
+    let mut ret = Vec::new();
     let stmts = &block.stmts;
     for (i, st) in stmts.iter().enumerate() {
         let last = i + 1 == stmts.len();
         match st {
             syn::Stmt::Local(local) => lower_local(local, ctx, &mut body)?,
-            syn::Stmt::Expr(expr, semi) => {
-                if last && semi.is_none() && is_value_expr(expr) {
-                    ret = Some(lower_expr(expr, ctx)?.0);
-                } else {
-                    lower_stmt_expr(expr, ctx, &mut body)?;
+            syn::Stmt::Expr(expr, semi) if last && semi.is_none() => match expr {
+                syn::Expr::Tuple(t) => {
+                    if t.elems.len() > 3 {
+                        return Err("tuple returns support up to 3 values".into());
+                    }
+                    for e in &t.elems {
+                        ret.push(lower_expr(e, ctx)?.0);
+                    }
                 }
-            }
+                _ if is_value_expr(expr) => ret.push(lower_expr(expr, ctx)?.0),
+                _ => lower_stmt_expr(expr, ctx, &mut body)?,
+            },
+            syn::Stmt::Expr(expr, _) => lower_stmt_expr(expr, ctx, &mut body)?,
             other => return Err(format!("unsupported statement: {other:?}")),
         }
     }
