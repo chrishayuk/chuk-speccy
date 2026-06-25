@@ -387,9 +387,11 @@ inspectable, deterministic, for the tiny-snippet class.*
 **Phased plan** (✓ = done; → = next):
 
 - [x] **P1 · Warm execution** — compile-once/run-many `Runner`, O(touched) reset (above).
-- [ ] **P2 · Run modes** — split the hot path from observability: `run_fast` (regs +
-  cycles + halt only) vs `run_report` (＋symbols/touched) vs `run_trace` (per-instruction
-  + writes + optional disasm). The 10 000×-candidate inner loop must not pay for debug.
+- [~] **P2 · Run modes** — `Runner::run_fast` (just regs + cycles + halt, **no per-call
+  allocations** — no symbol-map clone / size report / memory-diff coalesce) splits the hot
+  path from `run`'s rich `Report`. `cell-bench` shows the Report costs ~0.34 µs/call (~15%
+  of a tiny call): full 2.3 µs vs fast 1.9 µs. *Next:* `run_trace` (per-instruction +
+  writes + optional disasm) for the debug tier.
 - [x] **P3 · Full register capture** — `regs = [HL, DE, BC]`; tuple returns read back.
 - [x] **P4 · Typed I/O** — typed *read-back* (`read_named`/`--read`) **and typed inputs**
   (`Runner::run_with_inputs`, CLI `--set addr:ty=val`, written after the reset + cleaned

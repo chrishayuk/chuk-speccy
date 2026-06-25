@@ -26,6 +26,28 @@ fn cell_program_compile_once_instantiate_cheap() {
 }
 
 #[test]
+fn run_fast_matches_run() {
+    use rustz80::cell::Halt;
+    // The hot path must agree with the full Report on result/regs/cycles/halt.
+    let mut r = Runner::compile("fn run(a: u16, b: u16) -> (u16, u16) { (a * a + b, a) }").unwrap();
+    let full = r.run(None, &[6, 5], DEFAULT_CYCLES).unwrap();
+    let fast = r.run_fast(None, &[6, 5], DEFAULT_CYCLES).unwrap();
+    assert_eq!(fast.result, full.result); // 6*6 + 5 = 41
+    assert_eq!(fast.regs, full.regs);
+    assert_eq!(fast.cycles, full.cycles);
+    assert_eq!(fast.halt, full.halt);
+    assert_eq!(fast.halt, Halt::Returned);
+
+    // Budget overrun is reported, not hung, on the fast path too.
+    let mut spin =
+        Runner::compile("fn run() -> u16 { let mut i = 0u16; loop { i = i + 1u16; } }").unwrap();
+    assert_eq!(
+        spin.run_fast(None, &[], 1000).unwrap().halt,
+        Halt::CycleBudget
+    );
+}
+
+#[test]
 fn captures_all_result_registers() {
     // A tuple return leaves the values in HL/DE/BC — read them all back.
     let mut r = Runner::compile("fn run(a: u16, b: u16) -> (u16, u16) { (a / b, a % b) }").unwrap();

@@ -183,6 +183,12 @@ let prog = rustz80::cell::CellProgram::compile(src)?;  // ~19 µs, cache by sour
 let mut cell = rustz80::cell::Runner::new(&prog);       // ~1.2 µs — no re-parse
 ```
 
+**Fast path for tight loops.** `Runner::run_fast` returns just the result registers,
+cycles, and halt — no symbol-map clone / size report / memory-diff (no per-call
+allocations). Scoring 1000 candidates, that's ~15% cheaper per call than the full
+`Report` (≈1.9 µs vs 2.3 µs). Use `run` when you want the rich report, `run_fast` in the
+inner loop.
+
 **Typed inputs + results + state.** A cell takes typed **inputs** (`run_with_inputs`, or
 CLI `--set addr:ty=val`), returns all three result registers (`regs` = `[HL, DE, BC]`, so
 a `-> (u16, u16, u16)` tuple reads back fully), and — because the bus stays live after a

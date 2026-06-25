@@ -146,8 +146,8 @@ fn main() {
         (pc, cold, sum, bytes)
     };
 
-    // 3. rustz80-cell — warm Runner (compile once, run many).
-    let (cell_pc, cell_cold, cell_sum, cell_bytes) = {
+    // 3. rustz80-cell — warm Runner (compile once, run many): full Report vs the hot path.
+    let (cell_pc, cell_fast_pc, cell_cold, cell_sum, cell_bytes) = {
         use rustz80::cell::Runner;
         let t0 = Instant::now();
         let mut r = Runner::compile(CELL_SRC).expect("compile cell");
@@ -161,7 +161,15 @@ fn main() {
                 })
                 .sum()
         });
-        (pc, cold, sum, code)
+        let (fast_pc, _) = bench(|| {
+            (0..N)
+                .map(|i| {
+                    let (x, y) = cand(black_box(i));
+                    r.run_fast(None, &[x, y], CELL_BUDGET).unwrap().result as u64
+                })
+                .sum()
+        });
+        (pc, fast_pc, cold, sum, code)
     };
 
     // 4. Python subprocess.
@@ -186,7 +194,8 @@ fn main() {
     };
     row("native Rust", native_pc, None, native_sum);
     row("wasmtime", wasm_pc, Some(wasm_cold), wasm_sum);
-    row("rustz80-cell", cell_pc, Some(cell_cold), cell_sum);
+    row("cell (report)", cell_pc, Some(cell_cold), cell_sum);
+    row("cell (fast)", cell_fast_pc, None, cell_sum);
     match py {
         Some((pc, startup, sum)) => row("python (subp)", pc, Some(startup), sum),
         None => println!("{:<14} (python3 not available — skipped)", "python"),
@@ -205,6 +214,13 @@ fn main() {
     println!("\nall runtimes agree (sum = {native_sum}).");
     println!(
         "code size: rustz80-cell {cell_bytes} B Z80 vs wasmtime {wasm_bytes} B compiled module."
+    );
+    println!(
+        "\nper-call breakdown (cell): full Report {} µs vs run_fast {} µs  →  Report (symbol\n\
+         clone + size report + memory-diff coalesce) costs ~{} µs/call; the hot loop skips it.",
+        us(cell_pc),
+        us(cell_fast_pc),
+        us((cell_pc - cell_fast_pc).max(0.0)),
     );
     cold_breakdown();
     println!(
