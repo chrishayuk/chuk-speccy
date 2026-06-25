@@ -23,6 +23,12 @@ cell = ["dep:z80"]
 name = "rustz80-cell"
 required-features = ["cell"]
 
+# Throughput / latency benchmark for the cell runner (no criterion — a plain main).
+[[bench]]
+name = "cell"
+harness = false
+required-features = ["cell"]
+
 [dev-dependencies]
 # Run the compiled bytes on the real CPU to differential-test against rustc.
 z80 = { package = "chuk-speccy-z80", version = "0.1.0", path = "../z80" }
