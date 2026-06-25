@@ -26,6 +26,29 @@ fn cell_program_compile_once_instantiate_cheap() {
 }
 
 #[test]
+fn cell80_traps_mul_div_natively() {
+    use rustz80::cell::{CellProgram, Runner};
+    let src = "fn run(a: u16, b: u16) -> u16 { a * b + a / b + a % b }";
+
+    // Cell mode: `*`/`/`/`%` lower to ED FE host traps — no software runtime appended.
+    let cp = CellProgram::compile(src).unwrap();
+    assert!(
+        !cp.program().symbols.contains_key("__mul16"),
+        "cell mode shouldn't append __mul16"
+    );
+    assert!(!cp.program().symbols.contains_key("__divmod16"));
+    let got = Runner::new(&cp)
+        .run(None, &[60, 7], DEFAULT_CYCLES)
+        .unwrap()
+        .result;
+    assert_eq!(got, 60u16 * 7 + 60 / 7 + 60 % 7); // 420 + 8 + 4 = 432 (matches rustc)
+
+    // Authentic Spectrum compile still uses (and appends) the software routines.
+    let spec = rustz80::compile_program(src).unwrap();
+    assert!(spec.symbols.contains_key("__mul16") && spec.symbols.contains_key("__divmod16"));
+}
+
+#[test]
 fn run_fast_matches_run() {
     use rustz80::cell::Halt;
     // The hot path must agree with the full Report on result/regs/cycles/halt.

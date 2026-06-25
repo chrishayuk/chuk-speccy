@@ -444,7 +444,7 @@ inspectable, deterministic, for the tiny-snippet class.*
   generated-code stress, trace mode) × {cold, warm, warm-batch-10k, fast/report/trace},
   and publish — proving usability, not raw compute.
 
-### B4. Cell80 — a Z80 *superset* for the cell (idea — dual-target)
+### B4. Cell80 — a Z80 *superset* for the cell — **dual-target + native mul/div built**
 The cell keeps hitting Z80's limits (software mul/div, no block ops, no typed I/O, return
 via the calling convention). Rather than make *authentic* Z80 do everything, treat Z80 as
 the **base** and define a small **superset for cell mode** — two backends off the one
@@ -474,12 +474,17 @@ spectrum-mode codegen simply never emits it). Per-op lowering table:
 | halt + tuple return | trampoline `HALT` | `ED FE` HALT (clean halt code + regs) |
 
 **Incremental route** (smallest, safest first):
-- [ ] **1 · `Target` capability flag** through codegen (`Spectrum48` | `Cell`), default
-  Spectrum; cell-mode lowering hooks. (Foundation — no behaviour change yet.)
-- [ ] **2 · Trapped `mul`/`div` first** — the cheapest high-value extension (the trap hook
-  exists). Cell mode emits `ED FE MUL16/DIVMOD16`; the cell bus does native `u16` arithmetic
-  → mul/div become ~free in cell mode (supersedes the just-optimized software routines *for
-  cell mode*; spectrum keeps them). Benchmark mul/div-heavy snippets.
+- [x] **1 · `Target` capability flag** — `codegen::Target { Spectrum48, Cell }` threaded
+  through codegen; `compile_program`/`.tap`/games default Spectrum (authentic), the cell
+  defaults **Cell**. No behaviour change for Spectrum output (real Z80 still real).
+- [x] **2 · Trapped `mul`/`div`** — Cell mode lowers non-constant `*`/`/`/`%` to the
+  `ED FE` host trap (`0x10` MUL16 / `0x11` DIVMOD16, matching `spectrum::host::math_traps`);
+  `CellBus::host_trap` does native `u16` arithmetic. No `__mul16`/`__divmod16` appended in
+  cell mode (code shrank 69 → 53 B). **Result: the score's per-call (`run_fast`) dropped
+  1.03 → 0.24 µs (~4.3×, ~4M evals/s) — ~18× off native-JIT Wasm.** Differential: a Cell
+  program with `a*b + a/b + a%b` matches rustc and appends no runtime, while the Spectrum
+  compile still does. (Authentic Spectrum keeps the software routines — and their
+  early-exit/fast-path wins.)
 - [ ] **3 · Block memory ops** (`memcpy`/`clr`/`fill`) — agents touch arrays/structs.
 - [ ] **4 · Typed I/O regions + clean halt/return** — fixed input/output memory the runner
   maps JSON ↔ typed state; `ED FE HALT` for a structured `{halt, result[], cycles}`.

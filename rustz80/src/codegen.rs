@@ -58,8 +58,20 @@ const DIVMOD16: &[u8] = &[
     0xC9, // ret
 ];
 
+/// Code-generation target. `Spectrum48` is authentic Z80 — `*`/`/`/`%` use the appended
+/// software micro-runtime, so the output runs anywhere (real ROM, `.tap`). `Cell` is the
+/// micro-VM ([`crate::cell`]): those ops lower to the `ED FE` host-trap (serviced natively
+/// by the cell bus — see the Cell80 plan), so no software runtime is appended. `ED FE` is
+/// a no-op on real hardware, so it never reaches a real game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Spectrum48,
+    Cell,
+}
+
 struct Asm {
     org: u16,
+    target: Target,
     code: Vec<u8>,
     labels: Vec<Option<u16>>,
     label_fixups: Vec<(usize, usize)>,
@@ -80,9 +92,10 @@ struct Asm {
 }
 
 impl Asm {
-    fn new(org: u16) -> Self {
+    fn new(org: u16, target: Target) -> Self {
         Asm {
             org,
+            target,
             code: Vec::new(),
             labels: Vec::new(),
             label_fixups: Vec::new(),
@@ -171,8 +184,9 @@ pub fn codegen_program(
     funcs: &[(String, Func)],
     org: u16,
     entry: Option<&str>,
+    target: Target,
 ) -> (Vec<u8>, HashMap<String, u16>) {
-    let mut a = Asm::new(org);
+    let mut a = Asm::new(org, target);
     if let Some(e) = entry {
         a.byte(0xF3); // DI
         a.call(e); // CALL entry
@@ -201,7 +215,8 @@ pub fn codegen_loop(
     state_base: u16,
     state_bytes: u16,
 ) -> Vec<u8> {
-    let mut a = Asm::new(org);
+    // Games are authentic Z80 (real ROM); always the Spectrum target.
+    let mut a = Asm::new(org, Target::Spectrum48);
     a.byte(0xF3); // DI
                   // Zero the state region (memset via LD (HL),0 + LDIR).
     if state_bytes >= 2 {
@@ -331,42 +346,29 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                     a.byte(0x19); // ADD HL, DE
                 }
                 BinOp::Sub => gen_sub(a, l, r),
-                // `x * const` → shift-and-add (no `__mul16`); else the runtime.
+                // `x * const` → shift-and-add (no `__mul16`); else the runtime/trap.
                 BinOp::Mul => match const_operand(l, r) {
                     Some((k, other)) => {
                         gen_expr(a, other);
                         gen_mul_const(a, k);
                     }
-                    None => {
-                        gen_pair(a, l, r); // HL = r, DE = l
-                        a.call("__mul16"); // HL = l * r
-                        a.needs_mul = true;
-                    }
+                    None => gen_mul(a, l, r),
                 },
-                // `x / 2^n` → shift right; else the runtime.
+                // `x / 2^n` → shift right; else the runtime/trap.
                 BinOp::Div => match lit_val(r) {
                     Some(k) if k.is_power_of_two() => {
                         gen_expr(a, l);
                         gen_shr_const(a, k.trailing_zeros());
                     }
-                    _ => {
-                        gen_pair(a, r, l); // HL = l, DE = r
-                        a.call("__divmod16"); // HL = l / r
-                        a.needs_div = true;
-                    }
+                    _ => gen_divmod(a, l, r, false),
                 },
-                // `x % 2^n` → mask the low bits; else the runtime.
+                // `x % 2^n` → mask the low bits; else the runtime/trap.
                 BinOp::Rem => match lit_val(r) {
                     Some(k) if k.is_power_of_two() => {
                         gen_expr(a, l);
                         gen_and_mask(a, k - 1);
                     }
-                    _ => {
-                        gen_pair(a, r, l); // HL = l, DE = r
-                        a.call("__divmod16"); // DE = l % r
-                        a.byte(0xEB); // EX DE, HL  -> HL = remainder
-                        a.needs_div = true;
-                    }
+                    _ => gen_divmod(a, l, r, true),
                 },
                 BinOp::Or => gen_bitwise(a, l, r, 0xB3, 0xB2), // OR E / OR D
                 BinOp::And => gen_bitwise(a, l, r, 0xA3, 0xA2), // AND E / AND D
@@ -522,6 +524,67 @@ fn const_fold(op: BinOp, x: u16, y: u16) -> Option<u16> {
         BinOp::Rem if y != 0 => x % y,
         _ => return None,
     })
+}
+
+/// Host-trap ids (match `spectrum::host::math_traps`): `HL = BC * DE`, and `HL = BC / DE`
+/// with `DE = BC % DE`.
+const TRAP_MUL16: u8 = 0x10;
+const TRAP_DIVMOD16: u8 = 0x11;
+
+/// `HL = l * r` (full 16-bit, neither operand constant). Spectrum: the software runtime.
+/// Cell: an `ED FE` host trap, serviced natively by the cell bus.
+fn gen_mul(a: &mut Asm, l: &Expr, r: &Expr) {
+    match a.target {
+        Target::Spectrum48 => {
+            gen_pair(a, l, r); // HL = r, DE = l
+            a.call("__mul16"); // HL = l * r
+            a.needs_mul = true;
+        }
+        Target::Cell => {
+            gen_expr(a, l);
+            a.byte(0xE5); // PUSH HL  (l)
+            gen_expr(a, r);
+            a.byte(0x44);
+            a.byte(0x4D); // ld b,h ; ld c,l   (BC = r)
+            a.byte(0xD1); // POP DE   (DE = l)
+            gen_trap(a, TRAP_MUL16); // HL = BC * DE
+        }
+    }
+}
+
+/// `HL = l / r` (or `l % r` if `rem`), neither a power of two. Spectrum: the software
+/// runtime. Cell: an `ED FE` host trap.
+fn gen_divmod(a: &mut Asm, l: &Expr, r: &Expr, rem: bool) {
+    match a.target {
+        Target::Spectrum48 => {
+            gen_pair(a, r, l); // HL = l, DE = r
+            a.call("__divmod16"); // HL = l/r, DE = l%r
+            a.needs_div = true;
+            if rem {
+                a.byte(0xEB); // EX DE,HL  -> HL = remainder
+            }
+        }
+        Target::Cell => {
+            gen_expr(a, r);
+            a.byte(0xE5); // PUSH HL  (r = divisor)
+            gen_expr(a, l);
+            a.byte(0x44);
+            a.byte(0x4D); // ld b,h ; ld c,l   (BC = l = dividend)
+            a.byte(0xD1); // POP DE   (DE = r = divisor)
+            gen_trap(a, TRAP_DIVMOD16); // HL = BC/DE, DE = BC%DE
+            if rem {
+                a.byte(0xEB); // EX DE,HL  -> HL = remainder
+            }
+        }
+    }
+}
+
+/// Emit a host trap: `LD A, id ; ED FE` (the reserved `TRAP_OP`).
+fn gen_trap(a: &mut Asm, id: u8) {
+    a.byte(0x3E); // LD A, id
+    a.byte(id);
+    a.byte(0xED); // ED FE  (host trap)
+    a.byte(0xFE);
 }
 
 /// `HL >>= n` (logical), as `SRL H; RR L` per step.

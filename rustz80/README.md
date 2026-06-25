@@ -185,9 +185,16 @@ let mut cell = rustz80::cell::Runner::new(&prog);       // ~1.2 µs — no re-pa
 
 **Fast path for tight loops.** `Runner::run_fast` returns just the result registers,
 cycles, and halt — no symbol-map clone / size report / memory-diff (no per-call
-allocations). Scoring 1000 candidates, that's ~15% cheaper per call than the full
-`Report` (≈1.9 µs vs 2.3 µs). Use `run` when you want the rich report, `run_fast` in the
-inner loop.
+allocations). Use `run` when you want the rich report, `run_fast` in the inner loop.
+
+**Cell80 mode.** The cell compiles to a small **Z80 superset** (target `Cell`): `*`/`/`/`%`
+that would call the software micro-runtime instead lower to the `ED FE` **host trap**, which
+the cell bus services with native `u16` arithmetic (the authentic `Spectrum48` target —
+`compile_program`/`.tap`/games — keeps the software routines, so real output stays real
+Z80). That makes a `var*var` multiply a few T-states instead of a loop: scoring 1000
+candidates, `run_fast` runs at **~0.24 µs/call (~4M/s)** — about 18× off native-JIT Wasm
+while the code is ~950× smaller (53 B vs 50 KB) and cold setup ~5× lower. See
+[`cell-bench`](../cell-bench).
 
 **Typed inputs + results + state.** A cell takes typed **inputs** (`run_with_inputs`, or
 CLI `--set addr:ty=val`), returns all three result registers (`regs` = `[HL, DE, BC]`, so
