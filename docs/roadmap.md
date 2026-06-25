@@ -444,6 +444,56 @@ inspectable, deterministic, for the tiny-snippet class.*
   generated-code stress, trace mode) × {cold, warm, warm-batch-10k, fast/report/trace},
   and publish — proving usability, not raw compute.
 
+### B4. Cell80 — a Z80 *superset* for the cell (idea — dual-target)
+The cell keeps hitting Z80's limits (software mul/div, no block ops, no typed I/O, return
+via the calling convention). Rather than make *authentic* Z80 do everything, treat Z80 as
+the **base** and define a small **superset for cell mode** — two backends off the one
+frontend/IR:
+```
+                 ┌─ target: spectrum  → authentic Z80 / .tap (CALL __mul16, …)
+rustz80 frontend ┤
+   (typed IR)    └─ target: cell      → Z80 + host intrinsics (the microVM)
+```
+A `Target` capability picks the lowering; **real games stay real** (no non-Z80 bytes in
+spectrum output), agent cells get the fast/ergonomic chip. Keep it *tiny and bounded* —
+deterministic, sandboxed, easy to emulate; **never** a general OS (no fs/net/threads/heap/
+syscalls — host tools live *outside* the cell; the cell computes, the agent decides).
+
+**The mechanism is already here.** The CPU has a reserved host-trap, `ED FE` (`TRAP_OP`,
+`Bus::host_trap(&mut regs)`), today a no-op on a bare bus. So a cell intrinsic is just
+`ED FE <id>` (id in `A`, operands in regs) that the cell's bus services natively — clean,
+disassemblable, and a no-op on real hardware (so it can't sneak into a real game silently;
+spectrum-mode codegen simply never emits it). Per-op lowering table:
+
+| op | spectrum48 | cell |
+|---|---|---|
+| `u16 * u16` | `CALL __mul16` | `ED FE` MUL16 (host-native) |
+| `u16 / %`   | `CALL __divmod16` | `ED FE` DIVMOD16 |
+| memcpy/clr/fill | emit loop | `ED FE` MEM* |
+| typed input/output | symbol memory | `ED FE` READ/WRITE region |
+| halt + tuple return | trampoline `HALT` | `ED FE` HALT (clean halt code + regs) |
+
+**Incremental route** (smallest, safest first):
+- [ ] **1 · `Target` capability flag** through codegen (`Spectrum48` | `Cell`), default
+  Spectrum; cell-mode lowering hooks. (Foundation — no behaviour change yet.)
+- [ ] **2 · Trapped `mul`/`div` first** — the cheapest high-value extension (the trap hook
+  exists). Cell mode emits `ED FE MUL16/DIVMOD16`; the cell bus does native `u16` arithmetic
+  → mul/div become ~free in cell mode (supersedes the just-optimized software routines *for
+  cell mode*; spectrum keeps them). Benchmark mul/div-heavy snippets.
+- [ ] **3 · Block memory ops** (`memcpy`/`clr`/`fill`) — agents touch arrays/structs.
+- [ ] **4 · Typed I/O regions + clean halt/return** — fixed input/output memory the runner
+  maps JSON ↔ typed state; `ED FE HALT` for a structured `{halt, result[], cycles}`.
+- [ ] **5 · (optional) trace markers + seeded RNG** — debug tier only; RNG seeded + reported
+  to keep replay deterministic.
+- [ ] **6 · Formalise the *Cell80* ABI** — Z80-compatible deterministic VM: 64K flat RAM,
+  no ports by default, cycle budget, the `ED FE` extension space, standard I/O regions +
+  halt/report ABI, optional typed-symbol metadata. A small public spec.
+- [ ] **7 · (only then) real extension opcodes** if the trap dispatch ever shows up hot.
+Crate shape stays layered: shared frontend/IR; `rustz80` authentic + `rustz80-cell`
+virtual chip; `speccy-sdk` authoring + a future `cell-sdk`. *Pitch:* "Cell80 — a tiny
+deterministic virtual chip for agent-generated programs; restricted Rust in, falls back to
+real Z80 for Spectrum output, structured execution reports out."
+
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
   Python `chat.py` (`ChatSession`, pluggable responder, optional `llm_responder`
