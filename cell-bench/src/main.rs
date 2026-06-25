@@ -72,6 +72,43 @@ fn us(secs: f64) -> String {
     format!("{:.3}", secs * 1e6)
 }
 
+/// Time a single op in ~100 ms windows; return seconds per call.
+fn time_op(mut f: impl FnMut()) -> f64 {
+    f();
+    let mut n = 0u64;
+    let t = Instant::now();
+    while t.elapsed().as_secs_f64() < 0.1 {
+        f();
+        n += 1;
+    }
+    t.elapsed().as_secs_f64() / n as f64
+}
+
+/// Where the cell's cold setup goes — and that caching the compiled program removes it.
+fn cold_breakdown() {
+    use rustz80::cell::{CellProgram, Runner};
+    let parse = time_op(|| {
+        let _f: syn::File = black_box(syn::parse_str(CELL_SRC).unwrap());
+    });
+    let compile = time_op(|| {
+        black_box(CellProgram::compile(CELL_SRC).unwrap());
+    });
+    let cached = CellProgram::compile(CELL_SRC).unwrap();
+    let instantiate = time_op(|| {
+        black_box(Runner::new(black_box(&cached)));
+    });
+    println!("\ncold-setup breakdown (warm-allocator, amortized):");
+    println!(
+        "  CellProgram::compile        {} µs   (syn parse {} µs + lower/codegen)",
+        us(compile),
+        us(parse)
+    );
+    println!(
+        "  Runner::new (cached prog)   {} µs   ← caching a known snippet skips parse+compile",
+        us(instantiate)
+    );
+}
+
 fn main() {
     println!("cell-bench — score(x,y) = x*x + y*y + x*3, over N={N} candidates\n");
 
@@ -109,8 +146,8 @@ fn main() {
         (pc, cold, sum, bytes)
     };
 
-    // 3. rustz80-cell — warm Runner (compile once, run many).
-    let (cell_pc, cell_cold, cell_sum, cell_bytes) = {
+    // 3. rustz80-cell — warm Runner (compile once, run many): full Report vs the hot path.
+    let (cell_pc, cell_fast_pc, cell_cold, cell_sum, cell_bytes) = {
         use rustz80::cell::Runner;
         let t0 = Instant::now();
         let mut r = Runner::compile(CELL_SRC).expect("compile cell");
@@ -124,7 +161,15 @@ fn main() {
                 })
                 .sum()
         });
-        (pc, cold, sum, code)
+        let (fast_pc, _) = bench(|| {
+            (0..N)
+                .map(|i| {
+                    let (x, y) = cand(black_box(i));
+                    r.run_fast(None, &[x, y], CELL_BUDGET).unwrap().result as u64
+                })
+                .sum()
+        });
+        (pc, fast_pc, cold, sum, code)
     };
 
     // 4. Python subprocess.
@@ -149,7 +194,8 @@ fn main() {
     };
     row("native Rust", native_pc, None, native_sum);
     row("wasmtime", wasm_pc, Some(wasm_cold), wasm_sum);
-    row("rustz80-cell", cell_pc, Some(cell_cold), cell_sum);
+    row("cell (report)", cell_pc, Some(cell_cold), cell_sum);
+    row("cell (fast)", cell_fast_pc, None, cell_sum);
     match py {
         Some((pc, startup, sum)) => row("python (subp)", pc, Some(startup), sum),
         None => println!("{:<14} (python3 not available — skipped)", "python"),
@@ -170,7 +216,15 @@ fn main() {
         "code size: rustz80-cell {cell_bytes} B Z80 vs wasmtime {wasm_bytes} B compiled module."
     );
     println!(
-        "python per-call is amortized over the batch (one interpreter startup ≈ its cold column);\n\
+        "\nper-call breakdown (cell): full Report {} µs vs run_fast {} µs  →  Report (symbol\n\
+         clone + size report + memory-diff coalesce) costs ~{} µs/call; the hot loop skips it.",
+        us(cell_pc),
+        us(cell_fast_pc),
+        us((cell_pc - cell_fast_pc).max(0.0)),
+    );
+    cold_breakdown();
+    println!(
+        "\npython per-call is amortized over the batch (one interpreter startup ≈ its cold column);\n\
          a fresh subprocess *per* candidate would pay that startup 1000×.\n\
          the cell's edge isn't speed — it's a tiny, deterministic, inspectable sandbox\n\
          (64K, no WASI/imports, cycle-bounded, typed state read-back)."

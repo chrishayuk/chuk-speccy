@@ -12,6 +12,7 @@ publish = false
 [dependencies]
 # The cell runner under test (path-dep into the main workspace; allowed across roots).
 rustz80 = { package = "rustz80", path = "../rustz80", features = ["cell"] }
+syn = { version = "2.0.118", features = ["full"] }
 # A real JIT Wasm runtime — the compute-heavyweight to compare against.
 wasmtime = "27"
 

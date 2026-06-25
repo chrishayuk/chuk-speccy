@@ -173,6 +173,22 @@ trivial cell warm-runs in **~0.3 µs**, realistic snippets (`rng32`, `entities`)
 **hundreds of × real-hardware speed**. Reuse cut the small-cell run cost ~60× vs a cold
 one-shot (which was dominated by the 64 KiB bus allocation, not CPU work).
 
+**Compile once, instantiate cheap.** Cold setup is ~90% **syn parsing** (≈16 µs); the bus
+allocation is amortized-free. So separate the parse from the machine: compile to a
+cacheable [`CellProgram`] once, then spin up runners from it without re-parsing — a cached
+snippet's setup drops from ~19 µs to **~1.2 µs** (~16×):
+
+```rust
+let prog = rustz80::cell::CellProgram::compile(src)?;  // ~19 µs, cache by source hash
+let mut cell = rustz80::cell::Runner::new(&prog);       // ~1.2 µs — no re-parse
+```
+
+**Fast path for tight loops.** `Runner::run_fast` returns just the result registers,
+cycles, and halt — no symbol-map clone / size report / memory-diff (no per-call
+allocations). Scoring 1000 candidates, that's ~15% cheaper per call than the full
+`Report` (≈1.9 µs vs 2.3 µs). Use `run` when you want the rich report, `run_fast` in the
+inner loop.
+
 **Typed inputs + results + state.** A cell takes typed **inputs** (`run_with_inputs`, or
 CLI `--set addr:ty=val`), returns all three result registers (`regs` = `[HL, DE, BC]`, so
 a `-> (u16, u16, u16)` tuple reads back fully), and — because the bus stays live after a

@@ -153,6 +153,46 @@ impl z80::Bus for CellBus<'_> {
     }
 }
 
+/// A **compiled** cell: the result of parse + lower + codegen under a policy. Cheap to
+/// clone and cache (e.g. by source hash) — re-running a known snippet then skips the
+/// (syn-parse-dominated, ~16 µs) compile. Turn one into a runnable machine with
+/// [`Runner::new`].
+#[derive(Clone)]
+pub struct CellProgram {
+    prog: Program,
+    cfg: CellConfig,
+}
+
+impl CellProgram {
+    /// Compile `src` with the **permissive** policy (raw memory + ports allowed, no
+    /// ceilings) — for trusted/game code.
+    pub fn compile(src: &str) -> Result<Self, String> {
+        Self::compile_with_config(src, CellConfig::permissive())
+    }
+
+    /// Compile `src` under `cfg`: enforce its capability gates (`poke`/`peek`/`inport`)
+    /// and `max_code_bytes`. Parses once (shared by the cap scan and the compile).
+    pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
+        let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+        check_caps(&file, &cfg)?;
+        let prog = crate::compile_file(&file)?;
+        if let Some(max) = cfg.max_code_bytes {
+            if prog.code.len() > max {
+                return Err(format!(
+                    "code is {} bytes, over the {max}-byte limit",
+                    prog.code.len()
+                ));
+            }
+        }
+        Ok(CellProgram { prog, cfg })
+    }
+
+    /// The underlying program (symbol map, code).
+    pub fn program(&self) -> &Program {
+        &self.prog
+    }
+}
+
 /// A compiled cell, runnable many times. One 64 KiB bus is allocated up front and the
 /// code loaded once; each [`run`](Runner::run) resets only the previous run's writes,
 /// re-lays the argument trampoline, and steps — so reuse pays for the computation, not a
@@ -166,38 +206,31 @@ pub struct Runner {
 }
 
 impl Runner {
-    /// Compile `src` with the **permissive** policy (raw memory + ports allowed, no
-    /// ceilings) — back-compat for trusted/game code. Untrusted cells should use
-    /// [`compile_with_config`](Runner::compile_with_config) (e.g. [`CellConfig::sandboxed`]).
-    pub fn compile(src: &str) -> Result<Self, String> {
-        Self::compile_with_config(src, CellConfig::permissive())
-    }
-
-    /// Compile `src` under `cfg`: enforce its capability gates (`poke`/`peek`/`inport`)
-    /// and `max_code_bytes`, then allocate the reusable machine and load the code once.
-    pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
-        // Parse once — shared by the capability scan and the compile.
-        let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
-        check_caps(&file, &cfg)?;
-        let prog = crate::compile_file(&file)?;
-        if let Some(max) = cfg.max_code_bytes {
-            if prog.code.len() > max {
-                return Err(format!(
-                    "code is {} bytes, over the {max}-byte limit",
-                    prog.code.len()
-                ));
-            }
-        }
+    /// Instantiate a runnable machine from an already-[`compile`](CellProgram::compile)d
+    /// program — **cheap**: allocate the bus and load the code, *no parse/compile*. The
+    /// way to skip cold setup for a cached snippet (compile once → `Runner::new` many).
+    pub fn new(program: &CellProgram) -> Self {
         let mut mem = vec![0u8; 0x1_0000];
         let org = ORG as usize;
-        mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
-        Ok(Runner {
-            prog,
-            cfg,
+        mem[org..org + program.prog.code.len()].copy_from_slice(&program.prog.code);
+        Runner {
+            prog: program.prog.clone(),
+            cfg: program.cfg.clone(),
             mem,
             seen: vec![false; 0x1_0000],
             touched: Vec::new(),
-        })
+        }
+    }
+
+    /// Compile `src` (permissive) and instantiate — back-compat for trusted/game code.
+    /// Untrusted cells should use [`compile_with_config`](Runner::compile_with_config).
+    pub fn compile(src: &str) -> Result<Self, String> {
+        Ok(Self::new(&CellProgram::compile(src)?))
+    }
+
+    /// Compile `src` under `cfg` and instantiate.
+    pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
+        Ok(Self::new(&CellProgram::compile_with_config(src, cfg)?))
     }
 
     /// The compiled program (symbol map, code).
@@ -227,20 +260,76 @@ impl Runner {
         inputs: &[(u16, Ty, u64)],
         budget: u64,
     ) -> Result<Report, String> {
+        let (entry, entry_addr) = self.resolve_entry(entry)?;
+        let (regs, cycles, halt) = self.exec(entry_addr, args, inputs, budget);
+        // Observability: clone the symbol map + size report + coalesce the memory diff.
+        // The hot path skips all of this — see `run_fast`.
+        self.touched.sort_unstable();
+        Ok(Report {
+            entry,
+            entry_addr,
+            result: regs[0],
+            regs,
+            cycles,
+            budget,
+            returned: halt == Halt::Returned,
+            halt,
+            code_bytes: self.prog.code.len(),
+            fn_count: self.prog.size_report().len(),
+            symbols: sorted_symbols(&self.prog.symbols),
+            touched: coalesce(&self.touched),
+            reads: Vec::new(),
+        })
+    }
+
+    /// The **hot path**: run `entry` and return just the result registers, cycles, and
+    /// halt — *no* symbol-map clone, size report, or memory-diff (no per-call
+    /// allocations). For tight agent loops over many candidates (see `run` for the rich
+    /// [`Report`]).
+    pub fn run_fast(
+        &mut self,
+        entry: Option<&str>,
+        args: &[u16],
+        budget: u64,
+    ) -> Result<Fast, String> {
+        let (_, entry_addr) = self.resolve_entry(entry)?;
+        let (regs, cycles, halt) = self.exec(entry_addr, args, &[], budget);
+        Ok(Fast {
+            result: regs[0],
+            regs,
+            cycles,
+            halt,
+        })
+    }
+
+    /// Resolve the entry name + address (defaulting to `run`, then `main`).
+    fn resolve_entry(&self, entry: Option<&str>) -> Result<(String, u16), String> {
         let entry = match entry {
             Some(e) => e.to_string(),
             None if self.prog.symbols.contains_key("run") => "run".to_string(),
             None if self.prog.symbols.contains_key("main") => "main".to_string(),
             None => return Err("no `run` or `main` entry — pass an explicit entry".into()),
         };
-        let entry_addr = *self.prog.symbols.get(&entry).ok_or_else(|| {
+        let addr = *self.prog.symbols.get(&entry).ok_or_else(|| {
             let mut names: Vec<String> = self.prog.symbols.keys().cloned().collect();
             names.sort();
             format!("no entry `{entry}`; available: {}", names.join(", "))
         })?;
+        Ok((entry, addr))
+    }
 
-        // Reset: zero last run's writes, restore the code (in case it was poked), then
-        // lay the trampoline — load args into HL/DE/BC, CALL the entry, HALT on return.
+    /// Reset (zero last run's writes + restore code), lay the trampoline + inputs, and
+    /// step the CPU. Returns `(regs[HL,DE,BC], cycles, halt)`. The allocation-free core
+    /// shared by `run`/`run_fast` — the per-call cost is the computation, not bookkeeping.
+    fn exec(
+        &mut self,
+        entry_addr: u16,
+        args: &[u16],
+        inputs: &[(u16, Ty, u64)],
+        budget: u64,
+    ) -> ([u16; 3], u64, Halt) {
+        // Reset only the bytes the previous run wrote, then restore the code (in case it
+        // was poked).
         for &a in &self.touched {
             self.mem[a as usize] = 0;
             self.seen[a as usize] = false;
@@ -249,22 +338,23 @@ impl Runner {
         let org = ORG as usize;
         self.mem[org..org + self.prog.code.len()].copy_from_slice(&self.prog.code);
 
-        let mut t = Vec::new();
-        const LD: [u8; 3] = [0x21, 0x11, 0x01]; // LD HL,nn / LD DE,nn / LD BC,nn
+        // Trampoline written straight to memory (no per-call Vec): load args into
+        // HL/DE/BC, CALL the entry, HALT on return.
+        const LD: [u8; 3] = [0x21, 0x11, 0x01];
+        let mut p = TRAMPOLINE as usize;
         for (i, &v) in args.iter().enumerate().take(3) {
-            t.push(LD[i]);
-            t.push(v as u8);
-            t.push((v >> 8) as u8);
+            self.mem[p] = LD[i];
+            self.mem[p + 1] = v as u8;
+            self.mem[p + 2] = (v >> 8) as u8;
+            p += 3;
         }
-        t.push(0xCD); // CALL entry
-        t.push(entry_addr as u8);
-        t.push((entry_addr >> 8) as u8);
-        t.push(0x76); // HALT
-        let tr = TRAMPOLINE as usize;
-        self.mem[tr..tr + t.len()].copy_from_slice(&t);
+        self.mem[p] = 0xCD; // CALL entry
+        self.mem[p + 1] = entry_addr as u8;
+        self.mem[p + 2] = (entry_addr >> 8) as u8;
+        self.mem[p + 3] = 0x76; // HALT
 
-        // Typed inputs: written after the reset (so they survive it), marked touched
-        // (so the next run cleans them). Little-endian, low byte first.
+        // Typed inputs (after the reset, so they survive it; marked touched so the next
+        // run cleans them). Little-endian, low byte first.
         for &(addr, ty, val) in inputs {
             let bytes = match ty {
                 Ty::U8 => 1,
@@ -300,7 +390,6 @@ impl Runner {
                 break;
             }
         }
-        let cycles = bus.cycles;
         let halt = if cpu.halted {
             Halt::Returned
         } else if mem_limit {
@@ -308,27 +397,11 @@ impl Runner {
         } else {
             Halt::CycleBudget
         };
-        let returned = cpu.halted;
-        // The calling convention leaves results in HL/DE/BC (a `-> (u16, u16, u16)`
-        // tuple uses all three); `result` is the primary `HL`.
-        let regs = [cpu.regs.hl(), cpu.regs.de(), cpu.regs.bc()];
-
-        self.touched.sort_unstable();
-        Ok(Report {
-            entry,
-            entry_addr,
-            result: regs[0],
-            regs,
-            cycles,
-            budget,
-            returned,
+        (
+            [cpu.regs.hl(), cpu.regs.de(), cpu.regs.bc()],
+            bus.cycles,
             halt,
-            code_bytes: self.prog.code.len(),
-            fn_count: self.prog.size_report().len(),
-            symbols: sorted_symbols(&self.prog.symbols),
-            touched: coalesce(&self.touched),
-            reads: Vec::new(),
-        })
+        )
     }
 
     /// Read a byte from the cell's memory *after a run* (the bus stays live until the
@@ -389,6 +462,19 @@ impl Ty {
 /// compile-once/run-many).
 pub fn run(src: &str, entry: Option<&str>, args: &[u16], budget: u64) -> Result<Report, String> {
     Runner::compile(src)?.run(entry, args, budget)
+}
+
+/// The lightweight outcome of a [`run_fast`](Runner::run_fast): the result registers,
+/// T-states, and halt reason — no allocations (no symbol map, size report, or memory
+/// diff). For tight agent loops.
+#[derive(Debug, Clone, Copy)]
+pub struct Fast {
+    /// The primary result in `HL`.
+    pub result: u16,
+    /// All three result registers `[HL, DE, BC]`.
+    pub regs: [u16; 3],
+    pub cycles: u64,
+    pub halt: Halt,
 }
 
 /// The structured outcome of a [`run`].

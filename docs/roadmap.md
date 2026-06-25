@@ -387,9 +387,11 @@ inspectable, deterministic, for the tiny-snippet class.*
 **Phased plan** (✓ = done; → = next):
 
 - [x] **P1 · Warm execution** — compile-once/run-many `Runner`, O(touched) reset (above).
-- [ ] **P2 · Run modes** — split the hot path from observability: `run_fast` (regs +
-  cycles + halt only) vs `run_report` (＋symbols/touched) vs `run_trace` (per-instruction
-  + writes + optional disasm). The 10 000×-candidate inner loop must not pay for debug.
+- [~] **P2 · Run modes** — `Runner::run_fast` (just regs + cycles + halt, **no per-call
+  allocations** — no symbol-map clone / size report / memory-diff coalesce) splits the hot
+  path from `run`'s rich `Report`. `cell-bench` shows the Report costs ~0.34 µs/call (~15%
+  of a tiny call): full 2.3 µs vs fast 1.9 µs. *Next:* `run_trace` (per-instruction +
+  writes + optional disasm) for the debug tier.
 - [x] **P3 · Full register capture** — `regs = [HL, DE, BC]`; tuple returns read back.
 - [x] **P4 · Typed I/O** — typed *read-back* (`read_named`/`--read`) **and typed inputs**
   (`Runner::run_with_inputs`, CLI `--set addr:ty=val`, written after the reset + cleaned
@@ -398,9 +400,15 @@ inspectable, deterministic, for the tiny-snippet class.*
   `State` struct at a base, set its fields, run `State::run(&mut self)`, read its fields —
   the full named loop, differential-tested. *(Next: a one-call convenience that does the
   name↔addr resolution for a named state struct; `memory_diff` values, not just ranges.)*
-- [~] **P5 · Native CLI** — have `run` + `bench`; add `compile` (source → cached cell),
-  `exec` (precompiled), `inspect` (symbols/size/runtime helpers), and a `.cell` artifact
-  (z80 image + entry + symbols + source hash + compiler/ABI version + helper list).
+- [~] **P5 · Native CLI + compiled artifact** — the **compile/instantiate split** landed:
+  `CellProgram::compile(src)` (the parse-dominated cold cost — `cell-bench` shows cold
+  setup is ~90% syn parse, ≈16 µs; bus alloc is amortized-free) is now separate from
+  `Runner::new(&program)`, which instantiates a fresh machine in **~1.2 µs** (no re-parse,
+  ~16× cheaper; vs Wasm's ~3 ms JIT, ~2500×). So a cached `CellProgram` makes re-running a
+  known snippet's cold setup effectively vanish. *Next:* surface it on the CLI —
+  `compile` (source → `.cell`), `exec` (precompiled), `inspect` (symbols/size/helpers) —
+  and persist `CellProgram` as a `.cell` artifact (z80 image + entry + symbols + source
+  hash + compiler/ABI version).
 - [ ] **P6 · MCP server** — `chuk-mcp-cell` over the core: `cell.compile`, `cell.run`,
   `cell.compile_and_run`, `cell.inspect`; then cached-runner sessions
   (`compile → cell_id`, `run_cell(cell_id, args)`) for warm-path agent performance.
