@@ -989,6 +989,48 @@ fn struct_element_arrays() {
 }
 
 #[test]
+fn const_strength_reduction() {
+    // Constant multiply (shift-and-add), divide/remainder by a power of two (shift/mask),
+    // and const-folding — all must match rustc, and the program must compile *without* the
+    // mul/div runtimes (the whole point).
+    fn host() -> u16 {
+        let mut acc = 0u16;
+        let mut n = 1u16;
+        while n < 8 {
+            acc = acc + n * 3; // ×3 via shift-add
+            acc = acc + (n * 7) % 8; // ×7 then mask
+            acc = acc + n * 4 / 2; // ×4 (pow2) then >>1
+            n = n + 1;
+        }
+        acc + (2 * 5 + 4) // const-folded to 14
+    }
+    let src = "
+        fn run() -> u16 {
+            let mut acc = 0u16;
+            let mut n = 1u16;
+            while n < 8u16 {
+                acc = acc + n * 3u16;
+                acc = acc + (n * 7u16) % 8u16;
+                acc = acc + n * 4u16 / 2u16;
+                n = n + 1u16;
+            }
+            acc + (2u16 * 5u16 + 4u16)
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 84 + 28 + 56 + 14 = 182
+                                                   // Strength reduction fired: no `__mul16` / `__divmod16` runtime was appended.
+    assert!(
+        !prog.symbols.contains_key("__mul16"),
+        "constant mul should not call __mul16"
+    );
+    assert!(
+        !prog.symbols.contains_key("__divmod16"),
+        "pow2 div/rem should not call __divmod16"
+    );
+}
+
+#[test]
 fn u16_shifts() {
     // `<<` / `>>` by a constant on a u16 (logical).
     fn host() -> u16 {

@@ -79,7 +79,13 @@ impl Program {
 /// [`ORG`]; calls resolve by name; the mul/div micro-runtime is appended if used.
 pub fn compile_program(src: &str) -> Result<Program, String> {
     let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
-    let funcs = lower_program(&file, &PreludeConfig::default())?;
+    compile_file(&file)
+}
+
+/// Compile an already-parsed file — lets a caller that has parsed the source (e.g. the
+/// cell's capability scan) avoid a second parse.
+pub(crate) fn compile_file(file: &syn::File) -> Result<Program, String> {
+    let funcs = lower_program(file, &PreludeConfig::default())?;
     let (code, symbols) = codegen::codegen_program(&funcs, ORG, None);
     Ok(Program { code, symbols })
 }
