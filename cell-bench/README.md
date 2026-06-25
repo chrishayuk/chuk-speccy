@@ -21,17 +21,19 @@ cargo run --release --manifest-path cell-bench/Cargo.toml
 ```
 runtime            per-call   cold setup    batch(1000)   result-sum
 --------------------------------------------------------------------------
-native Rust        0.001 µs            —       0.759 µs   2722460
-wasmtime           0.013 µs  2997.000 µs      12.695 µs   2722460
-rustz80-cell       2.399 µs   590.834 µs    2398.919 µs   2722460
-python (subp)    408.067 µs 38838.875 µs  408066.916 µs   2722460
+native Rust        0.001 µs            —       0.771 µs   2722460
+wasmtime           0.013 µs  2687.000 µs      12.762 µs   2722460
+cell (report)      1.405 µs   624.292 µs    1405.012 µs   2722460
+cell (fast)        1.026 µs            —      1026.450 µs   2722460
+python (subp)     39.621 µs 36475.000 µs  39620.750 µs   2722460
 ```
-(all four agree on the sum — same computation.)
+(all agree on the sum — same computation. `cell (fast)` is `run_fast`, skipping the
+`Report`; cached re-instantiation `Runner::new` is ~1.1 µs.)
 
 ## How to read it
 
 This is **not** a claim that the cell is fast. Wasm JITs to native and **wins warm
-compute by ~185×** (0.013 µs vs 2.4 µs/call) — exactly as it should. For a real algorithm,
+compute by ~80×** (0.013 µs vs ~1.0 µs/call) — exactly as it should. For a real algorithm,
 use Wasm.
 
 What the cell wins, for the *tiny-snippet* class:

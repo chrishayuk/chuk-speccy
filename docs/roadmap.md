@@ -426,9 +426,16 @@ inspectable, deterministic, for the tiny-snippet class.*
   powers of two — `__mul16` gone for constant multipliers), **`/ 2ⁿ` / `% 2ⁿ`** are
   shift/mask (no `__divmod16`), and **literal-only ops const-fold**. Result: `mul_loop`
   (`×3`) dropped 12.8M → 2.5M T-states (warm 9.9 ms → 1.1 ms, ~8.8×); `entities` warm
-  11.5 → 6.7 µs. Also a **compile double-parse fix** (the cap scan shares the AST) ~halved
-  compile time. Differential-tested + asserts the runtimes aren't appended. *(Next:
-  register-fitting locals out of slots, fast small-range loops.)*
+  11.5 → 6.7 µs. And **`__mul16` is now multiplier-terminated** (early-exit) — a `var*var`
+  with small operands finishes in a few iterations, not a fixed 16, so a mul-using snippet
+  (`x*x + y*y`) roughly **halved** its per-call (cell-bench `run_fast` 1.9 → 1.0 µs).
+  `__divmod16` gained a **`dividend < divisor` fast path** (quotient 0, remainder =
+  dividend — returns at once instead of 16 iterations; common for `% n` of in-range
+  values). Also a **compile double-parse fix** (the cap scan shares the AST) ~halved
+  compile time. Differential-tested (incl. `__mul16` across multiplier widths and
+  `__divmod16` across a<b / a>b / a==b / 0 / wide) + asserts the runtimes aren't appended
+  for constants. *(Next: register-fitting locals out of slots; fast small-range loops —
+  or supersede both in cell mode with host-native intrinsics, see B4.)*
 - [ ] **P9 · Direct-IR cell mode** (later) — let advanced callers feed IR/JSON straight
   to codegen, bypassing the Rust parser (model-generated tools). Rust source stays the
   default — it's human-readable, testable, debuggable.
