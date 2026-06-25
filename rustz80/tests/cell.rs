@@ -2,7 +2,55 @@
 //! feature this file compiles to nothing.
 #![cfg(feature = "cell")]
 
-use rustz80::cell::{self, Runner, DEFAULT_CYCLES};
+use rustz80::cell::{self, Runner, Ty, DEFAULT_CYCLES};
+
+#[test]
+fn captures_all_result_registers() {
+    // A tuple return leaves the values in HL/DE/BC — read them all back.
+    let mut r = Runner::compile("fn run(a: u16, b: u16) -> (u16, u16) { (a / b, a % b) }").unwrap();
+    let rep = r.run(None, &[47, 5], DEFAULT_CYCLES).unwrap();
+    assert_eq!(rep.result, 9); // HL = quotient
+    assert_eq!(rep.regs[0], 9); // HL
+    assert_eq!(rep.regs[1], 2); // DE = remainder
+}
+
+#[test]
+fn typed_state_read_back() {
+    // A program that writes known bytes; read them back typed from post-run memory.
+    let mut r = Runner::compile(
+        "fn run() -> u16 {
+             poke(40000u16, 0x34u8); poke(40001u16, 0x12u8);  // u16 0x1234 @ 40000
+             poke(40002u16, 0x78u8); poke(40003u16, 0x56u8);  // u32 high word
+             0u16
+         }",
+    )
+    .unwrap();
+    r.run(None, &[], DEFAULT_CYCLES).unwrap();
+    assert_eq!(r.peek_u8(40000), 0x34);
+    assert_eq!(r.peek_u16(40000), 0x1234);
+    assert_eq!(r.peek_u32(40000), 0x5678_1234);
+    let vals = r.read_named(&[
+        ("a".into(), 40000, Ty::U16),
+        ("b".into(), 40000, Ty::U32),
+        ("c".into(), 40003, Ty::U8),
+    ]);
+    assert_eq!(
+        vals,
+        vec![
+            ("a".into(), 0x1234u64),
+            ("b".into(), 0x5678_1234u64),
+            ("c".into(), 0x56u64),
+        ]
+    );
+}
+
+#[test]
+fn ty_parse() {
+    assert_eq!(Ty::parse("u8").unwrap(), Ty::U8);
+    assert_eq!(Ty::parse("u16").unwrap(), Ty::U16);
+    assert_eq!(Ty::parse("u32").unwrap(), Ty::U32);
+    assert!(Ty::parse("u9").is_err());
+}
 
 #[test]
 fn runner_reuse_is_deterministic() {
@@ -150,4 +198,43 @@ fn run_cli_end_to_end() {
     assert!(cell::run_cli(&["wat".into()]).is_err());
     assert!(cell::run_cli(&["run".into(), p, "--bogus".into()]).is_err());
     assert!(cell::run_cli(&["run".into(), "/no/such/file.rs".into()]).is_err());
+}
+
+#[test]
+fn run_cli_typed_read() {
+    let dir = std::env::temp_dir().join("rustz80_cell_read_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("state.rs");
+    std::fs::write(
+        &path,
+        "fn run() -> u16 { poke(40000u16, 42u8); poke(40001u16, 7u8); 0u16 }",
+    )
+    .unwrap();
+    let p = path.to_str().unwrap().to_string();
+
+    let out = cell::run_cli(&[
+        "run".into(),
+        p.clone(),
+        "--read".into(),
+        "score@40000:u8,lives@0x9c41:u8".into(), // 0x9c41 = 40001 (hex addr)
+        "--json".into(),
+    ])
+    .unwrap();
+    assert!(
+        out.contains("\"reads\":{\"score\":42,\"lives\":7}"),
+        "got: {out}"
+    );
+
+    let human = cell::run_cli(&[
+        "run".into(),
+        p.clone(),
+        "--read".into(),
+        "score@40000:u8".into(),
+    ])
+    .unwrap();
+    assert!(human.contains("reads      score=42"), "got: {human}");
+
+    // bad specs
+    assert!(cell::run_cli(&["run".into(), p.clone(), "--read".into(), "noaddr".into()]).is_err());
+    assert!(cell::run_cli(&["run".into(), p, "--read".into(), "x@40000:u9".into()]).is_err());
 }

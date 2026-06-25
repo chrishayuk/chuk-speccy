@@ -343,10 +343,16 @@ bounded Z80 out → deterministic execution → typed symbols/state out.*
 - [x] **Cycle/byte budgets as first-class output** — `cycles` (from the `tick` clock)
   and `code_bytes`/`functions` (from `Program::size_report`) are in every `Report`, so
   an agent sees the cost of what it wrote.
-- [x] **Reads back the symbol map** — the `Report` carries the full name → address
-  layout (incl. monomorphic instances + the runtime), and `memory_touched` shows which
-  regions the run wrote. *(Next: decode named **state fields** by type via the B2/E
-  symbol map — read `score`/`Entities.len` after a run, not just `HL`.)*
+- [x] **Reads back results + typed state** — the `Report` carries the symbol map (name →
+  address, incl. instances + runtime), `memory_touched`, **all three result registers**
+  (`regs` = `[HL, DE, BC]`, so a tuple return reads back fully), and — since the bus
+  stays live after a run — **typed named state** decoded from memory: `Runner::peek_u8/
+  u16/u32` and `read_named(&[(name, addr, Ty)])`, surfaced on the CLI as
+  `--read name@addr:ty,...`. The `(name, addr, ty)` layout is the caller's, so it composes
+  with the B2/E state-struct symbol map (`score@0xb000:u16` → `score=4`). This closes the
+  agent loop: write code → run the cell → read typed output/state → iterate. *(Next: a
+  convenience that derives the read layout straight from a state struct's emitted
+  `.sym` map, so fields are named automatically.)*
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:

@@ -12,8 +12,8 @@ use crate::{compile_program, Program, ORG};
 use std::collections::HashMap;
 
 /// CLI usage line, shared by the `rustz80-cell` binary.
-pub const USAGE: &str =
-    "usage: rustz80-cell run <file.rs> [--entry NAME] [--cycles N] [--args a,b,c] [--json]";
+pub const USAGE: &str = "usage: rustz80-cell run <file.rs> [--entry NAME] [--cycles N] \
+     [--args a,b,c] [--read name@addr:ty,...] [--json]";
 
 const TRAMPOLINE: u16 = 0x7000;
 const SP_TOP: u16 = 0xFFF0;
@@ -140,13 +140,17 @@ impl Runner {
         while !cpu.halted && bus.cycles < budget {
             cpu.step(&mut bus);
         }
-        let (cycles, returned, result) = (bus.cycles, cpu.halted, cpu.regs.hl());
+        let (cycles, returned) = (bus.cycles, cpu.halted);
+        // The calling convention leaves results in HL/DE/BC (a `-> (u16, u16, u16)`
+        // tuple uses all three); `result` is the primary `HL`.
+        let regs = [cpu.regs.hl(), cpu.regs.de(), cpu.regs.bc()];
 
         self.touched.sort_unstable();
         Ok(Report {
             entry,
             entry_addr,
-            result,
+            result: regs[0],
+            regs,
             cycles,
             budget,
             returned,
@@ -154,7 +158,61 @@ impl Runner {
             fn_count: self.prog.size_report().len(),
             symbols: sorted_symbols(&self.prog.symbols),
             touched: coalesce(&self.touched),
+            reads: Vec::new(),
         })
+    }
+
+    /// Read a byte from the cell's memory *after a run* (the bus stays live until the
+    /// next [`run`](Runner::run) resets it).
+    pub fn peek_u8(&self, addr: u16) -> u8 {
+        self.mem[addr as usize]
+    }
+    /// Read a little-endian `u16` (one slot).
+    pub fn peek_u16(&self, addr: u16) -> u16 {
+        u16::from_le_bytes([
+            self.mem[addr as usize],
+            self.mem[addr.wrapping_add(1) as usize],
+        ])
+    }
+    /// Read a `u32` (two slots: low word at `addr`, high word at `addr + 2`).
+    pub fn peek_u32(&self, addr: u16) -> u32 {
+        self.peek_u16(addr) as u32 | (self.peek_u16(addr.wrapping_add(2)) as u32) << 16
+    }
+    /// Decode named, typed values from post-run memory — the typed state read-back. The
+    /// `(name, addr, ty)` layout is the caller's (e.g. from a state-struct symbol map);
+    /// this turns it into `(name, value)` pairs read off the live bus.
+    pub fn read_named(&self, fields: &[(String, u16, Ty)]) -> Vec<(String, u64)> {
+        fields
+            .iter()
+            .map(|(name, addr, ty)| {
+                let v = match ty {
+                    Ty::U8 => self.peek_u8(*addr) as u64,
+                    Ty::U16 => self.peek_u16(*addr) as u64,
+                    Ty::U32 => self.peek_u32(*addr) as u64,
+                };
+                (name.clone(), v)
+            })
+            .collect()
+    }
+}
+
+/// A scalar width for typed memory read-back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ty {
+    U8,
+    U16,
+    U32,
+}
+
+impl Ty {
+    /// Parse `u8`/`u16`/`u32`.
+    pub fn parse(s: &str) -> Result<Ty, String> {
+        match s {
+            "u8" => Ok(Ty::U8),
+            "u16" => Ok(Ty::U16),
+            "u32" => Ok(Ty::U32),
+            other => Err(format!("unknown type `{other}` (want u8/u16/u32)")),
+        }
     }
 }
 
@@ -170,8 +228,14 @@ pub struct Report {
     /// The entry function that was run, and its address.
     pub entry: String,
     pub entry_addr: u16,
-    /// The result in `HL` (a u16; tuple returns also leave `DE`/`BC`, not captured here).
+    /// The primary result in `HL`.
     pub result: u16,
+    /// All three result registers `[HL, DE, BC]` — a `-> (u16, u16, u16)` tuple return
+    /// fills all three (`result` is `regs[0]`).
+    pub regs: [u16; 3],
+    /// Named typed values decoded from post-run memory (empty unless requested via
+    /// [`Runner::read_named`] / the CLI `--read`).
+    pub reads: Vec<(String, u64)>,
     /// T-states elapsed, and the budget it ran under.
     pub cycles: u64,
     pub budget: u64,
@@ -210,18 +274,28 @@ impl Report {
         } else {
             mem.join(", ")
         };
+        let reads = if self.reads.is_empty() {
+            String::new()
+        } else {
+            let r: Vec<String> = self.reads.iter().map(|(n, v)| format!("{n}={v}")).collect();
+            format!("\nreads      {}", r.join(", "))
+        };
         format!(
             "entry      {} @ {:#06x}\n\
              result     {} ({:#06x})\n\
+             regs       HL={} DE={} BC={}\n\
              cycles     {} / {} T-states\n\
              halt       {halt}\n\
              code       {} bytes, {} functions\n\
              symbols    {}\n\
-             memory     {mem}",
+             memory     {mem}{reads}",
             self.entry,
             self.entry_addr,
             self.result,
             self.result,
+            self.regs[0],
+            self.regs[1],
+            self.regs[2],
             self.cycles,
             self.budget,
             self.code_bytes,
@@ -242,19 +316,33 @@ impl Report {
             .iter()
             .map(|(s, e)| format!("[{s},{e}]"))
             .collect();
+        let reads: Vec<String> = self
+            .reads
+            .iter()
+            .map(|(n, v)| format!("\"{n}\":{v}"))
+            .collect();
         format!(
-            "{{\"entry\":\"{}\",\"entry_addr\":{},\"result\":{},\"cycles\":{},\"budget\":{},\
-             \"halt\":\"{}\",\"code_bytes\":{},\"functions\":{},\"symbols\":{{{}}},\"memory_touched\":[{}]}}",
+            "{{\"entry\":\"{}\",\"entry_addr\":{},\"result\":{},\"regs\":[{},{},{}],\"cycles\":{},\
+             \"budget\":{},\"halt\":\"{}\",\"code_bytes\":{},\"functions\":{},\"symbols\":{{{}}},\
+             \"memory_touched\":[{}],\"reads\":{{{}}}}}",
             self.entry,
             self.entry_addr,
             self.result,
+            self.regs[0],
+            self.regs[1],
+            self.regs[2],
             self.cycles,
             self.budget,
-            if self.returned { "returned" } else { "budget_exceeded" },
+            if self.returned {
+                "returned"
+            } else {
+                "budget_exceeded"
+            },
             self.code_bytes,
             self.fn_count,
             syms.join(","),
             mem.join(","),
+            reads.join(","),
         )
     }
 }
@@ -292,6 +380,25 @@ pub fn parse_args(s: &str) -> Result<Vec<u16>, String> {
         .collect()
 }
 
+/// Parse a `--read` spec — comma-separated `name@addr:ty` (addr decimal or `0x..`).
+fn parse_reads(s: &str) -> Result<Vec<(String, u16, Ty)>, String> {
+    s.split(',')
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| {
+            let t = t.trim();
+            let bad = || format!("bad --read `{t}` (want name@addr:ty)");
+            let (name, rest) = t.split_once('@').ok_or_else(bad)?;
+            let (addr_s, ty_s) = rest.split_once(':').ok_or_else(bad)?;
+            let addr = match addr_s.strip_prefix("0x") {
+                Some(h) => u16::from_str_radix(h, 16),
+                None => addr_s.parse::<u16>(),
+            }
+            .map_err(|_| format!("bad address in `{t}`"))?;
+            Ok((name.to_string(), addr, Ty::parse(ty_s)?))
+        })
+        .collect()
+}
+
 /// Parse `run <file> [opts]` argv, run the cell, and return the formatted output
 /// (JSON if `--json`, else the human summary). The `rustz80-cell` binary is a shim
 /// over this.
@@ -306,6 +413,7 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     let mut entry: Option<String> = None;
     let mut cycles = DEFAULT_CYCLES;
     let mut call_args: Vec<u16> = Vec::new();
+    let mut reads: Vec<(String, u16, Ty)> = Vec::new();
     let mut json = false;
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -318,12 +426,17 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
                     .map_err(|_| "bad --cycles (want a positive integer)")?
             }
             "--args" => call_args = parse_args(it.next().ok_or("--args needs values")?)?,
+            "--read" => reads = parse_reads(it.next().ok_or("--read needs a spec")?)?,
             "--json" => json = true,
             other => return Err(format!("unknown option `{other}`\n{USAGE}")),
         }
     }
     let src = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
-    let report = run(&src, entry.as_deref(), &call_args, cycles)?;
+    let mut runner = Runner::compile(&src)?;
+    let mut report = runner.run(entry.as_deref(), &call_args, cycles)?;
+    if !reads.is_empty() {
+        report.reads = runner.read_named(&reads); // decode typed fields from post-run memory
+    }
     Ok(if json {
         report.to_json()
     } else {
