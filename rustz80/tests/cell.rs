@@ -45,6 +45,55 @@ fn typed_state_read_back() {
 }
 
 #[test]
+fn struct_layout_offsets() {
+    let src = "struct State { x: u16, y: u16, arr: [u16; 4], score: u16 }";
+    let l = rustz80::struct_layout(src, "State").unwrap();
+    assert_eq!(
+        l[0],
+        rustz80::FieldLayout {
+            name: "x".into(),
+            offset: 0,
+            slots: 1
+        }
+    );
+    assert_eq!(l[1].offset, 1); // y
+    assert_eq!((l[2].offset, l[2].slots), (2, 4)); // arr — 4 slots
+    assert_eq!(l[3].offset, 6); // score, after the array
+    assert!(rustz80::struct_layout(src, "Nope").is_err());
+}
+
+#[test]
+fn typed_io_named_loop() {
+    // The full agent loop by NAME: resolve field addresses from the layout, set typed
+    // inputs, run, read typed outputs — the caller never touches raw addresses directly.
+    let src = "struct State { x: u16, y: u16, score: u16 }
+               impl State { fn run(&mut self) -> u16 { self.score = self.x + self.y * 10u16; self.score } }";
+    const BASE: u16 = 0xB000;
+    let layout = rustz80::struct_layout(src, "State").unwrap();
+    let addr = |f: &str| BASE + layout.iter().find(|l| l.name == f).unwrap().offset * 2;
+
+    let mut r = Runner::compile(src).unwrap();
+    let inputs = vec![(addr("x"), Ty::U16, 3u64), (addr("y"), Ty::U16, 4u64)];
+    let rep = r
+        .run_with_inputs(Some("State::run"), &[BASE], &inputs, DEFAULT_CYCLES)
+        .unwrap();
+    assert_eq!(rep.result, 43); // 3 + 4*10
+    let out = r.read_named(&[("score".into(), addr("score"), Ty::U16)]);
+    assert_eq!(out, vec![("score".into(), 43u64)]);
+
+    // Different inputs, same compiled cell (warm) — no leakage from the prior run.
+    let rep2 = r
+        .run_with_inputs(
+            Some("State::run"),
+            &[BASE],
+            &[(addr("x"), Ty::U16, 100), (addr("y"), Ty::U16, 0)],
+            DEFAULT_CYCLES,
+        )
+        .unwrap();
+    assert_eq!(rep2.result, 100);
+}
+
+#[test]
 fn ty_parse() {
     assert_eq!(Ty::parse("u8").unwrap(), Ty::U8);
     assert_eq!(Ty::parse("u16").unwrap(), Ty::U16);
@@ -237,4 +286,41 @@ fn run_cli_typed_read() {
     // bad specs
     assert!(cell::run_cli(&["run".into(), p.clone(), "--read".into(), "noaddr".into()]).is_err());
     assert!(cell::run_cli(&["run".into(), p, "--read".into(), "x@40000:u9".into()]).is_err());
+}
+
+#[test]
+fn run_cli_typed_set() {
+    let dir = std::env::temp_dir().join("rustz80_cell_set_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("state.rs");
+    std::fs::write(
+        &path,
+        "struct State { x: u16, y: u16, score: u16 }
+         impl State { fn run(&mut self) -> u16 { self.score = self.x + self.y; self.score } }",
+    )
+    .unwrap();
+    let p = path.to_str().unwrap().to_string();
+
+    let out = cell::run_cli(&[
+        "run".into(),
+        p.clone(),
+        "--entry".into(),
+        "State::run".into(),
+        "--args".into(),
+        "0xB000".into(),
+        "--set".into(),
+        "0xB000:u16=20,0xB002:u16=22".into(),
+        "--read".into(),
+        "score@0xB004:u16".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+    assert!(
+        out.contains("\"result\":42") && out.contains("\"score\":42"),
+        "got: {out}"
+    );
+
+    // bad --set specs
+    assert!(cell::run_cli(&["run".into(), p.clone(), "--set".into(), "noeq".into()]).is_err());
+    assert!(cell::run_cli(&["run".into(), p, "--set".into(), "0xB000:u9=1".into()]).is_err());
 }

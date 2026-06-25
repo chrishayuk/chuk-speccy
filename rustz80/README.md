@@ -173,19 +173,26 @@ trivial cell warm-runs in **~0.3 µs**, realistic snippets (`rng32`, `entities`)
 **hundreds of × real-hardware speed**. Reuse cut the small-cell run cost ~60× vs a cold
 one-shot (which was dominated by the 64 KiB bus allocation, not CPU work).
 
-**Reading results + state back.** The `Report` carries all three result registers
-(`regs` = `[HL, DE, BC]`, so a `-> (u16, u16, u16)` tuple return reads back fully), and
-the bus stays live after a run so you can decode **typed named state** from memory —
-`Runner::peek_u8/u16/u32`, or `read_named(&[(name, addr, ty)])` (the layout is the
-caller's, e.g. from a state-struct symbol map). On the CLI, `--read name@addr:ty,...`:
+**Typed inputs + results + state.** A cell takes typed **inputs** (`run_with_inputs`, or
+CLI `--set addr:ty=val`), returns all three result registers (`regs` = `[HL, DE, BC]`, so
+a `-> (u16, u16, u16)` tuple reads back fully), and — because the bus stays live after a
+run — exposes typed **state** read-back (`peek_u8/u16/u32`, `read_named`, CLI
+`--read name@addr:ty`). `rustz80::struct_layout(src, "State")` gives each field's slot
+offset, so a caller works in **field names, not raw addresses** — place a `State` struct
+at a known base, set its fields, run a method on it, read its fields:
 
+```rust
+struct State { x: u16, y: u16, score: u16 }
+impl State { fn run(&mut self) -> u16 { self.score = self.x + self.y * 10u16; self.score } }
+```
 ```bash
-rustz80-cell run game.rs --read 'score@0xb000:u16,lives@0xb002:u8' --json
-# … "regs":[…],"reads":{"score":4,"lives":3}
+rustz80-cell run state.rs --entry State::run --args 0xb000 \
+    --set '0xb000:u16=3,0xb002:u16=4' --read 'score@0xb004:u16' --json
+# … "result":43,"reads":{"score":43}
 ```
 
-That closes the agent loop: **write code → run the cell → read typed output/state →
-iterate** — no Python/Docker/Wasm weight.
+That closes the agent loop: **set typed inputs → run the cell → read typed output/state →
+iterate** — source-shaped state, no Python/Docker/Wasm weight.
 
 ## The dial: one `impl Game`, two compilers
 

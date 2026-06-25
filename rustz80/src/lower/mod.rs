@@ -14,7 +14,7 @@
 
 mod expr;
 mod generics;
-mod layout;
+pub(crate) mod layout;
 mod prelude;
 mod stmt;
 mod vars;

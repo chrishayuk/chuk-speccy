@@ -376,11 +376,13 @@ memory), lighter than a container, constrained enough that models generate it re
   cycles + halt only) vs `run_report` (＋symbols/touched) vs `run_trace` (per-instruction
   + writes + optional disasm). The 10 000×-candidate inner loop must not pay for debug.
 - [x] **P3 · Full register capture** — `regs = [HL, DE, BC]`; tuple returns read back.
-- [~] **P4 · Typed I/O** — typed *read-back* done (`read_named`/`--read`). *Next:* typed
-  *inputs* — write named values into an `Input` region before the run (not just
-  `HL`/`DE`/`BC` args); and a convenience that derives the layout from a state struct's
-  `.sym` map so fields are named automatically. Plus `memory_diff` *values*, not just
-  ranges.
+- [x] **P4 · Typed I/O** — typed *read-back* (`read_named`/`--read`) **and typed inputs**
+  (`Runner::run_with_inputs`, CLI `--set addr:ty=val`, written after the reset + cleaned
+  next run). `rustz80::struct_layout(src, name)` exposes each field's slot offset (the ABI
+  primitive), so a caller resolves **field names → addresses** (`base + offset*2`): place a
+  `State` struct at a base, set its fields, run `State::run(&mut self)`, read its fields —
+  the full named loop, differential-tested. *(Next: a one-call convenience that does the
+  name↔addr resolution for a named state struct; `memory_diff` values, not just ranges.)*
 - [~] **P5 · Native CLI** — have `run` + `bench`; add `compile` (source → cached cell),
   `exec` (precompiled), `inspect` (symbols/size/runtime helpers), and a `.cell` artifact
   (z80 image + entry + symbols + source hash + compiler/ABI version + helper list).
