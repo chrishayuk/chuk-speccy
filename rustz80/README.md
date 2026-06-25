@@ -173,6 +173,20 @@ trivial cell warm-runs in **~0.3 µs**, realistic snippets (`rng32`, `entities`)
 **hundreds of × real-hardware speed**. Reuse cut the small-cell run cost ~60× vs a cold
 one-shot (which was dominated by the 64 KiB bus allocation, not CPU work).
 
+**Reading results + state back.** The `Report` carries all three result registers
+(`regs` = `[HL, DE, BC]`, so a `-> (u16, u16, u16)` tuple return reads back fully), and
+the bus stays live after a run so you can decode **typed named state** from memory —
+`Runner::peek_u8/u16/u32`, or `read_named(&[(name, addr, ty)])` (the layout is the
+caller's, e.g. from a state-struct symbol map). On the CLI, `--read name@addr:ty,...`:
+
+```bash
+rustz80-cell run game.rs --read 'score@0xb000:u16,lives@0xb002:u8' --json
+# … "regs":[…],"reads":{"score":4,"lives":3}
+```
+
+That closes the agent loop: **write code → run the cell → read typed output/state →
+iterate** — no Python/Docker/Wasm weight.
+
 ## The dial: one `impl Game`, two compilers
 
 The headline. Write an ordinary [`speccy-sdk`](../speccy-sdk/README.md) `Game` and the
