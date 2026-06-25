@@ -34,6 +34,7 @@ pub const ORG: u16 = 0x8000;
 
 /// A compiled program: the machine code (loaded at [`ORG`]) and the absolute
 /// address of each function by name.
+#[derive(Clone)]
 pub struct Program {
     pub code: Vec<u8>,
     pub symbols: HashMap<String, u16>,

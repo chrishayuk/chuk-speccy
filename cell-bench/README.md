@@ -49,3 +49,19 @@ What the cell wins, for the *tiny-snippet* class:
 At ~2.4 µs/call the cell runs **hundreds of thousands of evaluations per second** — well
 within "call it in an agent loop." The pitch isn't a Wasm replacement; it's a *smaller,
 more inspectable, deterministic sandbox for tiny agent-generated programs.*
+
+## Cold setup, broken down
+
+The harness also prints where the cell's cold setup goes (the ~0.59 ms table figure is a
+single cold-process sample — first page faults + cold caches; amortized it's far less):
+
+```
+CellProgram::compile        19.168 µs   (syn parse 16.727 µs + lower/codegen)
+Runner::new (cached prog)    1.219 µs   ← caching a known snippet skips parse+compile
+```
+
+So cold setup is **~90% syn parsing** — the bus allocation is amortized-free. The lever
+isn't a faster parser; it's *not re-parsing*: compile to a cacheable `CellProgram` once,
+then `Runner::new` instantiates a fresh machine in **~1.2 µs** (~16× cheaper). For an agent
+that re-runs known snippets, cold setup effectively disappears — and vs Wasm's ~3 ms JIT
+that's ~2500× cheaper.

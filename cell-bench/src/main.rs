@@ -72,6 +72,43 @@ fn us(secs: f64) -> String {
     format!("{:.3}", secs * 1e6)
 }
 
+/// Time a single op in ~100 ms windows; return seconds per call.
+fn time_op(mut f: impl FnMut()) -> f64 {
+    f();
+    let mut n = 0u64;
+    let t = Instant::now();
+    while t.elapsed().as_secs_f64() < 0.1 {
+        f();
+        n += 1;
+    }
+    t.elapsed().as_secs_f64() / n as f64
+}
+
+/// Where the cell's cold setup goes — and that caching the compiled program removes it.
+fn cold_breakdown() {
+    use rustz80::cell::{CellProgram, Runner};
+    let parse = time_op(|| {
+        let _f: syn::File = black_box(syn::parse_str(CELL_SRC).unwrap());
+    });
+    let compile = time_op(|| {
+        black_box(CellProgram::compile(CELL_SRC).unwrap());
+    });
+    let cached = CellProgram::compile(CELL_SRC).unwrap();
+    let instantiate = time_op(|| {
+        black_box(Runner::new(black_box(&cached)));
+    });
+    println!("\ncold-setup breakdown (warm-allocator, amortized):");
+    println!(
+        "  CellProgram::compile        {} µs   (syn parse {} µs + lower/codegen)",
+        us(compile),
+        us(parse)
+    );
+    println!(
+        "  Runner::new (cached prog)   {} µs   ← caching a known snippet skips parse+compile",
+        us(instantiate)
+    );
+}
+
 fn main() {
     println!("cell-bench — score(x,y) = x*x + y*y + x*3, over N={N} candidates\n");
 
@@ -169,8 +206,9 @@ fn main() {
     println!(
         "code size: rustz80-cell {cell_bytes} B Z80 vs wasmtime {wasm_bytes} B compiled module."
     );
+    cold_breakdown();
     println!(
-        "python per-call is amortized over the batch (one interpreter startup ≈ its cold column);\n\
+        "\npython per-call is amortized over the batch (one interpreter startup ≈ its cold column);\n\
          a fresh subprocess *per* candidate would pay that startup 1000×.\n\
          the cell's edge isn't speed — it's a tiny, deterministic, inspectable sandbox\n\
          (64K, no WASI/imports, cycle-bounded, typed state read-back)."

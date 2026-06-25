@@ -153,6 +153,46 @@ impl z80::Bus for CellBus<'_> {
     }
 }
 
+/// A **compiled** cell: the result of parse + lower + codegen under a policy. Cheap to
+/// clone and cache (e.g. by source hash) — re-running a known snippet then skips the
+/// (syn-parse-dominated, ~16 µs) compile. Turn one into a runnable machine with
+/// [`Runner::new`].
+#[derive(Clone)]
+pub struct CellProgram {
+    prog: Program,
+    cfg: CellConfig,
+}
+
+impl CellProgram {
+    /// Compile `src` with the **permissive** policy (raw memory + ports allowed, no
+    /// ceilings) — for trusted/game code.
+    pub fn compile(src: &str) -> Result<Self, String> {
+        Self::compile_with_config(src, CellConfig::permissive())
+    }
+
+    /// Compile `src` under `cfg`: enforce its capability gates (`poke`/`peek`/`inport`)
+    /// and `max_code_bytes`. Parses once (shared by the cap scan and the compile).
+    pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
+        let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+        check_caps(&file, &cfg)?;
+        let prog = crate::compile_file(&file)?;
+        if let Some(max) = cfg.max_code_bytes {
+            if prog.code.len() > max {
+                return Err(format!(
+                    "code is {} bytes, over the {max}-byte limit",
+                    prog.code.len()
+                ));
+            }
+        }
+        Ok(CellProgram { prog, cfg })
+    }
+
+    /// The underlying program (symbol map, code).
+    pub fn program(&self) -> &Program {
+        &self.prog
+    }
+}
+
 /// A compiled cell, runnable many times. One 64 KiB bus is allocated up front and the
 /// code loaded once; each [`run`](Runner::run) resets only the previous run's writes,
 /// re-lays the argument trampoline, and steps — so reuse pays for the computation, not a
@@ -166,38 +206,31 @@ pub struct Runner {
 }
 
 impl Runner {
-    /// Compile `src` with the **permissive** policy (raw memory + ports allowed, no
-    /// ceilings) — back-compat for trusted/game code. Untrusted cells should use
-    /// [`compile_with_config`](Runner::compile_with_config) (e.g. [`CellConfig::sandboxed`]).
-    pub fn compile(src: &str) -> Result<Self, String> {
-        Self::compile_with_config(src, CellConfig::permissive())
-    }
-
-    /// Compile `src` under `cfg`: enforce its capability gates (`poke`/`peek`/`inport`)
-    /// and `max_code_bytes`, then allocate the reusable machine and load the code once.
-    pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
-        // Parse once — shared by the capability scan and the compile.
-        let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
-        check_caps(&file, &cfg)?;
-        let prog = crate::compile_file(&file)?;
-        if let Some(max) = cfg.max_code_bytes {
-            if prog.code.len() > max {
-                return Err(format!(
-                    "code is {} bytes, over the {max}-byte limit",
-                    prog.code.len()
-                ));
-            }
-        }
+    /// Instantiate a runnable machine from an already-[`compile`](CellProgram::compile)d
+    /// program — **cheap**: allocate the bus and load the code, *no parse/compile*. The
+    /// way to skip cold setup for a cached snippet (compile once → `Runner::new` many).
+    pub fn new(program: &CellProgram) -> Self {
         let mut mem = vec![0u8; 0x1_0000];
         let org = ORG as usize;
-        mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
-        Ok(Runner {
-            prog,
-            cfg,
+        mem[org..org + program.prog.code.len()].copy_from_slice(&program.prog.code);
+        Runner {
+            prog: program.prog.clone(),
+            cfg: program.cfg.clone(),
             mem,
             seen: vec![false; 0x1_0000],
             touched: Vec::new(),
-        })
+        }
+    }
+
+    /// Compile `src` (permissive) and instantiate — back-compat for trusted/game code.
+    /// Untrusted cells should use [`compile_with_config`](Runner::compile_with_config).
+    pub fn compile(src: &str) -> Result<Self, String> {
+        Ok(Self::new(&CellProgram::compile(src)?))
+    }
+
+    /// Compile `src` under `cfg` and instantiate.
+    pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
+        Ok(Self::new(&CellProgram::compile_with_config(src, cfg)?))
     }
 
     /// The compiled program (symbol map, code).
