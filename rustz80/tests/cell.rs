@@ -261,9 +261,11 @@ fn run_cli_typed_read() {
     .unwrap();
     let p = path.to_str().unwrap().to_string();
 
+    // This cell uses `poke`, so it needs --allow-raw-memory (sandboxed by default).
     let out = cell::run_cli(&[
         "run".into(),
         p.clone(),
+        "--allow-raw-memory".into(),
         "--read".into(),
         "score@40000:u8,lives@0x9c41:u8".into(), // 0x9c41 = 40001 (hex addr)
         "--json".into(),
@@ -277,6 +279,7 @@ fn run_cli_typed_read() {
     let human = cell::run_cli(&[
         "run".into(),
         p.clone(),
+        "--allow-raw-memory".into(),
         "--read".into(),
         "score@40000:u8".into(),
     ])
@@ -284,8 +287,109 @@ fn run_cli_typed_read() {
     assert!(human.contains("reads      score=42"), "got: {human}");
 
     // bad specs
-    assert!(cell::run_cli(&["run".into(), p.clone(), "--read".into(), "noaddr".into()]).is_err());
-    assert!(cell::run_cli(&["run".into(), p, "--read".into(), "x@40000:u9".into()]).is_err());
+    assert!(cell::run_cli(&[
+        "run".into(),
+        p.clone(),
+        "--allow-raw-memory".into(),
+        "--read".into(),
+        "noaddr".into()
+    ])
+    .is_err());
+    assert!(cell::run_cli(&[
+        "run".into(),
+        p,
+        "--allow-raw-memory".into(),
+        "--read".into(),
+        "x@40000:u9".into()
+    ])
+    .is_err());
+}
+
+#[test]
+fn capabilities_gate_raw_memory_and_ports() {
+    use rustz80::cell::CellConfig;
+    // `poke`/`peek` need raw memory; `inport` needs ports — denied by default.
+    let pokes = "fn run() -> u16 { poke(40000u16, 1u8); peek(40000u16) as u16 }";
+    let ports = "fn run() -> u16 { inport(0xFEu16) as u16 }";
+    assert!(Runner::compile_with_config(pokes, CellConfig::sandboxed()).is_err());
+    assert!(Runner::compile_with_config(ports, CellConfig::sandboxed()).is_err());
+    // Explicitly allowed → compiles.
+    assert!(Runner::compile_with_config(pokes, CellConfig::permissive()).is_ok());
+    let mut cfg = CellConfig::sandboxed();
+    cfg.allow_ports = true;
+    assert!(Runner::compile_with_config(ports, cfg).is_ok());
+    // A pure-compute cell needs no capabilities — fine sandboxed.
+    assert!(Runner::compile_with_config(
+        "fn run(a: u16) -> u16 { a * 2u16 }",
+        CellConfig::sandboxed()
+    )
+    .is_ok());
+}
+
+#[test]
+fn safety_config_defaults_and_cli_flags() {
+    use rustz80::cell::{CellConfig, Halt};
+    // default() is the sandboxed policy.
+    let d = CellConfig::default();
+    assert!(!d.allow_raw_memory && !d.allow_ports && d.max_code_bytes.is_some());
+
+    // A memory-limit run formats in both modes.
+    let mut cfg = CellConfig::sandboxed();
+    cfg.max_touched = Some(2);
+    let mut r = Runner::compile_with_config(
+        "fn run() -> u16 { let mut a = [0u16; 32]; let mut i = 0u16;
+             while i < 32u16 { a[i as usize] = i; i = i + 1u16; } a[0] }",
+        cfg,
+    )
+    .unwrap();
+    let rep = r.run(None, &[], DEFAULT_CYCLES).unwrap();
+    assert_eq!(rep.halt, Halt::MemoryLimit);
+    assert!(rep.to_human().contains("MEMORY LIMIT"));
+    assert!(rep.to_json().contains("\"halt\":\"memory_limit\""));
+
+    // CLI safety flags parse + apply.
+    let dir = std::env::temp_dir().join("rustz80_cell_safety_cli");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("ok.rs");
+    std::fs::write(&path, "fn run(a: u16) -> u16 { a + 1u16 }").unwrap();
+    let p = path.to_str().unwrap().to_string();
+    let out = cell::run_cli(&[
+        "run".into(),
+        p.clone(),
+        "--max-code-bytes".into(),
+        "8192".into(),
+        "--max-touched".into(),
+        "8192".into(),
+        "--allow-ports".into(),
+        "--args".into(),
+        "41".into(),
+    ])
+    .unwrap();
+    assert!(out.contains("result     42"), "got: {out}");
+    // A too-tight code-size limit rejects.
+    assert!(cell::run_cli(&["run".into(), p, "--max-code-bytes".into(), "2".into()]).is_err());
+}
+
+#[test]
+fn limits_code_size_and_memory() {
+    use rustz80::cell::{CellConfig, Halt};
+    // A tiny code-size ceiling rejects at compile.
+    let mut cfg = CellConfig::sandboxed();
+    cfg.max_code_bytes = Some(4);
+    assert!(Runner::compile_with_config("fn run() -> u16 { let mut s = 0u16; let mut i = 0u16; while i < 100u16 { s = s + i; i = i + 1u16; } s }", cfg).is_err());
+
+    // A memory-touched ceiling aborts the run with Halt::MemoryLimit.
+    let mut cfg = CellConfig::sandboxed();
+    cfg.max_touched = Some(4);
+    let mut r = Runner::compile_with_config(
+        "fn run() -> u16 { let mut a = [0u16; 64]; let mut i = 0u16;
+             while i < 64u16 { a[i as usize] = i; i = i + 1u16; } a[0] }",
+        cfg,
+    )
+    .unwrap();
+    let rep = r.run(None, &[], DEFAULT_CYCLES).unwrap();
+    assert_eq!(rep.halt, Halt::MemoryLimit);
+    assert!(!rep.returned);
 }
 
 #[test]

@@ -13,12 +13,115 @@ use std::collections::HashMap;
 
 /// CLI usage line, shared by the `rustz80-cell` binary.
 pub const USAGE: &str = "usage: rustz80-cell run <file.rs> [--entry NAME] [--cycles N] \
-     [--args a,b,c] [--set addr:ty=val,...] [--read name@addr:ty,...] [--json]";
+     [--args a,b,c] [--set addr:ty=val,...] [--read name@addr:ty,...] [--json]\n  \
+     safety (sandboxed by default): [--allow-raw-memory] [--allow-ports] \
+     [--max-code-bytes N] [--max-touched N]";
 
 const TRAMPOLINE: u16 = 0x7000;
 const SP_TOP: u16 = 0xFFF0;
 /// A generous default T-state budget (well past any bounded computation).
 pub const DEFAULT_CYCLES: u64 = 2_000_000;
+
+/// Safety policy for a cell. Games need raw memory; general agent cells usually do not —
+/// so the intrinsics are **capability-gated, off by default** ([`CellConfig::sandboxed`]),
+/// and resource ceilings are explicit. The cycle budget (passed to [`Runner::run`]) is the
+/// deterministic liveness guard; these are the rest.
+#[derive(Debug, Clone)]
+pub struct CellConfig {
+    /// Allow `poke`/`peek` (raw memory access).
+    pub allow_raw_memory: bool,
+    /// Allow `inport` (I/O ports).
+    pub allow_ports: bool,
+    /// Reject if the compiled code exceeds this many bytes.
+    pub max_code_bytes: Option<usize>,
+    /// Abort the run if it writes more than this many distinct addresses.
+    pub max_touched: Option<usize>,
+}
+
+impl CellConfig {
+    /// Deny raw memory + ports, with tight ceilings — the default for untrusted cells.
+    pub fn sandboxed() -> Self {
+        CellConfig {
+            allow_raw_memory: false,
+            allow_ports: false,
+            max_code_bytes: Some(4096),
+            max_touched: Some(4096),
+        }
+    }
+    /// Allow everything, no ceilings — for trusted/game code (matches the pre-policy
+    /// behaviour).
+    pub fn permissive() -> Self {
+        CellConfig {
+            allow_raw_memory: true,
+            allow_ports: true,
+            max_code_bytes: None,
+            max_touched: None,
+        }
+    }
+}
+
+impl Default for CellConfig {
+    /// Safe by default.
+    fn default() -> Self {
+        Self::sandboxed()
+    }
+}
+
+/// Why a run stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Halt {
+    /// The entry returned (clean).
+    Returned,
+    /// The T-state budget was reached first.
+    CycleBudget,
+    /// The `max_touched` memory ceiling was reached.
+    MemoryLimit,
+}
+
+impl Halt {
+    fn as_str(self) -> &'static str {
+        match self {
+            Halt::Returned => "returned",
+            Halt::CycleBudget => "cycle_budget",
+            Halt::MemoryLimit => "memory_limit",
+        }
+    }
+}
+
+/// Which capability-gated intrinsics a source uses (`poke`/`peek`/`inport`).
+#[derive(Default)]
+struct Caps {
+    raw_memory: bool, // poke / peek
+    ports: bool,      // inport
+}
+
+impl<'ast> syn::visit::Visit<'ast> for Caps {
+    fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(p) = &*c.func {
+            match p.path.get_ident().map(|i| i.to_string()).as_deref() {
+                Some("poke") | Some("peek") => self.raw_memory = true,
+                Some("inport") => self.ports = true,
+                _ => {}
+            }
+        }
+        syn::visit::visit_expr_call(self, c); // recurse into nested calls
+    }
+}
+
+/// Check a source against a config's capability gates (parses + walks for the gated
+/// intrinsics).
+fn check_caps(src: &str, cfg: &CellConfig) -> Result<(), String> {
+    let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+    let mut caps = Caps::default();
+    syn::visit::visit_file(&mut caps, &file);
+    if caps.raw_memory && !cfg.allow_raw_memory {
+        return Err("raw memory (`poke`/`peek`) is not allowed (enable allow_raw_memory)".into());
+    }
+    if caps.ports && !cfg.allow_ports {
+        return Err("I/O ports (`inport`) are not allowed (enable allow_ports)".into());
+    }
+    Ok(())
+}
 
 /// The bus the CPU steps against — borrows the [`Runner`]'s reusable buffers, counts
 /// T-states, and records each *distinct* written address (for an O(touched) reset and
@@ -57,20 +160,39 @@ impl z80::Bus for CellBus<'_> {
 /// fresh 128 KiB alloc/zero.
 pub struct Runner {
     prog: Program,
+    cfg: CellConfig,
     mem: Vec<u8>,
     seen: Vec<bool>,   // was this address written this run? (dedup for `touched`)
     touched: Vec<u16>, // distinct addresses written by the last run
 }
 
 impl Runner {
-    /// Compile `src` and allocate the (reusable) machine, loading the code once.
+    /// Compile `src` with the **permissive** policy (raw memory + ports allowed, no
+    /// ceilings) — back-compat for trusted/game code. Untrusted cells should use
+    /// [`compile_with_config`](Runner::compile_with_config) (e.g. [`CellConfig::sandboxed`]).
     pub fn compile(src: &str) -> Result<Self, String> {
+        Self::compile_with_config(src, CellConfig::permissive())
+    }
+
+    /// Compile `src` under `cfg`: enforce its capability gates (`poke`/`peek`/`inport`)
+    /// and `max_code_bytes`, then allocate the reusable machine and load the code once.
+    pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
+        check_caps(src, &cfg)?;
         let prog = compile_program(src)?;
+        if let Some(max) = cfg.max_code_bytes {
+            if prog.code.len() > max {
+                return Err(format!(
+                    "code is {} bytes, over the {max}-byte limit",
+                    prog.code.len()
+                ));
+            }
+        }
         let mut mem = vec![0u8; 0x1_0000];
         let org = ORG as usize;
         mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
         Ok(Runner {
             prog,
+            cfg,
             mem,
             seen: vec![false; 0x1_0000],
             touched: Vec::new(),
@@ -158,6 +280,7 @@ impl Runner {
             }
         }
 
+        let max_touched = self.cfg.max_touched;
         let mut bus = CellBus {
             mem: &mut self.mem,
             seen: &mut self.seen,
@@ -168,10 +291,23 @@ impl Runner {
         cpu.reset();
         cpu.regs.pc = TRAMPOLINE;
         cpu.regs.sp = SP_TOP;
+        let mut mem_limit = false;
         while !cpu.halted && bus.cycles < budget {
             cpu.step(&mut bus);
+            if matches!(max_touched, Some(m) if bus.touched.len() > m) {
+                mem_limit = true;
+                break;
+            }
         }
-        let (cycles, returned) = (bus.cycles, cpu.halted);
+        let cycles = bus.cycles;
+        let halt = if cpu.halted {
+            Halt::Returned
+        } else if mem_limit {
+            Halt::MemoryLimit
+        } else {
+            Halt::CycleBudget
+        };
+        let returned = cpu.halted;
         // The calling convention leaves results in HL/DE/BC (a `-> (u16, u16, u16)`
         // tuple uses all three); `result` is the primary `HL`.
         let regs = [cpu.regs.hl(), cpu.regs.de(), cpu.regs.bc()];
@@ -185,6 +321,7 @@ impl Runner {
             cycles,
             budget,
             returned,
+            halt,
             code_bytes: self.prog.code.len(),
             fn_count: self.prog.size_report().len(),
             symbols: sorted_symbols(&self.prog.symbols),
@@ -270,8 +407,10 @@ pub struct Report {
     /// T-states elapsed, and the budget it ran under.
     pub cycles: u64,
     pub budget: u64,
-    /// Did the entry return (`true`) or hit the cycle budget first (`false`)?
+    /// Did the entry return cleanly (`true`)? (Shorthand for `halt == Halt::Returned`.)
     pub returned: bool,
+    /// Why the run stopped (returned / cycle budget / memory limit).
+    pub halt: Halt,
     /// Total compiled code size, and the number of functions (incl. monomorphic
     /// instances + the appended runtime).
     pub code_bytes: usize,
@@ -285,10 +424,10 @@ pub struct Report {
 impl Report {
     /// A human-readable, aligned summary.
     pub fn to_human(&self) -> String {
-        let halt = if self.returned {
-            "returned".to_string()
-        } else {
-            format!("BUDGET EXCEEDED (≥ {} T-states)", self.budget)
+        let halt = match self.halt {
+            Halt::Returned => "returned".to_string(),
+            Halt::CycleBudget => format!("CYCLE BUDGET EXCEEDED (≥ {} T-states)", self.budget),
+            Halt::MemoryLimit => "MEMORY LIMIT EXCEEDED".to_string(),
         };
         let syms: Vec<String> = self
             .symbols
@@ -364,11 +503,7 @@ impl Report {
             self.regs[2],
             self.cycles,
             self.budget,
-            if self.returned {
-                "returned"
-            } else {
-                "budget_exceeded"
-            },
+            self.halt.as_str(),
             self.code_bytes,
             self.fn_count,
             syms.join(","),
@@ -472,6 +607,12 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     let mut sets: Vec<(u16, Ty, u64)> = Vec::new();
     let mut reads: Vec<(String, u16, Ty)> = Vec::new();
     let mut json = false;
+    let mut cfg = CellConfig::sandboxed(); // safe by default on the CLI
+    let num = |o: Option<&String>, what: &str| -> Result<usize, String> {
+        o.ok_or_else(|| format!("{what} needs a number"))?
+            .parse()
+            .map_err(|_| format!("bad {what}"))
+    };
     while let Some(a) = it.next() {
         match a.as_str() {
             "--entry" => entry = Some(it.next().ok_or("--entry needs a name")?.clone()),
@@ -485,12 +626,16 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
             "--args" => call_args = parse_args(it.next().ok_or("--args needs values")?)?,
             "--set" => sets = parse_sets(it.next().ok_or("--set needs a spec")?)?,
             "--read" => reads = parse_reads(it.next().ok_or("--read needs a spec")?)?,
+            "--allow-raw-memory" => cfg.allow_raw_memory = true,
+            "--allow-ports" => cfg.allow_ports = true,
+            "--max-code-bytes" => cfg.max_code_bytes = Some(num(it.next(), "--max-code-bytes")?),
+            "--max-touched" => cfg.max_touched = Some(num(it.next(), "--max-touched")?),
             "--json" => json = true,
             other => return Err(format!("unknown option `{other}`\n{USAGE}")),
         }
     }
     let src = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
-    let mut runner = Runner::compile(&src)?;
+    let mut runner = Runner::compile_with_config(&src, cfg)?;
     let mut report = runner.run_with_inputs(entry.as_deref(), &call_args, &sets, cycles)?;
     if !reads.is_empty() {
         report.reads = runner.read_named(&reads); // decode typed fields from post-run memory

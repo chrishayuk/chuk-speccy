@@ -194,6 +194,16 @@ rustz80-cell run state.rs --entry State::run --args 0xb000 \
 That closes the agent loop: **set typed inputs → run the cell → read typed output/state →
 iterate** — source-shaped state, no Python/Docker/Wasm weight.
 
+**Safe by default.** A `CellConfig` gates the intrinsics and caps resources: `poke`/`peek`
+(raw memory) and `inport` (ports) are **capability-gated, off by default** for untrusted
+cells, with `max_code_bytes` / `max_touched` ceilings on top of the deterministic cycle
+budget. The CLI runs **sandboxed** unless you opt in (`--allow-raw-memory`,
+`--allow-ports`, `--max-code-bytes N`, `--max-touched N`); `Runner::compile` stays
+permissive for trusted/game code, or pass `CellConfig::sandboxed()` to
+`Runner::compile_with_config`. A run reports *why* it stopped (`halt`: returned /
+cycle-budget / memory-limit), so a model-generated program that misbehaves is rejected or
+bounded, never a hang.
+
 ## The dial: one `impl Game`, two compilers
 
 The headline. Write an ordinary [`speccy-sdk`](../speccy-sdk/README.md) `Game` and the
