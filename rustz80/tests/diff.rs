@@ -1021,6 +1021,38 @@ fn mul16_operand_widths() {
 }
 
 #[test]
+fn divmod16_small_dividend() {
+    // The `dividend < divisor` fast path + the normal restoring path, across var/var
+    // pairs: a<b (fast), a>b, a==b, 0/b, and a wide dividend. Checked vs rustc.
+    fn host() -> u16 {
+        let a = [5u16, 100u16, 7u16, 0u16, 65535u16];
+        let b = [10u16, 7u16, 7u16, 5u16, 13u16];
+        let mut s = 0u16;
+        for i in 0..5 {
+            s = s.wrapping_add(a[i] / b[i]).wrapping_add(a[i] % b[i]);
+        }
+        s
+    }
+    let src = "
+        fn run() -> u16 {
+            let a = [5u16, 100u16, 7u16, 0u16, 65535u16];
+            let b = [10u16, 7u16, 7u16, 5u16, 13u16];
+            let mut s = 0u16;
+            let mut i = 0u16;
+            while i < 5u16 {
+                s = s.wrapping_add(a[i as usize] / b[i as usize]);
+                s = s.wrapping_add(a[i as usize] % b[i as usize]);
+                i = i + 1u16;
+            }
+            s
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert!(prog.symbols.contains_key("__divmod16")); // var/var uses the runtime
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
 fn const_strength_reduction() {
     // Constant multiply (shift-and-add), divide/remainder by a power of two (shift/mask),
     // and const-folding — all must match rustc, and the program must compile *without* the

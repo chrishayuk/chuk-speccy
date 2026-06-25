@@ -28,8 +28,20 @@ const MUL16: &[u8] = &[
 ];
 
 /// `__divmod16`: HL/DE -> HL=quotient, DE=remainder (divisor < 0x8000).
-/// Restoring division; clobbers AF/BC.
+/// Fast path: `dividend < divisor` → quotient 0, remainder = dividend (returns at once).
+/// Else restoring division. Clobbers AF/BC.
 const DIVMOD16: &[u8] = &[
+    // Fast path: if HL (dividend) < DE (divisor), q=0, r=dividend.
+    0x7C, 0xBA, // ld a,h ; cp d
+    0x38, 0x06, // jr c, less        (H < D → HL < DE)
+    0x20, 0x09, // jr nz, big        (H > D → HL >= DE)
+    0x7D, 0xBB, // ld a,l ; cp e     (H == D: compare low)
+    0x30, 0x05, // jr nc, big        (L >= E → HL >= DE)
+    // less: quotient 0, remainder = dividend.
+    0xEB, // ex de,hl                (DE = dividend = remainder, HL = divisor)
+    0x21, 0x00, 0x00, // ld hl,0     (quotient)
+    0xC9, // ret
+    // big: restoring division.
     0x44, 0x4D, // ld b,h ; ld c,l   (BC = dividend)
     0x21, 0x00, 0x00, // ld hl,0     (remainder)
     0x3E, 0x10, // ld a,16
