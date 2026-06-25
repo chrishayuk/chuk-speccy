@@ -2,7 +2,36 @@
 //! feature this file compiles to nothing.
 #![cfg(feature = "cell")]
 
-use rustz80::cell::{self, DEFAULT_CYCLES};
+use rustz80::cell::{self, Runner, DEFAULT_CYCLES};
+
+#[test]
+fn runner_reuse_is_deterministic() {
+    // Compile once, run many: each run must reset the bus, so repeated runs (same args)
+    // are bit-identical — same result, same T-states, same touched memory — and changing
+    // args changes the result, with no leakage between runs.
+    let mut r = Runner::compile(
+        "fn run(n: u16) -> u16 { let mut a = [0u16; 8]; let mut s = 0u16;
+             let mut i = 0u16; while i < 8u16 { a[i as usize] = i + n; i = i + 1u16; }
+             let mut j = 0u16; while j < 8u16 { s = s + a[j as usize]; j = j + 1u16; } s }",
+    )
+    .expect("compile");
+
+    assert!(r.program().symbols.contains_key("run")); // the compiled program is reachable
+    let first = r.run(None, &[0], DEFAULT_CYCLES).unwrap(); // 0+1+..+7 = 28
+    let again = r.run(None, &[0], DEFAULT_CYCLES).unwrap();
+    assert_eq!(first.result, 28);
+    assert_eq!(first.result, again.result, "reuse must be deterministic");
+    assert_eq!(first.cycles, again.cycles, "same path → same T-states");
+    assert_eq!(
+        first.touched, again.touched,
+        "same writes → same memory diff"
+    );
+
+    let bumped = r.run(None, &[10], DEFAULT_CYCLES).unwrap(); // (0..7)+8*10 = 28+80 = 108
+    assert_eq!(bumped.result, 108);
+    // Back to the original args still gives the original answer (no accumulated state).
+    assert_eq!(r.run(None, &[0], DEFAULT_CYCLES).unwrap().result, 28);
+}
 
 #[test]
 fn runs_and_reports() {

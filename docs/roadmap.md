@@ -331,6 +331,15 @@ bounded Z80 out → deterministic execution → typed symbols/state out.*
   dependency-free; an infinite loop stops at the budget instead of hanging. A "safe
   executable thought bubble" for agents: deterministic, bounded, inspectable, no side
   effects. Tested (`tests/cell.rs`).
+- [x] **Benchmarked + compile-once/run-many** — `benches/cell.rs` measures per-cell
+  latency + emulated throughput. Baseline showed the per-run floor was a fresh 64 KiB
+  bus allocation, not CPU work; `Runner::compile(src)` → `runner.run(…)` now owns one
+  bus and between runs **resets only the bytes the last run wrote** (an O(touched) reset
+  via a distinct-write list). Result (Apple Silicon): a trivial warm run dropped
+  ~20 µs → **~0.3 µs** (≈60×), realistic snippets (`rng32`/`entities`) ~30–35 µs →
+  **~11–15 µs**; heavy loops emulate at 300–600× real-hardware speed. Reuse is
+  bit-deterministic (same args → same result, T-states, and memory diff). The warm
+  run cost is now the computation, not the setup.
 - [x] **Cycle/byte budgets as first-class output** — `cycles` (from the `tick` clock)
   and `code_bytes`/`functions` (from `Program::size_report`) are in every `Report`, so
   an agent sees the cost of what it wrote.

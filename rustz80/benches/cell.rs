@@ -9,7 +9,7 @@
 //! steps. (The runner allocates a fresh 64 KiB bus per run — negligible for the heavy
 //! steady-state rows, where the MHz figure is meaningful.)
 
-use rustz80::cell;
+use rustz80::cell::{self, Runner};
 use std::time::Instant;
 
 const BUDGET: u64 = 50_000_000; // high enough that nothing here hits it
@@ -28,25 +28,30 @@ fn time_per(mut f: impl FnMut()) -> f64 {
 }
 
 fn bench(name: &str, src: &str) {
-    let total = time_per(|| {
+    // Compile (one-time), warm run (reused bus, the compile-once/run-many path), and a
+    // cold one-shot (`cell::run` — fresh alloc + compile + run) for comparison.
+    let compile = time_per(|| {
+        Runner::compile(src).unwrap();
+    });
+    let mut runner = Runner::compile(src).unwrap();
+    let warm = time_per(|| {
+        runner.run(None, &[], BUDGET).unwrap();
+    });
+    let cold = time_per(|| {
         cell::run(src, None, &[], BUDGET).unwrap();
     });
-    let compile = time_per(|| {
-        rustz80::compile_program(src).unwrap();
-    });
-    let run = (total - compile).max(1e-12);
 
-    let r = cell::run(src, None, &[], BUDGET).unwrap();
-    let mhz = r.cycles as f64 / run / 1e6; // M T-states / sec == MHz
+    let r = runner.run(None, &[], BUDGET).unwrap();
+    let mhz = r.cycles as f64 / warm / 1e6; // M T-states / sec == MHz
     let note = if r.returned { "" } else { " [budget!]" };
     println!(
-        "{name:11} {res:>6} {cyc:>9}  {code:>4}B   {comp:>6.1}   {rn:>8.2}   {tot:>7.1}   {mhz:>6.0}   {x:>5.0}×{note}",
+        "{name:11} {res:>6} {cyc:>9}  {code:>4}B   {comp:>6.1}   {wm:>8.2}   {cd:>7.1}   {mhz:>6.0}   {x:>5.0}×{note}",
         res = r.result,
         cyc = r.cycles,
         code = r.code_bytes,
         comp = compile * 1e6,
-        rn = run * 1e6,
-        tot = total * 1e6,
+        wm = warm * 1e6,
+        cd = cold * 1e6,
         x = mhz / REAL_MHZ,
     );
 }
@@ -73,7 +78,7 @@ fn main() {
     println!("rustz80-cell — microseconds per cell, and emulated-Z80 throughput\n");
     println!(
         "{:11} {:>6} {:>9}  {:>5}  {:>7}  {:>9}  {:>8}  {:>6}  {:>6}",
-        "workload", "result", "cycles", "code", "comp µs", "run µs", "total µs", "MHz", "×real"
+        "workload", "result", "cycles", "code", "comp µs", "warm µs", "cold µs", "MHz", "×real"
     );
     println!("{}", "-".repeat(86));
     bench("tiny", tiny);
@@ -82,5 +87,8 @@ fn main() {
     bench("xorshift1k", xorshift_1k);
     bench("rng32", rng32);
     bench("entities", entities);
-    println!("\n(real 48K Spectrum = 3.5 MHz; compile is one-time per source, run is per call.)");
+    println!(
+        "\n(real 48K Spectrum = 3.5 MHz. warm = Runner reuse — bus reset, not realloc;\n \
+         cold = one-shot cell::run — fresh alloc + compile + run. compile is one-time.)"
+    );
 }

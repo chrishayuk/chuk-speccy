@@ -3,8 +3,12 @@
 //! returning a structured [`Report`] (result, cost, symbol layout, touched memory,
 //! halt status). Deterministic, side-effect-free, inspectable. Behind `--features cell`
 //! (it pulls in the `z80` CPU); the compiler library proper stays dependency-free.
+//!
+//! [`Runner`] is the compile-once/run-many shape: it owns one 64 KiB bus and, between
+//! runs, resets only the bytes the previous run wrote (not the whole 64 KiB) — so the
+//! per-run floor is the work, not a fresh allocation. [`run`] is the one-shot convenience.
 
-use crate::ORG;
+use crate::{compile_program, Program, ORG};
 use std::collections::HashMap;
 
 /// CLI usage line, shared by the `rustz80-cell` binary.
@@ -16,21 +20,26 @@ const SP_TOP: u16 = 0xFFF0;
 /// A generous default T-state budget (well past any bounded computation).
 pub const DEFAULT_CYCLES: u64 = 2_000_000;
 
-/// A flat 64 KiB RAM bus with a T-state counter and per-address write tracking — the
-/// whole machine the cell runs on (ports float high, no contention).
-struct Cell {
-    mem: Vec<u8>,
+/// The bus the CPU steps against — borrows the [`Runner`]'s reusable buffers, counts
+/// T-states, and records each *distinct* written address (for an O(touched) reset and
+/// the report).
+struct CellBus<'a> {
+    mem: &'a mut [u8],
+    seen: &'a mut [bool],
+    touched: &'a mut Vec<u16>,
     cycles: u64,
-    touched: Vec<bool>,
 }
 
-impl z80::Bus for Cell {
+impl z80::Bus for CellBus<'_> {
     fn read(&mut self, a: u16) -> u8 {
         self.mem[a as usize]
     }
     fn write(&mut self, a: u16, v: u8) {
         self.mem[a as usize] = v;
-        self.touched[a as usize] = true;
+        if !self.seen[a as usize] {
+            self.seen[a as usize] = true;
+            self.touched.push(a);
+        }
     }
     fn input(&mut self, _: u16) -> u8 {
         0xFF
@@ -40,6 +49,119 @@ impl z80::Bus for Cell {
     fn tick(&mut self, c: u32) {
         self.cycles += c as u64; // the single source of truth for elapsed time
     }
+}
+
+/// A compiled cell, runnable many times. One 64 KiB bus is allocated up front and the
+/// code loaded once; each [`run`](Runner::run) resets only the previous run's writes,
+/// re-lays the argument trampoline, and steps — so reuse pays for the computation, not a
+/// fresh 128 KiB alloc/zero.
+pub struct Runner {
+    prog: Program,
+    mem: Vec<u8>,
+    seen: Vec<bool>,   // was this address written this run? (dedup for `touched`)
+    touched: Vec<u16>, // distinct addresses written by the last run
+}
+
+impl Runner {
+    /// Compile `src` and allocate the (reusable) machine, loading the code once.
+    pub fn compile(src: &str) -> Result<Self, String> {
+        let prog = compile_program(src)?;
+        let mut mem = vec![0u8; 0x1_0000];
+        let org = ORG as usize;
+        mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
+        Ok(Runner {
+            prog,
+            mem,
+            seen: vec![false; 0x1_0000],
+            touched: Vec::new(),
+        })
+    }
+
+    /// The compiled program (symbol map, code).
+    pub fn program(&self) -> &Program {
+        &self.prog
+    }
+
+    /// Run `entry` (or `run`/`main` if `None`) with `args` in the calling-convention
+    /// registers (`HL`/`DE`/`BC`), bounded by `budget` T-states. Memory the previous
+    /// run touched is zeroed first, so repeated runs start from the same clean state.
+    pub fn run(
+        &mut self,
+        entry: Option<&str>,
+        args: &[u16],
+        budget: u64,
+    ) -> Result<Report, String> {
+        let entry = match entry {
+            Some(e) => e.to_string(),
+            None if self.prog.symbols.contains_key("run") => "run".to_string(),
+            None if self.prog.symbols.contains_key("main") => "main".to_string(),
+            None => return Err("no `run` or `main` entry — pass an explicit entry".into()),
+        };
+        let entry_addr = *self.prog.symbols.get(&entry).ok_or_else(|| {
+            let mut names: Vec<String> = self.prog.symbols.keys().cloned().collect();
+            names.sort();
+            format!("no entry `{entry}`; available: {}", names.join(", "))
+        })?;
+
+        // Reset: zero last run's writes, restore the code (in case it was poked), then
+        // lay the trampoline — load args into HL/DE/BC, CALL the entry, HALT on return.
+        for &a in &self.touched {
+            self.mem[a as usize] = 0;
+            self.seen[a as usize] = false;
+        }
+        self.touched.clear();
+        let org = ORG as usize;
+        self.mem[org..org + self.prog.code.len()].copy_from_slice(&self.prog.code);
+
+        let mut t = Vec::new();
+        const LD: [u8; 3] = [0x21, 0x11, 0x01]; // LD HL,nn / LD DE,nn / LD BC,nn
+        for (i, &v) in args.iter().enumerate().take(3) {
+            t.push(LD[i]);
+            t.push(v as u8);
+            t.push((v >> 8) as u8);
+        }
+        t.push(0xCD); // CALL entry
+        t.push(entry_addr as u8);
+        t.push((entry_addr >> 8) as u8);
+        t.push(0x76); // HALT
+        let tr = TRAMPOLINE as usize;
+        self.mem[tr..tr + t.len()].copy_from_slice(&t);
+
+        let mut bus = CellBus {
+            mem: &mut self.mem,
+            seen: &mut self.seen,
+            touched: &mut self.touched,
+            cycles: 0,
+        };
+        let mut cpu = z80::Cpu::new();
+        cpu.reset();
+        cpu.regs.pc = TRAMPOLINE;
+        cpu.regs.sp = SP_TOP;
+        while !cpu.halted && bus.cycles < budget {
+            cpu.step(&mut bus);
+        }
+        let (cycles, returned, result) = (bus.cycles, cpu.halted, cpu.regs.hl());
+
+        self.touched.sort_unstable();
+        Ok(Report {
+            entry,
+            entry_addr,
+            result,
+            cycles,
+            budget,
+            returned,
+            code_bytes: self.prog.code.len(),
+            fn_count: self.prog.size_report().len(),
+            symbols: sorted_symbols(&self.prog.symbols),
+            touched: coalesce(&self.touched),
+        })
+    }
+}
+
+/// One-shot convenience: compile `src` and run `entry` once (see [`Runner`] for
+/// compile-once/run-many).
+pub fn run(src: &str, entry: Option<&str>, args: &[u16], budget: u64) -> Result<Report, String> {
+    Runner::compile(src)?.run(entry, args, budget)
 }
 
 /// The structured outcome of a [`run`].
@@ -137,6 +259,24 @@ impl Report {
     }
 }
 
+fn sorted_symbols(symbols: &HashMap<String, u16>) -> Vec<(String, u16)> {
+    let mut v: Vec<(String, u16)> = symbols.iter().map(|(k, a)| (k.clone(), *a)).collect();
+    v.sort_by_key(|(_, a)| *a);
+    v
+}
+
+/// Coalesce a *sorted* list of distinct addresses into contiguous `(start, end)` ranges.
+fn coalesce(sorted: &[u16]) -> Vec<(u16, u16)> {
+    let mut ranges: Vec<(u16, u16)> = Vec::new();
+    for &a in sorted {
+        match ranges.last_mut() {
+            Some(last) if last.1.checked_add(1) == Some(a) => last.1 = a,
+            _ => ranges.push((a, a)),
+        }
+    }
+    ranges
+}
+
 /// Parse a comma-separated arg list — decimal or `0x`-prefixed hex, each a `u16`.
 pub fn parse_args(s: &str) -> Result<Vec<u16>, String> {
     s.split(',')
@@ -189,91 +329,4 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     } else {
         report.to_human()
     })
-}
-
-/// Compile `src` and run `entry` (or `run`/`main` if `None`) with `args` in the
-/// calling-convention registers (`HL`/`DE`/`BC`), bounded by `budget` T-states.
-pub fn run(src: &str, entry: Option<&str>, args: &[u16], budget: u64) -> Result<Report, String> {
-    let prog = crate::compile_program(src)?;
-
-    let entry = match entry {
-        Some(e) => e.to_string(),
-        None if prog.symbols.contains_key("run") => "run".to_string(),
-        None if prog.symbols.contains_key("main") => "main".to_string(),
-        None => return Err("no `run` or `main` entry — pass an explicit entry".into()),
-    };
-    let entry_addr = *prog.symbols.get(&entry).ok_or_else(|| {
-        let mut names: Vec<String> = prog.symbols.keys().cloned().collect();
-        names.sort();
-        format!("no entry `{entry}`; available: {}", names.join(", "))
-    })?;
-
-    let mut bus = Cell {
-        mem: vec![0u8; 0x1_0000],
-        cycles: 0,
-        touched: vec![false; 0x1_0000],
-    };
-
-    // Trampoline at 0x7000: load args into HL/DE/BC, CALL the entry, HALT on return.
-    let mut t = Vec::new();
-    const LD: [u8; 3] = [0x21, 0x11, 0x01]; // LD HL,nn / LD DE,nn / LD BC,nn
-    for (i, &v) in args.iter().enumerate().take(3) {
-        t.push(LD[i]);
-        t.push(v as u8);
-        t.push((v >> 8) as u8);
-    }
-    t.push(0xCD); // CALL entry
-    t.push(entry_addr as u8);
-    t.push((entry_addr >> 8) as u8);
-    t.push(0x76); // HALT
-    let tr = TRAMPOLINE as usize;
-    bus.mem[tr..tr + t.len()].copy_from_slice(&t);
-
-    let org = ORG as usize;
-    bus.mem[org..org + prog.code.len()].copy_from_slice(&prog.code);
-
-    let mut cpu = z80::Cpu::new();
-    cpu.reset();
-    cpu.regs.pc = TRAMPOLINE;
-    cpu.regs.sp = SP_TOP;
-    while !cpu.halted && bus.cycles < budget {
-        cpu.step(&mut bus);
-    }
-
-    Ok(Report {
-        entry,
-        entry_addr,
-        result: cpu.regs.hl(),
-        cycles: bus.cycles,
-        budget,
-        returned: cpu.halted,
-        code_bytes: prog.code.len(),
-        fn_count: prog.size_report().len(),
-        symbols: sorted_symbols(&prog.symbols),
-        touched: coalesce(&bus.touched),
-    })
-}
-
-fn sorted_symbols(symbols: &HashMap<String, u16>) -> Vec<(String, u16)> {
-    let mut v: Vec<(String, u16)> = symbols.iter().map(|(k, a)| (k.clone(), *a)).collect();
-    v.sort_by_key(|(_, a)| *a);
-    v
-}
-
-/// Coalesce a per-address touched bitmap into contiguous `(start, end_inclusive)` ranges.
-fn coalesce(touched: &[bool]) -> Vec<(u16, u16)> {
-    let mut ranges = Vec::new();
-    let mut i = 0usize;
-    while i < touched.len() {
-        if touched[i] {
-            let start = i;
-            while i < touched.len() && touched[i] {
-                i += 1;
-            }
-            ranges.push((start as u16, (i - 1) as u16));
-        } else {
-            i += 1;
-        }
-    }
-    ranges
 }
