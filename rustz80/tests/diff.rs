@@ -989,6 +989,38 @@ fn struct_element_arrays() {
 }
 
 #[test]
+fn mul16_operand_widths() {
+    // The multiplier-terminated `__mul16` must be correct across multiplier widths: 0
+    // (immediate return), 1 bit, full 16 bits, and in between. `a[i] * b[i]` is var*var,
+    // so it goes through the runtime (not const strength-reduction). Checked vs rustc.
+    fn host() -> u16 {
+        let a = [255u16, 1u16, 65535u16, 0u16, 123u16];
+        let b = [255u16, 65535u16, 1u16, 12345u16, 456u16];
+        let mut s = 0u16;
+        for i in 0..5 {
+            s = s.wrapping_add(a[i].wrapping_mul(b[i]));
+        }
+        s
+    }
+    let src = "
+        fn run() -> u16 {
+            let a = [255u16, 1u16, 65535u16, 0u16, 123u16];
+            let b = [255u16, 65535u16, 1u16, 12345u16, 456u16];
+            let mut s = 0u16;
+            let mut i = 0u16;
+            while i < 5u16 {
+                s = s.wrapping_add(a[i as usize].wrapping_mul(b[i as usize]));
+                i = i + 1u16;
+            }
+            s
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert!(prog.symbols.contains_key("__mul16")); // var*var uses the runtime
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
 fn const_strength_reduction() {
     // Constant multiply (shift-and-add), divide/remainder by a power of two (shift/mask),
     // and const-folding — all must match rustc, and the program must compile *without* the
