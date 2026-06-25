@@ -369,6 +369,21 @@ code to check something small"* with *"let the agent run tiny bounded code in a
 deterministic cell."* More inspectable than Wasm (source-shaped typed state, not linear
 memory), lighter than a container, constrained enough that models generate it reliably.
 
+**Positioning — keep the claim narrow.** *Not* "faster than Wasm" — Wasm JITs to native
+and wins decisively on real compute. The claim is: **for tiny agent-generated programs,
+the cell is a smaller, more inspectable, deterministic sandbox** — *a thought bubble, not
+a runtime.* Latency only needs to be cheap enough to call in a loop (it is: realistic
+snippets warm-run in single-to-low-tens of µs); the differentiators are determinism,
+source-shaped typed state read-back, capability gating, a cycle budget, and a sandbox
+surface you can hold in your head (64K, no WASI/imports). The honest proof is the cross-runtime **comparison benchmark** (`cell-bench/`): native
+Rust (floor) · Wasmtime warm · `rustz80-cell` warm · Python subprocess, scoring 1000
+candidates. Measured (Apple Silicon): warm per-call **native 0.001 µs · Wasm 0.013 µs ·
+cell 2.4 µs · Python 408 µs**; cold setup **Wasm 3.0 ms · cell 0.59 ms · Python 39 ms**;
+code size **cell 69 B vs Wasm 50 KB**. So Wasm wins warm compute ~185×, but the cell sets
+up ~5× faster and is ~730× smaller — and runs ~400k evals/s, well inside "call it in a
+loop." The result confirms the niche: *not faster than Wasm — smaller, lower-setup, more
+inspectable, deterministic, for the tiny-snippet class.*
+
 **Phased plan** (✓ = done; → = next):
 
 - [x] **P1 · Warm execution** — compile-once/run-many `Runner`, O(touched) reset (above).

@@ -1,0 +1,19 @@
+# Standalone comparison benchmark — its own workspace so Wasmtime's (large) dependency
+# tree never touches `cargo test --workspace` on the emulator. Run with:
+#   cargo run --release --manifest-path cell-bench/Cargo.toml
+[package]
+name = "cell-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+# The cell runner under test (path-dep into the main workspace; allowed across roots).
+rustz80 = { package = "rustz80", path = "../rustz80", features = ["cell"] }
+# A real JIT Wasm runtime — the compute-heavyweight to compare against.
+wasmtime = "27"
+
+[profile.release]
+opt-level = 3
