@@ -398,10 +398,14 @@ memory), lighter than a container, constrained enough that models generate it re
   `compile_with_config(src, CellConfig::sandboxed())` for untrusted. `Report.halt` now
   says *why* a run stopped (returned / cycle-budget / memory-limit). Tested. *(Next: a
   wall-clock timeout and a monomorphization cap — compile-time blow-up guards.)*
-- [ ] **P8 · Cell-specific codegen wins** (overlaps Stage 2) — the narrow ones that hit
-  generated snippets: const-fold, strength-reduce `*`/`/`/`%` by powers of two (skip
-  `__mul16`/`__divmod16`), keep register-fitting locals out of slots, fast small-range
-  loops, power-of-two array strides.
+- [~] **P8 · Cell-specific codegen wins** (overlaps Stage 2) — landed the multiply/divide
+  ones (they benefit games too): **`× constant` is shift-and-add** (any constant, not just
+  powers of two — `__mul16` gone for constant multipliers), **`/ 2ⁿ` / `% 2ⁿ`** are
+  shift/mask (no `__divmod16`), and **literal-only ops const-fold**. Result: `mul_loop`
+  (`×3`) dropped 12.8M → 2.5M T-states (warm 9.9 ms → 1.1 ms, ~8.8×); `entities` warm
+  11.5 → 6.7 µs. Also a **compile double-parse fix** (the cap scan shares the AST) ~halved
+  compile time. Differential-tested + asserts the runtimes aren't appended. *(Next:
+  register-fitting locals out of slots, fast small-range loops.)*
 - [ ] **P9 · Direct-IR cell mode** (later) — let advanced callers feed IR/JSON straight
   to codegen, bypassing the Rust parser (model-generated tools). Rust source stays the
   default — it's human-readable, testable, debuggable.

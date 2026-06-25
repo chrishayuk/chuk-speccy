@@ -8,7 +8,7 @@
 //! runs, resets only the bytes the previous run wrote (not the whole 64 KiB) — so the
 //! per-run floor is the work, not a fresh allocation. [`run`] is the one-shot convenience.
 
-use crate::{compile_program, Program, ORG};
+use crate::{Program, ORG};
 use std::collections::HashMap;
 
 /// CLI usage line, shared by the `rustz80-cell` binary.
@@ -108,12 +108,11 @@ impl<'ast> syn::visit::Visit<'ast> for Caps {
     }
 }
 
-/// Check a source against a config's capability gates (parses + walks for the gated
+/// Check a parsed file against a config's capability gates (walks for the gated
 /// intrinsics).
-fn check_caps(src: &str, cfg: &CellConfig) -> Result<(), String> {
-    let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+fn check_caps(file: &syn::File, cfg: &CellConfig) -> Result<(), String> {
     let mut caps = Caps::default();
-    syn::visit::visit_file(&mut caps, &file);
+    syn::visit::visit_file(&mut caps, file);
     if caps.raw_memory && !cfg.allow_raw_memory {
         return Err("raw memory (`poke`/`peek`) is not allowed (enable allow_raw_memory)".into());
     }
@@ -177,8 +176,10 @@ impl Runner {
     /// Compile `src` under `cfg`: enforce its capability gates (`poke`/`peek`/`inport`)
     /// and `max_code_bytes`, then allocate the reusable machine and load the code once.
     pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
-        check_caps(src, &cfg)?;
-        let prog = compile_program(src)?;
+        // Parse once — shared by the capability scan and the compile.
+        let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+        check_caps(&file, &cfg)?;
+        let prog = crate::compile_file(&file)?;
         if let Some(max) = cfg.max_code_bytes {
             if prog.code.len() > max {
                 return Err(format!(

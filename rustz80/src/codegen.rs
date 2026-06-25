@@ -298,6 +298,15 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
             a.word(addr);
         }
         Expr::Bin(op, l, r, w) => {
+            // Const-fold a literal-only op (e.g. `2 * 3 + 4`).
+            if let (Expr::Lit(x), Expr::Lit(y)) = (&**l, &**r) {
+                if let Some(v) = const_fold(*op, *x, *y) {
+                    a.byte(0x21); // LD HL, v
+                    a.word(v);
+                    mask_to_width(a, *w);
+                    return;
+                }
+            }
             match op {
                 BinOp::Add => {
                     gen_expr(a, l);
@@ -307,22 +316,43 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                     a.byte(0x19); // ADD HL, DE
                 }
                 BinOp::Sub => gen_sub(a, l, r),
-                BinOp::Mul => {
-                    gen_pair(a, l, r); // HL = r, DE = l
-                    a.call("__mul16"); // HL = l * r
-                    a.needs_mul = true;
-                }
-                BinOp::Div => {
-                    gen_pair(a, r, l); // HL = l, DE = r
-                    a.call("__divmod16"); // HL = l / r
-                    a.needs_div = true;
-                }
-                BinOp::Rem => {
-                    gen_pair(a, r, l); // HL = l, DE = r
-                    a.call("__divmod16"); // DE = l % r
-                    a.byte(0xEB); // EX DE, HL  -> HL = remainder
-                    a.needs_div = true;
-                }
+                // `x * const` → shift-and-add (no `__mul16`); else the runtime.
+                BinOp::Mul => match const_operand(l, r) {
+                    Some((k, other)) => {
+                        gen_expr(a, other);
+                        gen_mul_const(a, k);
+                    }
+                    None => {
+                        gen_pair(a, l, r); // HL = r, DE = l
+                        a.call("__mul16"); // HL = l * r
+                        a.needs_mul = true;
+                    }
+                },
+                // `x / 2^n` → shift right; else the runtime.
+                BinOp::Div => match lit_val(r) {
+                    Some(k) if k.is_power_of_two() => {
+                        gen_expr(a, l);
+                        gen_shr_const(a, k.trailing_zeros());
+                    }
+                    _ => {
+                        gen_pair(a, r, l); // HL = l, DE = r
+                        a.call("__divmod16"); // HL = l / r
+                        a.needs_div = true;
+                    }
+                },
+                // `x % 2^n` → mask the low bits; else the runtime.
+                BinOp::Rem => match lit_val(r) {
+                    Some(k) if k.is_power_of_two() => {
+                        gen_expr(a, l);
+                        gen_and_mask(a, k - 1);
+                    }
+                    _ => {
+                        gen_pair(a, r, l); // HL = l, DE = r
+                        a.call("__divmod16"); // DE = l % r
+                        a.byte(0xEB); // EX DE, HL  -> HL = remainder
+                        a.needs_div = true;
+                    }
+                },
                 BinOp::Or => gen_bitwise(a, l, r, 0xB3, 0xB2), // OR E / OR D
                 BinOp::And => gen_bitwise(a, l, r, 0xA3, 0xA2), // AND E / AND D
                 BinOp::Xor => gen_bitwise(a, l, r, 0xAB, 0xAA), // XOR E / XOR D
@@ -335,18 +365,10 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
                 }
                 BinOp::Shr => {
                     gen_expr(a, l);
-                    for _ in 0..lit_u8(r) {
-                        a.byte(0xCB);
-                        a.byte(0x3C); // SRL H
-                        a.byte(0xCB);
-                        a.byte(0x1D); // RR L   (logical >> 1)
-                    }
+                    gen_shr_const(a, lit_u8(r) as u32);
                 }
             }
-            if *w == Width::Byte {
-                a.byte(0x26); // LD H, 0   (wrap to u8)
-                a.byte(0x00);
-            }
+            mask_to_width(a, *w);
         }
         Expr::Index(base, index, w) => {
             gen_elem_addr(a, *base, index); // HL = &base[index]
@@ -454,6 +476,69 @@ fn lit_u8(e: &Expr) -> u8 {
     }
 }
 
+/// The literal value of `e`, if it is one.
+fn lit_val(e: &Expr) -> Option<u16> {
+    match e {
+        Expr::Lit(k) => Some(*k),
+        _ => None,
+    }
+}
+
+/// For a commutative op, a literal operand `(k, other)` if exactly one side is a literal.
+fn const_operand<'a>(l: &'a Expr, r: &'a Expr) -> Option<(u16, &'a Expr)> {
+    match (lit_val(l), lit_val(r)) {
+        (Some(k), None) => Some((k, r)),
+        (None, Some(k)) => Some((k, l)),
+        _ => None, // both-literal is const-folded; neither falls through
+    }
+}
+
+/// Fold a literal-only binary op at compile time (`None` = leave to the runtime: a
+/// `Div`/`Rem` by zero, or a shift, which the normal path handles).
+fn const_fold(op: BinOp, x: u16, y: u16) -> Option<u16> {
+    Some(match op {
+        BinOp::Add => x.wrapping_add(y),
+        BinOp::Sub => x.wrapping_sub(y),
+        BinOp::Mul => x.wrapping_mul(y),
+        BinOp::And => x & y,
+        BinOp::Or => x | y,
+        BinOp::Xor => x ^ y,
+        BinOp::Div if y != 0 => x / y,
+        BinOp::Rem if y != 0 => x % y,
+        _ => return None,
+    })
+}
+
+/// `HL >>= n` (logical), as `SRL H; RR L` per step.
+fn gen_shr_const(a: &mut Asm, n: u32) {
+    for _ in 0..n {
+        a.byte(0xCB);
+        a.byte(0x3C); // SRL H
+        a.byte(0xCB);
+        a.byte(0x1D); // RR L
+    }
+}
+
+/// `HL &= mask` (a compile-time constant), byte-wise through the accumulator.
+fn gen_and_mask(a: &mut Asm, mask: u16) {
+    a.byte(0x7D); // LD A,L
+    a.byte(0xE6); // AND lo
+    a.byte(mask as u8);
+    a.byte(0x6F); // LD L,A
+    a.byte(0x7C); // LD A,H
+    a.byte(0xE6); // AND hi
+    a.byte((mask >> 8) as u8);
+    a.byte(0x67); // LD H,A
+}
+
+/// Wrap `HL` to a byte (`u8`) by zeroing `H`.
+fn mask_to_width(a: &mut Asm, w: Width) {
+    if w == Width::Byte {
+        a.byte(0x26); // LD H, 0
+        a.byte(0x00);
+    }
+}
+
 /// Evaluate a `u32` expression into the `HL:DE` pair (`HL` = low word, `DE` = high word).
 fn gen_expr32(a: &mut Asm, e: &Expr) {
     match e {
@@ -546,11 +631,19 @@ fn gen_mul_const(a: &mut Asm, k: u16) {
         for _ in 0..k.trailing_zeros() {
             a.byte(0x29); // ADD HL,HL
         }
-    } else {
-        a.byte(0x11); // LD DE, k
-        a.word(k);
-        a.call("__mul16"); // HL = HL * k
-        a.needs_mul = true;
+        return;
+    }
+    // General constant: shift-and-add (no `__mul16`). Move the value to DE, build the
+    // result in HL by `result = result*2 (+ value)` per bit from the top.
+    a.byte(0xEB); // EX DE,HL   (DE = value)
+    a.byte(0x21); // LD HL, 0   (result)
+    a.word(0);
+    let top = 15 - k.leading_zeros();
+    for i in (0..=top).rev() {
+        a.byte(0x29); // ADD HL,HL   (result <<= 1)
+        if k & (1 << i) != 0 {
+            a.byte(0x19); // ADD HL,DE   (result += value)
+        }
     }
 }
 

@@ -41,7 +41,7 @@ Supported today (all differential-tested):
 | Feature | Notes |
 |---|---|
 | Types | `u16` (default) and `u8` (wraps at 256). `as u8` truncates, `as u16`/`as usize` widen. `u32` (two slots, computed in `HL:DE`) for `^ & \|` + constant shifts + `as u16`/`as u8` — enough for a 32-bit xorshift RNG. |
-| Arithmetic | `+ - * / %`, `wrapping_add/sub/mul`. `*`/`/`/`%` use the appended micro-runtime. (16-bit; `u32` arithmetic beyond bitwise/shift is not done yet.) |
+| Arithmetic | `+ - * / %`, `wrapping_add/sub/mul`. `*`/`/`/`%` use the appended micro-runtime — *except by a constant*: `× k` is shift-and-add, `/ 2ⁿ` / `% 2ⁿ` are shift/mask, and literal-only ops const-fold (no runtime call). (16-bit; `u32` arithmetic beyond bitwise/shift is not done yet.) |
 | Bitwise | `\|` `&` `^`, and `<<` / `>>` by a **constant** amount (`u16` and `u32`). |
 | Control flow | `if`/`else if`/`else`, `while`, `for` over integer ranges (`a..b` / `a..=b`, `for _ in`), `loop` / `break` / `continue`, early `return`; comparison conditions (`< <= > >= == !=`). |
 | Arrays | `let a = [0u16; N];` / `[e0, e1, …]`; `a[i]`, `a[i] = v`. Index with `i as usize`. `[u8; N]` are byte-packed-per-slot. Arrays of structs `let a = [Cell { … }; N]` — element field access `a[i].x` (read/write) + whole-element assign `a[i] = Cell { … }`. |
