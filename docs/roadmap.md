@@ -389,10 +389,15 @@ memory), lighter than a container, constrained enough that models generate it re
 - [ ] **P6 · MCP server** — `chuk-mcp-cell` over the core: `cell.compile`, `cell.run`,
   `cell.compile_and_run`, `cell.inspect`; then cached-runner sessions
   (`compile → cell_id`, `run_cell(cell_id, args)`) for warm-path agent performance.
-- [ ] **P7 · Safety / capabilities** — a `CellConfig`: `max_cycles` (have it),
-  `max_code_bytes`, `max_touched`, wall-clock timeout, cap on monomorphizations, and
-  **capability-gated `poke`/`peek`/`inport`** (off by default for agent cells; games opt
-  in). Deterministic by default, no ports.
+- [x] **P7 · Safety / capabilities** — a `CellConfig` with **capability-gated
+  `poke`/`peek` (raw memory) + `inport` (ports), off by default** (a `syn`-visitor scan
+  rejects them at compile unless allowed), plus `max_code_bytes` (compile-time) and
+  `max_touched` (run-time abort) ceilings on top of the deterministic cycle budget. The
+  CLI is **sandboxed by default** (`--allow-raw-memory`/`--allow-ports`/`--max-code-bytes`/
+  `--max-touched` to opt in); `Runner::compile` stays permissive for trusted/game code,
+  `compile_with_config(src, CellConfig::sandboxed())` for untrusted. `Report.halt` now
+  says *why* a run stopped (returned / cycle-budget / memory-limit). Tested. *(Next: a
+  wall-clock timeout and a monomorphization cap — compile-time blow-up guards.)*
 - [ ] **P8 · Cell-specific codegen wins** (overlaps Stage 2) — the narrow ones that hit
   generated snippets: const-fold, strength-reduce `*`/`/`/`%` by powers of two (skip
   `__mul16`/`__divmod16`), keep register-fitting locals out of slots, fast small-range
