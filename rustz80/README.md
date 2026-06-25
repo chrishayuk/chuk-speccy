@@ -157,6 +157,22 @@ The runner is library API ([`rustz80::cell::run`] → a `Report`); the binary is
 shim. An infinite loop stops at the budget and reports `BUDGET EXCEEDED` rather than
 hanging.
 
+**Compile once, run many.** [`rustz80::cell::Runner`] owns a single bus and, between
+runs, resets only the bytes the previous run wrote — so a warm run pays for the
+computation, not a fresh allocation:
+
+```rust
+let mut cell = rustz80::cell::Runner::compile(src)?;
+let a = cell.run(None, &[2, 3], budget)?;   // run with HL=2, DE=3
+let b = cell.run(None, &[9, 4], budget)?;   // again — bus reset, no realloc
+```
+
+Benchmarked (`cargo bench -p rustz80 --features cell --bench cell`, Apple Silicon): a
+trivial cell warm-runs in **~0.3 µs**, realistic snippets (`rng32`, `entities`) in
+**~10–15 µs** after their one-time compile, and heavy compute loops emulate the Z80 at
+**hundreds of × real-hardware speed**. Reuse cut the small-cell run cost ~60× vs a cold
+one-shot (which was dominated by the 64 KiB bus allocation, not CPU work).
+
 ## The dial: one `impl Game`, two compilers
 
 The headline. Write an ordinary [`speccy-sdk`](../speccy-sdk/README.md) `Game` and the
