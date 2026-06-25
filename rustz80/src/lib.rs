@@ -84,6 +84,42 @@ pub fn compile_program(src: &str) -> Result<Program, String> {
     Ok(Program { code, symbols })
 }
 
+/// One field of a [`struct_layout`]: its name, slot offset, and slot count (1 for a
+/// scalar, `N` for `[T; N]` / a tuple, `N × sizeof(elem)` for `[Cell; N]`). Each slot is
+/// a 2-byte `u16` cell, so a field's byte address (relative to a struct base) is
+/// `offset * 2`. This is the typed-state ABI: the layout a caller writes inputs into and
+/// reads outputs out of (`rustz80-cell`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldLayout {
+    pub name: String,
+    /// Slot offset from the struct's base.
+    pub offset: u16,
+    /// Slot count (each slot is one 2-byte `u16`).
+    pub slots: u16,
+}
+
+/// The field layout of a (non-generic) named struct in `src` — `(name, slot offset, slot
+/// count)` in declaration order. Field byte addresses are `base + offset * 2`. Used to
+/// place typed inputs / read typed state for a cell whose state lives at a known base.
+pub fn struct_layout(src: &str, name: &str) -> Result<Vec<FieldLayout>, String> {
+    let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+    let structs = lower::layout::collect_structs(&file)?;
+    let fields = structs
+        .get(name)
+        .ok_or_else(|| format!("no struct `{name}`"))?;
+    let mut out = Vec::with_capacity(fields.len());
+    let mut offset = 0u16;
+    for f in fields {
+        out.push(FieldLayout {
+            name: f.name.clone(),
+            offset,
+            slots: f.slots as u16,
+        });
+        offset += f.slots as u16;
+    }
+    Ok(out)
+}
+
 /// Compile a program and wrap it as a bootable `.tap` that runs from `entry`
 /// (a function name, default `"main"`). The autoloader `CLEAR`s below [`ORG`],
 /// `LOAD`s the code there, and `RANDOMIZE USR`s the entry.

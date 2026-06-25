@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 /// CLI usage line, shared by the `rustz80-cell` binary.
 pub const USAGE: &str = "usage: rustz80-cell run <file.rs> [--entry NAME] [--cycles N] \
-     [--args a,b,c] [--read name@addr:ty,...] [--json]";
+     [--args a,b,c] [--set addr:ty=val,...] [--read name@addr:ty,...] [--json]";
 
 const TRAMPOLINE: u16 = 0x7000;
 const SP_TOP: u16 = 0xFFF0;
@@ -91,6 +91,19 @@ impl Runner {
         args: &[u16],
         budget: u64,
     ) -> Result<Report, String> {
+        self.run_with_inputs(entry, args, &[], budget)
+    }
+
+    /// Like [`run`](Runner::run), but first writes typed `inputs` `(addr, ty, value)` into
+    /// memory after the reset — so a cell whose state lives at a known base reads
+    /// caller-supplied values (resolve field addresses with [`crate::struct_layout`]).
+    pub fn run_with_inputs(
+        &mut self,
+        entry: Option<&str>,
+        args: &[u16],
+        inputs: &[(u16, Ty, u64)],
+        budget: u64,
+    ) -> Result<Report, String> {
         let entry = match entry {
             Some(e) => e.to_string(),
             None if self.prog.symbols.contains_key("run") => "run".to_string(),
@@ -126,6 +139,24 @@ impl Runner {
         t.push(0x76); // HALT
         let tr = TRAMPOLINE as usize;
         self.mem[tr..tr + t.len()].copy_from_slice(&t);
+
+        // Typed inputs: written after the reset (so they survive it), marked touched
+        // (so the next run cleans them). Little-endian, low byte first.
+        for &(addr, ty, val) in inputs {
+            let bytes = match ty {
+                Ty::U8 => 1,
+                Ty::U16 => 2,
+                Ty::U32 => 4,
+            };
+            for i in 0..bytes {
+                let a = addr.wrapping_add(i as u16) as usize;
+                self.mem[a] = (val >> (8 * i)) as u8;
+                if !self.seen[a] {
+                    self.seen[a] = true;
+                    self.touched.push(a as u16);
+                }
+            }
+        }
 
         let mut bus = CellBus {
             mem: &mut self.mem,
@@ -380,6 +411,31 @@ pub fn parse_args(s: &str) -> Result<Vec<u16>, String> {
         .collect()
 }
 
+/// Parse a `--set` spec — comma-separated `addr:ty=value` (addr/value decimal or `0x..`),
+/// the typed inputs written into memory before the run.
+fn parse_sets(s: &str) -> Result<Vec<(u16, Ty, u64)>, String> {
+    let num16 = |t: &str| match t.strip_prefix("0x") {
+        Some(h) => u16::from_str_radix(h, 16),
+        None => t.parse::<u16>(),
+    };
+    let num64 = |t: &str| match t.strip_prefix("0x") {
+        Some(h) => u64::from_str_radix(h, 16),
+        None => t.parse::<u64>(),
+    };
+    s.split(',')
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| {
+            let t = t.trim();
+            let bad = || format!("bad --set `{t}` (want addr:ty=value)");
+            let (lhs, val_s) = t.split_once('=').ok_or_else(bad)?;
+            let (addr_s, ty_s) = lhs.split_once(':').ok_or_else(bad)?;
+            let addr = num16(addr_s).map_err(|_| format!("bad address in `{t}`"))?;
+            let val = num64(val_s).map_err(|_| format!("bad value in `{t}`"))?;
+            Ok((addr, Ty::parse(ty_s)?, val))
+        })
+        .collect()
+}
+
 /// Parse a `--read` spec — comma-separated `name@addr:ty` (addr decimal or `0x..`).
 fn parse_reads(s: &str) -> Result<Vec<(String, u16, Ty)>, String> {
     s.split(',')
@@ -413,6 +469,7 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     let mut entry: Option<String> = None;
     let mut cycles = DEFAULT_CYCLES;
     let mut call_args: Vec<u16> = Vec::new();
+    let mut sets: Vec<(u16, Ty, u64)> = Vec::new();
     let mut reads: Vec<(String, u16, Ty)> = Vec::new();
     let mut json = false;
     while let Some(a) = it.next() {
@@ -426,6 +483,7 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
                     .map_err(|_| "bad --cycles (want a positive integer)")?
             }
             "--args" => call_args = parse_args(it.next().ok_or("--args needs values")?)?,
+            "--set" => sets = parse_sets(it.next().ok_or("--set needs a spec")?)?,
             "--read" => reads = parse_reads(it.next().ok_or("--read needs a spec")?)?,
             "--json" => json = true,
             other => return Err(format!("unknown option `{other}`\n{USAGE}")),
@@ -433,7 +491,7 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     }
     let src = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
     let mut runner = Runner::compile(&src)?;
-    let mut report = runner.run(entry.as_deref(), &call_args, cycles)?;
+    let mut report = runner.run_with_inputs(entry.as_deref(), &call_args, &sets, cycles)?;
     if !reads.is_empty() {
         report.reads = runner.read_named(&reads); // decode typed fields from post-run memory
     }
