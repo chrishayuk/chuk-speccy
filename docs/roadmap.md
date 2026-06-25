@@ -313,7 +313,7 @@ still ship games if it stalls). The decisions that keep it solo-sized are realis
   (same source host + pure); generics via monomorphization; optional MIR frontend.
   Inline-asm / eDSL escape hatch for hot loops.
 
-### B3. `rustz80` as a deterministic agent microVM — **runner built**
+### B3. `rustz80-cell` — a deterministic agent microVM — **runner + typed read-back built**
 The const-generics + struct-element-array work has quietly changed `rustz80`'s
 category: it is no longer just a "Rust-shaped Z80 game compiler" but a **bounded,
 Rust-shaped data-structure compiler for a tiny deterministic VM** — fixed-capacity
@@ -353,6 +353,55 @@ bounded Z80 out → deterministic execution → typed symbols/state out.*
   agent loop: write code → run the cell → read typed output/state → iterate. *(Next: a
   convenience that derives the read layout straight from a state struct's emitted
   `.sym` map, so fields are named automatically.)*
+
+**Product shape — three layers, one core.** `rustz80-cell` is *a safe executable
+scratchpad for agents*: compile a tiny Rust-shaped program into a bounded Z80 cell, run
+it deterministically under a cycle budget, return typed results + cost + memory effects +
+(later) a trace. Keep it layered — **don't make MCP the core**:
+
+- `rustz80-cell-core` — the library API (today: `rustz80::cell`; later its own crate),
+  embeddable with no CLI/MCP assumptions. Used by the CLI, MCP, benches, the SDK, tests.
+- `rustz80-cell` — the native CLI / local scratchpad.
+- `chuk-mcp-cell` — a thin MCP adapter exposing cells to agents.
+
+The first niche isn't replacing Wasm/Python; it's replacing *"let the agent run arbitrary
+code to check something small"* with *"let the agent run tiny bounded code in a
+deterministic cell."* More inspectable than Wasm (source-shaped typed state, not linear
+memory), lighter than a container, constrained enough that models generate it reliably.
+
+**Phased plan** (✓ = done; → = next):
+
+- [x] **P1 · Warm execution** — compile-once/run-many `Runner`, O(touched) reset (above).
+- [ ] **P2 · Run modes** — split the hot path from observability: `run_fast` (regs +
+  cycles + halt only) vs `run_report` (＋symbols/touched) vs `run_trace` (per-instruction
+  + writes + optional disasm). The 10 000×-candidate inner loop must not pay for debug.
+- [x] **P3 · Full register capture** — `regs = [HL, DE, BC]`; tuple returns read back.
+- [~] **P4 · Typed I/O** — typed *read-back* done (`read_named`/`--read`). *Next:* typed
+  *inputs* — write named values into an `Input` region before the run (not just
+  `HL`/`DE`/`BC` args); and a convenience that derives the layout from a state struct's
+  `.sym` map so fields are named automatically. Plus `memory_diff` *values*, not just
+  ranges.
+- [~] **P5 · Native CLI** — have `run` + `bench`; add `compile` (source → cached cell),
+  `exec` (precompiled), `inspect` (symbols/size/runtime helpers), and a `.cell` artifact
+  (z80 image + entry + symbols + source hash + compiler/ABI version + helper list).
+- [ ] **P6 · MCP server** — `chuk-mcp-cell` over the core: `cell.compile`, `cell.run`,
+  `cell.compile_and_run`, `cell.inspect`; then cached-runner sessions
+  (`compile → cell_id`, `run_cell(cell_id, args)`) for warm-path agent performance.
+- [ ] **P7 · Safety / capabilities** — a `CellConfig`: `max_cycles` (have it),
+  `max_code_bytes`, `max_touched`, wall-clock timeout, cap on monomorphizations, and
+  **capability-gated `poke`/`peek`/`inport`** (off by default for agent cells; games opt
+  in). Deterministic by default, no ports.
+- [ ] **P8 · Cell-specific codegen wins** (overlaps Stage 2) — the narrow ones that hit
+  generated snippets: const-fold, strength-reduce `*`/`/`/`%` by powers of two (skip
+  `__mul16`/`__divmod16`), keep register-fitting locals out of slots, fast small-range
+  loops, power-of-two array strides.
+- [ ] **P9 · Direct-IR cell mode** (later) — let advanced callers feed IR/JSON straight
+  to codegen, bypassing the Rust parser (model-generated tools). Rust source stays the
+  default — it's human-readable, testable, debuggable.
+- [~] **P10–11 · Benchmark families + matrix** — have synthetic + 2 real rows; add
+  agent-shaped classes (scalar, state-transition, scoring, bounded search, data-structure,
+  generated-code stress, trace mode) × {cold, warm, warm-batch-10k, fast/report/trace},
+  and publish — proving usability, not raw compute.
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
