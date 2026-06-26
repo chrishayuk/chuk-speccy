@@ -113,7 +113,7 @@ fn cold_breakdown() {
 /// instantiate → warm run → cold one-shot → batch) and where the µs go. A disposable
 /// tool's whole life, broken down.
 fn lifecycle() {
-    use rustz80::cell::{CellProgram, Runner};
+    use rustz80::cell::{CellPool, CellProgram, Runner};
     const TINY: &str = "fn run() -> u16 { 0u16 }"; // isolates fixed per-call overhead
 
     // Build phases.
@@ -165,6 +165,15 @@ fn lifecycle() {
         let mut r = Runner::new(&p);
         black_box(r.run_fast(None, &[7, 5], CELL_BUDGET).unwrap().result);
     });
+    // Pooled: recycle a bus (skip the ~1 µs alloc), load the program, run, release.
+    let mut pool = CellPool::new();
+    let primed = pool.acquire(&cached); // prime one idle bus
+    pool.release(primed);
+    let pooled = time_op(|| {
+        let mut r = pool.acquire(black_box(&cached));
+        black_box(r.run_fast(None, &[7, 5], CELL_BUDGET).unwrap().result);
+        pool.release(r);
+    });
 
     let band = |s: f64| {
         let t = s * 1e6;
@@ -188,6 +197,7 @@ fn lifecycle() {
     line("cold: compile source + 1 run", cold_src);
     line("cold: cached image + 1 run", cold_img);
     line("cold: image bytes + 1 run", cold_imgbytes);
+    line("pooled: acquire + run + release", pooled);
     println!(
         "  → per-call overhead ~{} µs (tiny); the score adds ~{} µs of pure emulation;\n    \
          run_many_fast trims the per-call name-resolve, landing at ~{} µs.",
