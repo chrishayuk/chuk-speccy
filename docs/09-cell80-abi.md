@@ -58,6 +58,14 @@ used as a hardware-fidelity figure or an RL reward — that would reward pushing
 traps that read as "free." (The authentic `Spectrum48` target keeps the real software
 routines; only the `Cell` target traps.)
 
+**`trapped_ops`** is the honest companion: the count of cost-bearing traps (`mul`/`div`/fill)
+a run executed. A reward function should pair it with `cycles` — weight or refuse trap-heavy
+programs — rather than treat low `cycles` as cheap. (A program's compute footprint is then
+roughly `cycles + trapped_ops × <software-routine cost>`.) The memory footprint is bounded
+separately by `max_touched` (the write-budget); there is no separate cap to add. `halt`
+(`0x30`) is the explicit-stop trap and is *not* counted in `trapped_ops`; an unknown trap id
+is a no-op (also uncounted).
+
 ## Halt status
 
 | `halt` | meaning |
@@ -87,7 +95,7 @@ with a compiled `CellProgram` (and its serialized image).
 
 ```json
 {"abi":1,"entry":"run","entry_addr":32768,"result":42,"regs":[42,0,0],
- "cycles":67,"budget":2000000,"halt":"returned","code_bytes":47,"functions":1,
+ "cycles":67,"trapped_ops":0,"budget":2000000,"halt":"returned","code_bytes":47,"functions":1,
  "symbols":{"run":32768},"memory_touched":[[36864,36867]],"reads":{}}
 ```
 
@@ -95,6 +103,7 @@ with a compiled `CellProgram` (and its serialized image).
 - `entry` / `entry_addr` — the function run, and its address.
 - `result` / `regs` — `HL`, and `[HL, DE, BC]`.
 - `cycles` / `budget` — see the caveat above.
+- `trapped_ops` — count of cost-bearing traps (the honest companion to `cycles`).
 - `halt` — one of the statuses above; `halt_code` is present only for `halted`.
 - `code_bytes` / `functions` — compiled size and function count.
 - `symbols` — name → address, sorted by address.
