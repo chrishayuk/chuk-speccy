@@ -442,8 +442,16 @@ inspectable, deterministic, for the tiny-snippet class.*
   values). Also a **compile double-parse fix** (the cap scan shares the AST) ~halved
   compile time. Differential-tested (incl. `__mul16` across multiplier widths and
   `__divmod16` across a<b / a>b / a==b / 0 / wide) + asserts the runtimes aren't appended
-  for constants. *(Next: register-fitting locals out of slots; fast small-range loops —
-  or supersede both in cell mode with host-native intrinsics, see B4.)*
+  for constants. **`x * x` (a variable squared) now loads the operand once** and fans it
+  to both registers instead of evaluating + reloading twice — score `x*x + y*y + x*3`
+  dropped 385 → 327 T-states (−15%), 53 → 47 code bytes (helps games too). Differential-
+  tested (`square_same_var` across widths + overflow). A disassembly/perf-debug of the
+  score showed the remaining warm cost is **interpreter dispatch + fixed per-call overhead,
+  not codegen** — wall-clock is near its floor (~0.19 µs/call batch), so further codegen
+  micro-opts give diminishing wall-clock returns (they still shrink games + cycle counts).
+  *(Next: register-fitting locals out of slots is the only big lever left, but it's a real
+  allocator — high risk for ~modest warm gain; or supersede in cell mode via host-native
+  intrinsics, see B4.)*
 - [ ] **P9 · Direct-IR cell mode** (later) — let advanced callers feed IR/JSON straight
   to codegen, bypassing the Rust parser (model-generated tools). Rust source stays the
   default — it's human-readable, testable, debuggable.
