@@ -23,13 +23,18 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # `cell80-z80` and `rustz80` publish from the cell80 repo
           # (https://github.com/chrishayuk/cell80); spectrum/sdk depend on those crates.io
-          # releases (version deps), so publish cell80 first.
-          for p in chuk-speccy-display chuk-speccy-wos \
-                   chuk-speccy-spectrum chuk-speccy-sdk speccy; do
+          # releases (version deps), so publish cell80 first. `speccy` (the frontend bins)
+          # depends on chuk-speccy-games, so games publishes before it.
+          for p in chuk-speccy-display chuk-speccy-wos chuk-speccy-spectrum \
+                   chuk-speccy-sdk chuk-speccy-games speccy; do
             echo "::group::publish $p"
-            cargo publish -p "$p"
+            if ! cargo publish -p "$p" 2>publish.err; then
+              cat publish.err
+              # Tolerate re-runs: skip a version already on crates.io; fail on anything else.
+              grep -q "already exists" publish.err && echo "$p already published — skipping" || exit 1
+            fi
             echo "::endgroup::"
           done
