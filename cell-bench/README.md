@@ -41,7 +41,7 @@ What the cell wins, for the *tiny-snippet* class:
 
 - **Cold setup ~5× lower** — 0.59 ms vs Wasmtime's 3.0 ms (compile + instantiate). For
   "run a small thing once and throw it away," setup dominates, and the cell is cheaper.
-- **Code ~950× smaller** — 53 bytes of Z80 vs a 50 KB compiled Wasm module. Small enough
+- **Code ~1070× smaller** — 47 bytes of Z80 vs a 50 KB compiled Wasm module. Small enough
   to inspect, hash, cache, or show a human.
 - **Far lighter than Python** — Python is ~37 µs/call amortized and ~35 ms just to start
   the interpreter; a fresh subprocess *per* candidate would pay that 1000×.
@@ -81,7 +81,7 @@ compile source → image                 18.0 µs   realistic agent snippet
 instantiate runner (cached image)       1.1 µs   hot-loop cell/tool call
 warm run_fast — tiny (overhead floor)   0.06 µs   excellent warm primitive
 warm run_fast — realistic (score)       0.25 µs   excellent warm primitive
-batch run_many_fast — per-call          0.20 µs   excellent warm primitive
+batch run_many_fast — per-call          0.05 µs   excellent warm primitive
 cold: compile source + 1 run           18.9 µs   realistic agent snippet
 cold: cached image + 1 run              1.0 µs   hot-loop cell/tool call
 cold: image bytes + 1 run               1.2 µs   hot-loop cell/tool call
@@ -90,13 +90,18 @@ cold: image bytes + 1 run               1.2 µs   hot-loop cell/tool call
 Reading it:
 
 - **The per-call overhead floor is ~0.06 µs** (a trivial cell) — reset + trampoline + CPU
-  setup. The score's 0.25 µs is mostly the ~0.19 µs of actual Z80 emulation, not framework
-  cost. `run_fast` is genuinely an inner-loop primitive.
-- **`run_many_fast` (0.20 µs/call)** resolves the entry once instead of per call — a real
-  ~20% trim on the "score N candidates" path, the router's hot loop.
+  setup. The score's 0.25 µs (single `run_fast`) is mostly actual Z80 emulation, not
+  framework cost. `run_fast` is genuinely an inner-loop primitive.
+- **`run_many_fast` is ~0.05 µs/call** — a **~5×** drop. For a *straight-line* cell it
+  decodes once and replays on a stripped, native-register executor (no per-instruction
+  fetch/contention/refresh/flag work); the cycle count is input-independent so it's taken
+  from one authentic calibration run, and the results stay differential-checked against the
+  authentic interpreter. Anything outside that subset (branches/calls/shifts/`(HL)`) falls
+  back transparently. That puts the batch hot path **~4× off native-JIT Wasm** (0.013 µs),
+  vs ~18× for the general per-call `run_fast`.
 - **A whole disposable tool — instantiate + run — is ~1 µs.** That's the "million tiny
   tools" number: retrieve by manifest, instantiate cheaply, run deterministically, discard.
-- **The cell image is a 77-byte cartridge.** `CellProgram::to_bytes()` serializes code +
+- **The cell image is a 71-byte cartridge.** `CellProgram::to_bytes()` serializes code +
   symbols + policy with no syn; `from_bytes()` reloads + runs in **~1.2 µs — 16× cheaper
   than compiling the 235-byte source**. Cache it by hash, ship it, index it.
 

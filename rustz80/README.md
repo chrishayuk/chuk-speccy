@@ -189,13 +189,17 @@ self-contained image — code + symbols + policy, no syn, no source — so a too
 cached by hash, shipped, and reloaded without compiling at all:
 
 ```rust
-let image: Vec<u8> = prog.to_bytes();                  // ~77 bytes for the score cell
+let image: Vec<u8> = prog.to_bytes();                  // ~71 bytes for the score cell
 let prog = rustz80::cell::CellProgram::from_bytes(&image)?;  // reload + run in ~1.2 µs (16× < compile)
 ```
 
-**Batch the hot loop.** `run_many_fast(entry, &arg_sets, budget)` resolves the entry once
-and runs each input — the "score N candidates" path, ~20% under per-call `run_fast`
-(0.20 vs 0.25 µs/call):
+**Batch the hot loop.** `run_many_fast(entry, &arg_sets, budget)` is the "score N
+candidates" path. For a **straight-line** cell it decodes once and replays on a stripped
+native-register executor (skipping the authentic CPU's per-instruction
+fetch/contention/refresh/flag work); the cycle count is input-independent so it's taken
+from one authentic calibration run, and results stay differential-checked against the
+authentic interpreter (non-straight-line cells fall back transparently). **~0.05 vs
+0.25 µs/call (~5×)** — the batch hot path lands ~4× off native-JIT Wasm:
 
 ```rust
 let scores = cell.run_many_fast(None, &[&[3, 1], &[6, 5], &[10, 0]], budget)?;
@@ -221,9 +225,9 @@ that would call the software micro-runtime instead lower to the `ED FE` **host t
 the cell bus services with native `u16` arithmetic (the authentic `Spectrum48` target —
 `compile_program`/`.tap`/games — keeps the software routines, so real output stays real
 Z80). That makes a `var*var` multiply a few T-states instead of a loop: scoring 1000
-candidates, `run_fast` runs at **~0.24 µs/call (~4M/s)** — about 18× off native-JIT Wasm
-while the code is ~950× smaller (53 B vs 50 KB) and cold setup ~5× lower. See
-[`cell-bench`](../cell-bench).
+candidates, `run_fast` runs at **~0.24 µs/call** (and **~0.05 µs batched** via `run_many_fast`)
+— about 18× / 4× off native-JIT Wasm while the code is ~1070× smaller (47 B vs 50 KB) and
+cold setup ~5× lower. See [`cell-bench`](../cell-bench).
 
 **Typed inputs + results + state.** A cell takes typed **inputs** (`run_with_inputs`, or
 CLI `--set addr:ty=val`), returns all three result registers (`regs` = `[HL, DE, BC]`, so
@@ -302,9 +306,9 @@ cargo run --release --bin speccy-gui -- testroms/48.rom move.tap   # then press 
   `layout` (struct/enum layout + parse helpers), `prelude` (handle routing),
   `generics` (monomorphization), `expr`, and `stmt`; `mod.rs` owns the `Ctx` and the
   function-level orchestration.
-- **Codegen** (`codegen.rs`): IR → Z80. Locals (incl. params) live in a per-function
-  scratch region; expressions evaluate via `HL` + the stack; `*`/`/`/`%` `CALL` an
-  appended `__mul16`/`__divmod16`.
+- **Codegen** (`codegen/`: `asm` · `runtime` · `expr` · `stmt`): IR → Z80. Locals (incl.
+  params) live in a per-function scratch region; expressions evaluate via `HL` + the stack;
+  `*`/`/`/`%` `CALL` an appended `__mul16`/`__divmod16` (Spectrum) or trap (Cell).
 - **Library API**: `compile_program(src) -> Program { code, symbols }`,
   `compile_fn(src) -> Vec<u8>`, `to_tap(code, org, entry, name)`,
   `compile_to_tap(src, entry, name)`. Code is laid out from `ORG = 0x8000`.

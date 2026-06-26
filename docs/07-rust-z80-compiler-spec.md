@@ -23,7 +23,7 @@ micro-runtime.
 > has landed too: const-fold, `× constant` via shift-and-add, `/ 2ⁿ`/`% 2ⁿ` via
 > shift/mask, and faster mul/div runtimes.
 >
-> **A second product shares the frontend: [`rustz80-cell`](../rustz80/src/cell.rs)** — a
+> **A second product shares the frontend: [`rustz80-cell`](../rustz80/src/cell/)** — a
 > deterministic agent micro-VM (compile-once/run-many on a flat-RAM Z80, cycle budget,
 > capability-gated intrinsics, typed inputs + state read-back, structured report). It uses
 > a **dual-target** backend: `Spectrum48` is authentic Z80 (games/`.tap`), while `Cell`

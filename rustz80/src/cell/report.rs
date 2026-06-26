@@ -45,7 +45,7 @@ impl Ty {
     }
 }
 
-/// The lightweight outcome of a [`run_fast`](Runner::run_fast): the result registers,
+/// The lightweight outcome of a [`run_fast`](crate::cell::Runner::run_fast): the result registers,
 /// T-states, and halt reason — no allocations (no symbol map, size report, or memory
 /// diff). For tight agent loops.
 #[derive(Debug, Clone, Copy)]
@@ -58,7 +58,7 @@ pub struct Fast {
     pub halt: Halt,
 }
 
-/// The structured outcome of a [`run`].
+/// The structured outcome of a [`run`](crate::cell::run).
 #[derive(Debug, Clone)]
 pub struct Report {
     /// The entry function that was run, and its address.
@@ -70,7 +70,7 @@ pub struct Report {
     /// fills all three (`result` is `regs[0]`).
     pub regs: [u16; 3],
     /// Named typed values decoded from post-run memory (empty unless requested via
-    /// [`Runner::read_named`] / the CLI `--read`).
+    /// [`Runner::read_named`](crate::cell::Runner::read_named) / the CLI `--read`).
     pub reads: Vec<(String, u64)>,
     /// T-states elapsed, and the budget it ran under.
     pub cycles: u64,
