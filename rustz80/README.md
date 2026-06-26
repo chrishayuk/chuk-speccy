@@ -201,6 +201,17 @@ and runs each input — the "score N candidates" path, ~20% under per-call `run_
 let scores = cell.run_many_fast(None, &[&[3, 1], &[6, 5], &[10, 0]], budget)?;
 ```
 
+**Pool short-lived cells.** For "spawn a fresh cell per candidate/task," a `CellPool`
+recycles the 64 KiB bus so each cell skips the ~1 µs allocation — a disposable cell
+(acquire + run + release) costs **~0.38 µs** vs ~1.06 µs cold:
+
+```rust
+let mut pool = rustz80::cell::CellPool::new();
+let mut cell = pool.acquire(&prog);   // recycles an idle bus, or allocs if none free
+let out = cell.run_fast(None, &[7, 5], budget)?;
+pool.release(cell);                    // back to the pool for the next acquire
+```
+
 **Fast path for tight loops.** `Runner::run_fast` returns just the result registers,
 cycles, and halt — no symbol-map clone / size report / memory-diff (no per-call
 allocations). Use `run` when you want the rich report, `run_fast` in the inner loop.

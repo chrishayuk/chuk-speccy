@@ -411,9 +411,12 @@ inspectable, deterministic, for the tiny-snippet class.*
   known snippet's cold setup effectively vanish. **The image format landed:**
   `CellProgram::to_bytes()` / `from_bytes()` is a compact self-contained cartridge (code +
   symbols + policy, no syn — **77 bytes** for the score cell) that reloads + runs in
-  ~1.2 µs (16× under compiling the source) — cache by hash, ship, index. *Next:* surface it
-  on the CLI — `compile` (source → `.cell`), `exec` (precompiled image), `inspect`
-  (symbols/size/helpers) — and stamp the artifact with a source hash + compiler/ABI version.
+  ~1.2 µs (16× under compiling the source) — cache by hash, ship, index. And a **`CellPool`**
+  recycles the 64 KiB bus across cells of any program, so a *disposable* cell (acquire +
+  run + release) costs **~0.38 µs** instead of ~1.06 µs cold — the "spawn N short-lived
+  cells" path. *Next:* surface it on the CLI — `compile` (source → `.cell`), `exec`
+  (precompiled image), `inspect` (symbols/size/helpers) — and stamp the artifact with a
+  source hash + compiler/ABI version.
 - [ ] **P6 · MCP server** — `chuk-mcp-cell` over the core: `cell.compile`, `cell.run`,
   `cell.compile_and_run`, `cell.inspect`; then cached-runner sessions
   (`compile → cell_id`, `run_cell(cell_id, args)`) for warm-path agent performance.

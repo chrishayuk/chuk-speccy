@@ -619,6 +619,65 @@ impl Runner {
             })
             .collect()
     }
+
+    /// Re-point this runner at `program`, **reusing the allocated 64 KiB bus** (for
+    /// [`CellPool`]). Clears the previous run's writes and the previous program's code so
+    /// there's no cross-program leakage, then loads the new code — paying only O(code), not
+    /// a fresh 128 KiB alloc/zero.
+    fn reset_for(&mut self, program: &CellProgram) {
+        for &a in &self.touched {
+            self.mem[a as usize] = 0;
+            self.seen[a as usize] = false;
+        }
+        self.touched.clear();
+        let org = ORG as usize;
+        for b in self.mem[org..org + self.prog.code.len()].iter_mut() {
+            *b = 0; // the old program's code (the new one may be shorter)
+        }
+        self.prog = program.prog.clone();
+        self.cfg = program.cfg.clone();
+        self.mem[org..org + self.prog.code.len()].copy_from_slice(&self.prog.code);
+    }
+}
+
+/// A pool of reusable 64 KiB buses. Acquiring a cell for *any* program recycles an idle bus
+/// instead of allocating + zeroing a fresh 128 KiB (the ~1 µs `Runner::new` cost the
+/// lifecycle bench isolates) — paying only to load the code. For "spawn many short-lived
+/// cells" / "instantiate N candidate tools concurrently" patterns: [`acquire`](Self::acquire)
+/// a runner, run it, [`release`](Self::release) it back. The pool grows to the high-water
+/// mark of live cells.
+#[derive(Default)]
+pub struct CellPool {
+    idle: Vec<Runner>,
+}
+
+impl CellPool {
+    /// An empty pool (allocates buses lazily, on the first [`acquire`](Self::acquire)).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A runner loaded with `program` — recycling an idle bus if one is free (no 128 KiB
+    /// alloc), else allocating one. Return it with [`release`](Self::release).
+    pub fn acquire(&mut self, program: &CellProgram) -> Runner {
+        match self.idle.pop() {
+            Some(mut r) => {
+                r.reset_for(program);
+                r
+            }
+            None => Runner::new(program),
+        }
+    }
+
+    /// Return a runner to the pool so its bus can be reused by a later acquire.
+    pub fn release(&mut self, runner: Runner) {
+        self.idle.push(runner);
+    }
+
+    /// How many buses are idle (reusable without allocation).
+    pub fn idle_count(&self) -> usize {
+        self.idle.len()
+    }
 }
 
 /// A scalar width for typed memory read-back.

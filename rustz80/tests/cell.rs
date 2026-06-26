@@ -72,6 +72,34 @@ fn run_many_fast_matches_single() {
 }
 
 #[test]
+fn cell_pool_reuses_buses() {
+    use rustz80::cell::{CellPool, CellProgram};
+    let p1 = CellProgram::compile("fn run(a: u16) -> u16 { a + 1u16 }").unwrap();
+    let p2 = CellProgram::compile("fn run(a: u16) -> u16 { a * 2u16 }").unwrap();
+    let mut pool = CellPool::new();
+    assert_eq!(pool.idle_count(), 0);
+
+    let mut r = pool.acquire(&p1);
+    assert_eq!(r.run(None, &[10], DEFAULT_CYCLES).unwrap().result, 11);
+    pool.release(r);
+    assert_eq!(pool.idle_count(), 1);
+
+    // A different program reuses the pooled bus — no leakage from p1, correct result.
+    let mut r = pool.acquire(&p2);
+    assert_eq!(pool.idle_count(), 0); // the idle bus was taken, not a new alloc
+    assert_eq!(r.run(None, &[10], DEFAULT_CYCLES).unwrap().result, 20);
+    pool.release(r);
+    assert_eq!(pool.idle_count(), 1);
+
+    // Two concurrent cells → pool grows to the high-water mark of 2.
+    let a = pool.acquire(&p1);
+    let b = pool.acquire(&p2);
+    pool.release(a);
+    pool.release(b);
+    assert_eq!(pool.idle_count(), 2);
+}
+
+#[test]
 fn cell_image_roundtrip() {
     use rustz80::cell::{CellConfig, CellProgram};
     let src = "fn run(a: u16, b: u16) -> u16 { a * b }";
