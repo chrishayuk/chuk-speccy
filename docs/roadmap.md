@@ -493,8 +493,13 @@ spectrum-mode codegen simply never emits it). Per-op lowering table:
   them). A `[0u16; 64]` cell dropped from ~450 B of stores to **28 B**. Differential-tested
   (word const/zero/runtime + `u8`) — every element is one 2-byte slot, so the fill is
   slot-stride. *(memcpy awaits an element-copy construct.)*
-- [ ] **4 · Typed I/O regions + clean halt/return** — fixed input/output memory the runner
-  maps JSON ↔ typed state; `ED FE HALT` for a structured `{halt, result[], cycles}`.
+- [~] **4 · Typed I/O regions** — `StateCell::bind(src, "State", entry)` lays a state struct
+  at a fixed `STATE_BASE` and exposes **typed I/O by field name**: `set("x", 10)` →
+  `run(budget)` → `get("score")`, resolving names to addresses via the struct layout (the
+  program is `impl State { fn run(&mut self) … }`); `fields()` lists them, reuse is
+  leak-clean. The JSON↔state surface the MCP adapter (P6) needs. The structured
+  `{halt, result, cycles}` is already the `Report`. *(Next: `ED FE HALT` for a
+  program-driven halt code / early exit; multi-slot field get/set.)*
 - [ ] **5 · (optional) trace markers + seeded RNG** — debug tier only; RNG seeded + reported
   to keep replay deterministic.
 - [ ] **6 · Formalise the *Cell80* ABI** — Z80-compatible deterministic VM: 64K flat RAM,

@@ -26,6 +26,33 @@ fn cell_program_compile_once_instantiate_cheap() {
 }
 
 #[test]
+fn state_cell_named_io() {
+    use rustz80::cell::StateCell;
+    // The agent surface: set named inputs → run → read named outputs, no raw addresses.
+    let src = "struct State { x: u16, y: u16, score: u16 }
+               impl State { fn run(&mut self) -> u16 { self.score = self.x * self.x + self.y; self.score } }";
+    let mut cell = StateCell::bind(src, "State", None).unwrap(); // entry defaults to State::run
+    cell.set("x", 6).unwrap();
+    cell.set("y", 5).unwrap();
+    let rep = cell.run(DEFAULT_CYCLES).unwrap();
+    assert_eq!(rep.result, 41); // 6*6 + 5
+    assert_eq!(cell.get("score"), Some(41));
+
+    // Reuse with new inputs — no leakage (score re-zeroed by the reset before re-run).
+    cell.set("x", 2).unwrap();
+    cell.set("y", 3).unwrap();
+    cell.run(DEFAULT_CYCLES).unwrap();
+    assert_eq!(cell.get("score"), Some(7)); // 2*2 + 3
+
+    // Unknown / non-existent fields.
+    assert!(cell.set("nope", 1).is_err());
+    assert_eq!(cell.get("nope"), None);
+    let mut names: Vec<&str> = cell.fields().collect();
+    names.sort();
+    assert_eq!(names, ["score", "x", "y"]);
+}
+
+#[test]
 fn cell80_array_init_is_a_block_op() {
     use rustz80::cell::{CellProgram, Runner};
     // A big `[v; N]` init is one block op, not N unrolled stores — so the code stays tiny

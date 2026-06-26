@@ -217,6 +217,16 @@ rustz80-cell run state.rs --entry State::run --args 0xb000 \
 That closes the agent loop: **set typed inputs → run the cell → read typed output/state →
 iterate** — source-shaped state, no Python/Docker/Wasm weight.
 
+**By field name (`StateCell`).** For the common "state struct in / out" shape, bind the
+struct and work in field names — the layout resolves the addresses:
+
+```rust
+let mut cell = rustz80::cell::StateCell::bind(src, "State", None)?; // entry: State::run
+cell.set("x", 10)?;
+cell.run(budget)?;
+let score = cell.get("score");   // typed, by name — the JSON↔state surface for agents/MCP
+```
+
 **Safe by default.** A `CellConfig` gates the intrinsics and caps resources: `poke`/`peek`
 (raw memory) and `inport` (ports) are **capability-gated, off by default** for untrusted
 cells, with `max_code_bytes` / `max_touched` ceilings on top of the deterministic cycle
