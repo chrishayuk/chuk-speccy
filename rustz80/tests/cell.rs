@@ -296,6 +296,159 @@ fn run_many_fast_falls_back_for_branches() {
 }
 
 #[test]
+fn cartridge_roundtrip_and_inspect() {
+    use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig, ABI_VERSION};
+    let src = "fn run(a: u16, b: u16) -> u16 { a * b }";
+    let cart = Cartridge::compile(
+        src,
+        CellConfig::sandboxed(),
+        CartridgeOpts {
+            id: Some("mul.v1".into()),
+            summary: "product".into(),
+            tags: vec!["math".into(), "demo".into()],
+            entry: None, // resolves to `run`
+        },
+    )
+    .unwrap();
+
+    // Round-trip through bytes: manifest + program survive, and it still runs.
+    let bytes = cart.to_bytes();
+    let back = Cartridge::from_bytes(&bytes).unwrap();
+    assert_eq!(back.manifest, cart.manifest);
+    assert_eq!(back.manifest.id, "mul.v1");
+    assert_eq!(back.manifest.entry, "run");
+    assert_eq!(back.manifest.abi_version, ABI_VERSION);
+    assert!(!back.manifest.compiler_version.is_empty());
+    assert_eq!(
+        Runner::new(&back.program)
+            .run(None, &[6, 7], DEFAULT_CYCLES)
+            .unwrap()
+            .result,
+        42
+    );
+
+    // Inspection surfaces the manifest for a tool index.
+    let j = back.to_json();
+    for key in [
+        "\"id\":\"mul.v1\"",
+        "\"entry\":\"run\"",
+        "\"tags\":[\"math\",\"demo\"]",
+        "\"abi\":1",
+    ] {
+        assert!(j.contains(key), "inspect json missing {key}: {j}");
+    }
+    assert!(back.to_human().contains("mul.v1"));
+
+    // Foreign / truncated bytes are rejected, not panicked; bad entry errors.
+    assert!(Cartridge::from_bytes(b"nope!!").is_err());
+    assert!(Cartridge::from_bytes(&bytes[..bytes.len() - 4]).is_err());
+    assert!(Cartridge::compile(
+        src,
+        CellConfig::sandboxed(),
+        CartridgeOpts {
+            entry: Some("missing".into()),
+            ..Default::default()
+        }
+    )
+    .is_err());
+}
+
+#[test]
+fn cartridge_permissive_and_empty_manifest_branches() {
+    use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig};
+    // Permissive (no ceilings → ∞/null) + empty summary/tags (→ "(no summary)" / "—").
+    let cart = Cartridge::compile(
+        "fn run() -> u16 { 0u16 }",
+        CellConfig::permissive(),
+        CartridgeOpts::default(),
+    )
+    .unwrap();
+    let human = cart.to_human();
+    assert!(
+        human.contains("(no summary)") && human.contains("tags: —"),
+        "got: {human}"
+    );
+    assert!(human.contains("max_code=∞") && human.contains("max_touched=∞"));
+    assert!(cart
+        .to_json()
+        .contains("\"max_code\":null,\"max_touched\":null"));
+    assert_eq!(cart.manifest.id, "run"); // defaulted to the entry name
+
+    // Neither `run` nor `main`, no explicit entry → error.
+    assert!(Cartridge::compile(
+        "fn helper() -> u16 { 1u16 }",
+        CellConfig::permissive(),
+        CartridgeOpts::default()
+    )
+    .is_err());
+}
+
+#[test]
+fn cli_compile_inspect_and_errors() {
+    let dir = std::env::temp_dir().join("rustz80_cart_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let rs = dir.join("c.rs");
+    let cellfile = dir.join("c.cell");
+    std::fs::write(
+        &rs,
+        "fn run(a: u16, b: u16) -> u16 { poke(40000u16, a as u8); a + b }",
+    )
+    .unwrap();
+    let (rs, cellfile) = (
+        rs.to_str().unwrap().to_string(),
+        cellfile.to_str().unwrap().to_string(),
+    );
+
+    // compile exercising most options (poke needs --allow-raw-memory).
+    let out = cell::run_cli(&[
+        "compile".into(),
+        rs.clone(),
+        "-o".into(),
+        cellfile.clone(),
+        "--entry".into(),
+        "run".into(),
+        "--id".into(),
+        "add.v1".into(),
+        "--summary".into(),
+        "adds two".into(),
+        "--tags".into(),
+        "math, demo".into(),
+        "--allow-raw-memory".into(),
+        "--max-touched".into(),
+        "256".into(),
+    ])
+    .unwrap();
+    assert!(
+        out.contains("wrote") && out.contains("add.v1"),
+        "got: {out}"
+    );
+
+    // inspect: human (no --json) and json.
+    assert!(cell::run_cli(&["inspect".into(), cellfile.clone()])
+        .unwrap()
+        .contains("add.v1"));
+    assert!(
+        cell::run_cli(&["inspect".into(), cellfile, "--json".into()])
+            .unwrap()
+            .contains("\"tags\":[\"math\",\"demo\"]")
+    );
+
+    // error paths: unknown command, no args, compile without -o, unknown option, missing file.
+    assert!(cell::run_cli(&["frobnicate".into()]).is_err());
+    assert!(cell::run_cli(&[]).is_err());
+    assert!(cell::run_cli(&["compile".into(), rs.clone()]).is_err());
+    assert!(cell::run_cli(&[
+        "compile".into(),
+        rs,
+        "-o".into(),
+        "/x".into(),
+        "--bogus".into()
+    ])
+    .is_err());
+    assert!(cell::run_cli(&["inspect".into(), "/no/such.cell".into()]).is_err());
+}
+
+#[test]
 fn cell_image_roundtrip() {
     use rustz80::cell::{CellConfig, CellProgram};
     let src = "fn run(a: u16, b: u16) -> u16 { a * b }";
@@ -679,14 +832,14 @@ fn run_cli_typed_read() {
         p.clone(),
         "--allow-raw-memory".into(),
         "--set".into(),
-        "0x9c42:u16=0x00ff".into(), // hex addr + hex value (exercises the hex parse paths)
+        "0x9c42:u16=0x00ff,40004:u16=9".into(), // hex addr/value AND decimal — both parse paths
         "--read".into(),
-        "score@40000:u8,lives@0x9c41:u8,extra@0x9c42:u16".into(), // 0x9c41 = 40001 (hex addr)
+        "score@40000:u8,lives@0x9c41:u8,extra@0x9c42:u16,dec@40004:u16".into(), // 0x9c41 = 40001
         "--json".into(),
     ])
     .unwrap();
     assert!(
-        out.contains("\"reads\":{\"score\":42,\"lives\":7,\"extra\":255}"),
+        out.contains("\"reads\":{\"score\":42,\"lives\":7,\"extra\":255,\"dec\":9}"),
         "got: {out}"
     );
 

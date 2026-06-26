@@ -114,27 +114,45 @@ const IMAGE_MAGIC: &[u8; 4] = b"CZ80";
 
 const IMAGE_VER: u8 = 1;
 
-/// A tiny bounds-checked cursor for [`CellProgram::from_bytes`].
-struct ImageReader<'a> {
-    b: &'a [u8],
-    i: usize,
+/// A tiny bounds-checked byte cursor — shared by [`CellProgram::from_bytes`] and the
+/// `.cell` cartridge reader ([`super::cartridge`]).
+pub(super) struct ImageReader<'a> {
+    pub(super) b: &'a [u8],
+    pub(super) i: usize,
 }
 impl<'a> ImageReader<'a> {
-    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
+    pub(super) fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
         let end = self.i.checked_add(n).ok_or("cell image truncated")?;
         let s = self.b.get(self.i..end).ok_or("cell image truncated")?;
         self.i = end;
         Ok(s)
     }
-    fn u8(&mut self) -> Result<u8, String> {
+    pub(super) fn u8(&mut self) -> Result<u8, String> {
         Ok(self.take(1)?[0])
     }
-    fn u16(&mut self) -> Result<u16, String> {
+    pub(super) fn u16(&mut self) -> Result<u16, String> {
         let s = self.take(2)?;
         Ok(u16::from_le_bytes([s[0], s[1]]))
     }
-    fn u32(&mut self) -> Result<u32, String> {
+    pub(super) fn u32(&mut self) -> Result<u32, String> {
         let s = self.take(4)?;
         Ok(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
     }
+    pub(super) fn u64(&mut self) -> Result<u64, String> {
+        let s = self.take(8)?;
+        Ok(u64::from_le_bytes(s.try_into().unwrap()))
+    }
+    /// A `u16`-length-prefixed UTF-8 string.
+    pub(super) fn string(&mut self) -> Result<String, String> {
+        let n = self.u16()? as usize;
+        Ok(std::str::from_utf8(self.take(n)?)
+            .map_err(|_| "bad utf-8 in cell image")?
+            .to_string())
+    }
+}
+
+/// Write a `u16`-length-prefixed UTF-8 string into `b` (mirror of [`ImageReader::string`]).
+pub(super) fn put_string(b: &mut Vec<u8>, s: &str) {
+    b.extend_from_slice(&(s.len() as u16).to_le_bytes());
+    b.extend_from_slice(s.as_bytes());
 }
