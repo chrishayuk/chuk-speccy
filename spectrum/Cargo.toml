@@ -10,7 +10,7 @@ repository.workspace = true
 name = "spectrum"
 
 [dependencies]
-z80 = { package = "cell80-z80", version = "0.1.0", git = "https://github.com/chrishayuk/cell80", rev = "43b457308bea32a48ad57082ff4c8072d5820574" }
+z80 = { package = "cell80-z80", version = "0.2.0" }
 # The authentic colour palette (one source of truth for RGBA rendering). `display`
 # is standalone (no emulator deps), so this is a clean downward reference.
-display = { package = "chuk-speccy-display", version = "0.1.0", path = "../display" }
+display = { package = "chuk-speccy-display", version = "0.2.0", path = "../display" }

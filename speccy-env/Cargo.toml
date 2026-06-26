@@ -10,10 +10,10 @@ repository.workspace = true
 name = "speccy_env"
 
 [dependencies]
-spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
-speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }
+spectrum = { package = "chuk-speccy-spectrum", version = "0.2.0", path = "../spectrum" }
+speccy-sdk = { package = "chuk-speccy-sdk", version = "0.2.0", path = "../speccy-sdk" }
 
 [dev-dependencies]
 # Compile a dialect game (+ its symbol map) to drive in the end-to-end tests — via
 # the SDK's `compile` feature (the one game-compile entry point).
-speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk", features = ["compile"] }
+speccy-sdk = { package = "chuk-speccy-sdk", version = "0.2.0", path = "../speccy-sdk", features = ["compile"] }

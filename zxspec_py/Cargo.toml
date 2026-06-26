@@ -3,7 +3,7 @@
 # flags don't affect `cargo test --workspace`. Built with maturin.
 [package]
 name = "zxspec_py"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 spectrum = { package = "chuk-speccy-spectrum", path = "../spectrum" }
-z80 = { package = "cell80-z80", git = "https://github.com/chrishayuk/cell80", rev = "43b457308bea32a48ad57082ff4c8072d5820574" }
+z80 = { package = "cell80-z80", version = "0.2.0" }
 # World of Spectrum search + download (shared with the frontend CLI).
 wos = { package = "chuk-speccy-wos", path = "../wos" }
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py311"] }

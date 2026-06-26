@@ -25,10 +25,8 @@ jobs:
         run: |
           set -euo pipefail
           # `cell80-z80` and `rustz80` publish from the cell80 repo
-          # (https://github.com/chrishayuk/cell80); this repo's spectrum/sdk depend on those
-          # releases. NOTE: until spectrum/sdk reference z80/rustz80 as crates.io versions
-          # (not the current git deps), `cargo publish` of those two will fail — flip them to
-          # version deps once cell80's crates are on crates.io.
+          # (https://github.com/chrishayuk/cell80); spectrum/sdk depend on those crates.io
+          # releases (version deps), so publish cell80 first.
           for p in chuk-speccy-display chuk-speccy-wos \
                    chuk-speccy-spectrum chuk-speccy-sdk speccy; do
             echo "::group::publish $p"
