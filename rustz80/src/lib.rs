@@ -40,7 +40,7 @@ pub struct Program {
     pub symbols: HashMap<String, u16>,
 }
 
-/// One entry in a [`size_report`]: a named function (or appended runtime routine, or
+/// One entry in a [`Program::size_report`]: a named function (or appended runtime routine, or
 /// a monomorphized instance) and the byte span it occupies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnSize {

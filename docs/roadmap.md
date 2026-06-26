@@ -8,7 +8,7 @@ ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonom
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
 (Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), a `.tap` emitter, and **the dial closed**: one `impl Game` source compiles under rustc (speccy-sdk) **and** rustz80 (a bootable tape that runs on the real ROM). The dialect has since grown into a **bounded data-structure language**: generics + const-generics, struct arrays / fixed-capacity pools (`Entities<Cell, const N>`), and a `u32` 32-bit xorshift RNG — all monomorphized, no heap, deterministic.
-That language now also runs headless as **`rustz80-cell`** (B3) — a *deterministic agent microVM*: compile-once/run-many on a flat-RAM Z80, cycle-budgeted, capability-gated, with typed inputs + state read-back and a structured report. It defaults to a **Cell80** backend (B4) — a Z80 *superset* where `*`/`/`/`%` and `[v; N]` fills lower to `ED FE` host traps (native, no software runtime), while the authentic `Spectrum48` target keeps real-Z80 output. Benchmarked vs Wasmtime + Python (`cell-bench`): a realistic snippet warm-runs in **~0.24 µs (~4M/s)** — ~18× off native-JIT Wasm but ~950× smaller code (53 B vs 50 KB) and ~5× lower cold setup.
+That language now also runs headless as **`rustz80-cell`** (B3) — a *deterministic agent microVM*: compile-once/run-many on a flat-RAM Z80, cycle-budgeted, capability-gated, with typed inputs + state read-back and a structured report. It defaults to a **Cell80** backend (B4) — a Z80 *superset* where `*`/`/`/`%` and `[v; N]` fills lower to `ED FE` host traps (native, no software runtime), while the authentic `Spectrum48` target keeps real-Z80 output. Benchmarked vs Wasmtime + Python (`cell-bench`): a realistic snippet warm-runs in **~0.24 µs** (**~0.05 µs batched**, via a decode-once fast executor) — ~18×/~4× off native-JIT Wasm but ~1070× smaller code (47 B vs 50 KB) and ~5× lower cold setup.
 Plus **bit-exact `serialize_full` reset** (the RL gate), surfaced through PyO3 + MCP,
 and the crates published (`chuk-speccy-*` libs, `speccy`/`rustz80` CLIs). Headline
 next: the **authoring plane** ([spec 08](./08-speccy-kit-authoring-plane-spec.md)) —
@@ -379,22 +379,27 @@ source-shaped typed state read-back, capability gating, a cycle budget, and a sa
 surface you can hold in your head (64K, no WASI/imports). The honest proof is the cross-runtime **comparison benchmark** (`cell-bench/`): native
 Rust (floor) · Wasmtime warm · `rustz80-cell` warm · Python subprocess, scoring 1000
 candidates. Measured (Apple Silicon): warm per-call **native 0.001 µs · Wasm 0.013 µs ·
-cell 2.4 µs · Python 408 µs**; cold setup **Wasm 3.0 ms · cell 0.59 ms · Python 39 ms**;
-code size **cell 69 B vs Wasm 50 KB**. So Wasm wins warm compute ~185×, but the cell sets
-up ~5× faster and is ~730× smaller — and runs ~400k evals/s, well inside "call it in a
-loop." The result confirms the niche: *not faster than Wasm — smaller, lower-setup, more
-inspectable, deterministic, for the tiny-snippet class.*
+cell 0.24 µs (`run_fast`) / 0.05 µs (`run_many_fast`, decode-once) · Python ~37 µs**; cold
+setup **Wasm 3.0 ms · cell 0.59 ms (≈1 µs from a cached image) · Python ~35 ms**; code size
+**cell 47 B vs Wasm 50 KB**. So Wasm wins warm compute (~18× per-call, ~4× on the batch hot
+path), but the cell sets up ~5× faster, is ~1070× smaller, and runs **~4–20 M evals/s** —
+well inside "call it in a loop." The niche holds: *not faster than Wasm — smaller,
+lower-setup, more inspectable, deterministic, for the tiny-snippet class.*
 
 **Phased plan** (✓ = done; → = next):
 
 - [x] **P1 · Warm execution** — compile-once/run-many `Runner`, O(touched) reset (above).
 - [~] **P2 · Run modes** — `Runner::run_fast` (just regs + cycles + halt, **no per-call
   allocations** — no symbol-map clone / size report / memory-diff coalesce) splits the hot
-  path from `run`'s rich `Report`, and `run_many_fast(entry, &arg_sets, budget)` resolves
-  the entry once for the "score N candidates" loop. Lifecycle bench (cell-bench): per-call
-  overhead floor **~0.06 µs** (a trivial cell), the score **0.25 µs** (mostly Z80
-  emulation, not framework), `run_many_fast` **0.20 µs** (~20% under per-call). *Next:*
-  `run_trace` (per-instruction + writes + optional disasm) for the debug tier.
+  path from `run`'s rich `Report`. `run_many_fast(entry, &arg_sets, budget)` is the batch
+  hot path: it resolves the entry once and, for a **straight-line** cell, **decodes it once
+  and replays on a stripped native-register executor** (no per-instruction
+  fetch/contention/refresh/flag work) — the cycle count is input-independent so it comes
+  from one authentic calibration run, and results stay differential-checked against the
+  authentic interpreter; non-straight-line cells fall back transparently. Lifecycle bench
+  (cell-bench): per-call overhead floor **~0.06 µs**, single `run_fast` score **0.25 µs**,
+  `run_many_fast` **~0.05 µs** (~5×, ~4× off native-JIT Wasm). *Next:* lazy flags +
+  conditional jumps so looping cells fast-path too; `run_trace` for the debug tier.
 - [x] **P3 · Full register capture** — `regs = [HL, DE, BC]`; tuple returns read back.
 - [x] **P4 · Typed I/O** — typed *read-back* (`read_named`/`--read`) **and typed inputs**
   (`Runner::run_with_inputs`, CLI `--set addr:ty=val`, written after the reset + cleaned
@@ -410,7 +415,7 @@ inspectable, deterministic, for the tiny-snippet class.*
   ~16× cheaper; vs Wasm's ~3 ms JIT, ~2500×). So a cached `CellProgram` makes re-running a
   known snippet's cold setup effectively vanish. **The image format landed:**
   `CellProgram::to_bytes()` / `from_bytes()` is a compact self-contained cartridge (code +
-  symbols + policy, no syn — **77 bytes** for the score cell) that reloads + runs in
+  symbols + policy, no syn — **71 bytes** for the score cell) that reloads + runs in
   ~1.2 µs (16× under compiling the source) — cache by hash, ship, index. And a **`CellPool`**
   recycles the 64 KiB bus across cells of any program, so a *disposable* cell (acquire +
   run + release) costs **~0.38 µs** instead of ~1.06 µs cold — the "spawn N short-lived
@@ -446,12 +451,13 @@ inspectable, deterministic, for the tiny-snippet class.*
   to both registers instead of evaluating + reloading twice — score `x*x + y*y + x*3`
   dropped 385 → 327 T-states (−15%), 53 → 47 code bytes (helps games too). Differential-
   tested (`square_same_var` across widths + overflow). A disassembly/perf-debug of the
-  score showed the remaining warm cost is **interpreter dispatch + fixed per-call overhead,
-  not codegen** — wall-clock is near its floor (~0.19 µs/call batch), so further codegen
-  micro-opts give diminishing wall-clock returns (they still shrink games + cycle counts).
-  *(Next: register-fitting locals out of slots is the only big lever left, but it's a real
-  allocator — high risk for ~modest warm gain; or supersede in cell mode via host-native
-  intrinsics, see B4.)*
+  score showed the remaining warm cost was **interpreter dispatch + fixed per-call
+  overhead, not codegen** — which is exactly what the **decode-once fast executor** (P2)
+  then attacked, taking the batch hot path from ~0.19 → ~0.05 µs/call by skipping the
+  authentic CPU's per-instruction fetch/contention/refresh/flag work. So codegen micro-opts
+  still shrink games + cycle counts, while the engine swap took the wall-clock win.
+  *(Next: register-fitting locals out of slots — a real allocator, high risk for modest
+  gain; or supersede in cell mode via host-native intrinsics, see B4.)*
 - [ ] **P9 · Direct-IR cell mode** (later) — let advanced callers feed IR/JSON straight
   to codegen, bypassing the Rust parser (model-generated tools). Rust source stays the
   default — it's human-readable, testable, debuggable.

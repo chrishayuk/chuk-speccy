@@ -2,7 +2,7 @@
 
 /// Safety policy for a cell. Games need raw memory; general agent cells usually do not —
 /// so the intrinsics are **capability-gated, off by default** ([`CellConfig::sandboxed`]),
-/// and resource ceilings are explicit. The cycle budget (passed to [`Runner::run`]) is the
+/// and resource ceilings are explicit. The cycle budget (passed to [`Runner::run`](crate::cell::Runner::run)) is the
 /// deterministic liveness guard; these are the rest.
 #[derive(Debug, Clone)]
 pub struct CellConfig {
