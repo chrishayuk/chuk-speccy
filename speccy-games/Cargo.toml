@@ -10,4 +10,4 @@ repository.workspace = true
 name = "speccy_games"
 
 [dependencies]
-speccy-sdk = { package = "chuk-speccy-sdk", version = "0.1.0", path = "../speccy-sdk" }
+speccy-sdk = { package = "chuk-speccy-sdk", version = "0.2.0", path = "../speccy-sdk" }

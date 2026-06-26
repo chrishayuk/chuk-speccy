@@ -25,7 +25,7 @@ required-features = ["compile"]
 compile = ["dep:rustz80", "dep:syn"]
 
 [dependencies]
-spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
+spectrum = { package = "chuk-speccy-spectrum", version = "0.2.0", path = "../spectrum" }
 # Only for the `compile` feature (the game-compile flow). From the standalone cell80 repo.
-rustz80 = { version = "0.1.0", optional = true }
+rustz80 = { version = "0.2.0", optional = true }
 syn = { version = "2", features = ["full"], optional = true }
