@@ -623,9 +623,13 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
    startup every call). **Landed:** `CellHost` — a catalog of cartridges + a `CellIndex` +
    a `CellPool`, with `search` / `manifest` (inspect) / **`load(id) → handle` / `run(handle,
    …)` / `run_fast` / `read_named` / `unload`** (cached-runner sessions: load once → run
-   many warm, freed handle slots reused, buses recycled). Transport-agnostic. *Next:* put a
-   thin **MCP front** (`cell_search`/`inspect`/`load`/`run`/`unload`) on it — or a bare
-   stdio daemon / PyO3 binding; the session layer is the warm-path, MCP is just one wrapper.
+   many warm, freed handle slots reused, buses recycled). Transport-agnostic, exercised by a
+   **bare-stdio front**: `rustz80-cell serve <dir>` loads a library into a warm host and
+   reads `search`/`inspect`/`load`/`run`/`unload` commands one per line — the host (index +
+   runners) stays alive across the whole session, in one process. The line-handler
+   (`dispatch`) is the shared core. *Next:* a thin **MCP front** over the same `dispatch`
+   (`cell_search`/`inspect`/`load`/`run`/`unload`) — or a socket daemon / PyO3 binding; the
+   session layer is the warm-path, MCP/stdio/socket are interchangeable wrappers.
 7. ~ **Tool manifest + local index/search** — the bridge to "millions of tools without
    millions of schemas". **Landed:** `CellIndex` (add manifests; `search(query, limit)`
    ranks by token overlap — tags ×3, id ×2, summary ×1) + CLI `index <dir>` / `search
