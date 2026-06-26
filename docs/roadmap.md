@@ -625,7 +625,7 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
 8. ☐ **CellGraph / inter-cell messaging** — composition; v1 deliberately constrained: static
    graph, bounded mailboxes, fixed message size, deterministic scheduler, **no dynamic spawn,
    no shared memory, every message traced**. Intrinsics `send`/`recv`/`poll`/`yield`
-   (planner→scorer→validator→decision; worker-swarm→reducer). The "tiny executable society."
+   (planner→scorer→validator→decision; worker-swarm→reducer). The cell-composition layer.
 9. ~ **Cell80 extensions** — mul/div/fill/halt traps ✓; next: memcpy/memclr, trace/assert
    traps, typed-I/O traps, message send/recv traps. Keep `Spectrum48` = real Z80, `Cell` =
    Z80 + safe virtual chip — never pollute the Spectrum side.
@@ -649,6 +649,51 @@ reset-completeness fuzzer** (`cell_fuzz.rs`: random programs × inputs, bit-iden
 authentic, + cross-program bus-reuse leak probe). *Next:* a `check_state!` single-source
 macro covering arrays/post-array offsets; a structured `Outcome` enum (distinguish
 unknown-trap-id).
+
+### B7. The cell library — what a cell *is*, its caps, and a standard cell set
+Cells are **micro-tools, not apps**: tiny, typed, deterministic functions or state machines
+an agent can discover, run, compose, and discard. The central design rule —
+
+> a good cell isn't "small code"; it's a **small contract** (small typed input, small typed
+> output, bounded execution, predictable cost, easy manifest + tests, useful composition).
+> **The valuable ones are those whose manifest is smaller than their usefulness.**
+
+**Caps (rules of thumb).** *Excellent:* <1 KB code · <1 KB touched · <10–50 µs warm ·
+compact typed I/O · no capabilities. *Good:* <4 KB · <8 KB mem · <100–250 µs · typed state.
+*Suspicious:* >8 KB · >16 KB mem · >1 ms · needs raw memory/ports/messages. *Not a cell:*
+needs files/network/large text/external APIs/big libraries (→ native/Wasm/Python/MCP/LLM).
+
+**Scale tiers.** T0 register-only (4–128 B, sub-µs — add/clamp/minmax/divmod/score); T1 small
+typed (128 B–1 KB, few–50 µs — validator/scorer/transition/grid-move — *the main tier*); T2
+data-structure (1–4 KB, 50–250 µs — entities/stack/queue/top-k/small-search); T3 heavy
+(4–16 KB, 0.25–2 ms — tiny VM/planner/multi-entity sim); T4 = wrong abstraction (use Wasm).
+
+**The three populations are different sizes** — this *is* the architecture:
+- **Stored** (artifacts/index): **millions** realistic (~2 KB/cell → 1 M ≈ 2 GB); index +
+  trust + quality become the real problem past ~10 M.
+- **Active** (instantiated runners): **hundreds–thousands** (a 64 KiB image each → 10 K ≈
+  640 MB); pool the hot few, never millions live.
+- **Model-visible**: **3–10** inspected manifests (1 router tool + 5–20 search hits). So
+  selection is **retrieval/index-driven** — that's B6 #7, the load-bearing piece.
+
+**Categories (the useful kinds).** scalar math · tuple/result · bitfield/packing · grid/
+spatial · candidate scoring (the `run_many_fast` killer app) · validators · state
+transitions · bounded search (N≤8/16) · fixed-cap data structures · small-N sort/rank ·
+seeded RNG · tiny binary parsers · message/protocol · planner/critic/verifier · bounded
+memory · reward/evaluator (generated tasks carry executable reward cells) · program-repair
+graders · tool-router helpers · manifest/cartridge meta-cells · safety/decision-support ·
+tiny game-env steps · reasoning-benchmark cells. **Most are buildable in the dialect today**
+(u16/u8/u32, structs, arrays, `Entities`, `xorshift`, bounded loops).
+
+- [ ] **Seed a standard cell library** — a curated first set (~30 → 100) as `.rs` sources
+  compiled to `.cell` cartridges, spanning: math (`clamp`/`min`/`max`/`abs_diff`/`divmod`/
+  `weighted_sum`) · grid (`manhattan`/`legal_move`/`nearest`/`direction`) · scoring
+  (`distance`/`risk`/`reward`/`combine`) · validation (`range`/`action`/`capacity`/
+  `transition`) · state (`door_key`/`retry`/`cooldown`) · memory (`visited_set_16`/
+  `recent_actions_4`) · data structures (`stack`/`ring`/`queue`/`entities`) · selection
+  (`best_of_8`/`top2_of_8`/`tie_break`) · bench (`gcd`/`checksum`/`sort8`/`rpn`). Enough to
+  demo discovery → typed run → candidate scoring → composition → repair → messaging.
+  *(Depends on B6 #2/#7 — the cartridge exists; the index is next.)*
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
