@@ -621,7 +621,7 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
 8. ☐ **CellGraph / inter-cell messaging** — composition; v1 deliberately constrained: static
    graph, bounded mailboxes, fixed message size, deterministic scheduler, **no dynamic spawn,
    no shared memory, every message traced**. Intrinsics `send`/`recv`/`poll`/`yield`
-   (planner→scorer→validator→decision; worker-swarm→reducer). The "tiny executable society."
+   (planner→scorer→validator→decision; worker-swarm→reducer). The cell-composition layer.
 9. ~ **Cell80 extensions** — mul/div/fill/halt traps ✓; next: memcpy/memclr, trace/assert
    traps, typed-I/O traps, message send/recv traps. Keep `Spectrum48` = real Z80, `Cell` =
    Z80 + safe virtual chip — never pollute the Spectrum side.
@@ -646,7 +646,7 @@ authentic, + cross-program bus-reuse leak probe). *Next:* a `check_state!` singl
 macro covering arrays/post-array offsets; a structured `Outcome` enum (distinguish
 unknown-trap-id).
 
-### B7. The cell library — what a cell *is*, its caps, and a standard organ set
+### B7. The cell library — what a cell *is*, its caps, and a standard cell set
 Cells are **micro-tools, not apps**: tiny, typed, deterministic functions or state machines
 an agent can discover, run, compose, and discard. The central design rule —
 
@@ -681,7 +681,7 @@ graders · tool-router helpers · manifest/cartridge meta-cells · safety/decisi
 tiny game-env steps · reasoning-benchmark cells. **Most are buildable in the dialect today**
 (u16/u8/u32, structs, arrays, `Entities`, `xorshift`, bounded loops).
 
-- [ ] **Seed a "standard organ library"** — a curated first set (~30 → 100) as `.rs` sources
+- [ ] **Seed a standard cell library** — a curated first set (~30 → 100) as `.rs` sources
   compiled to `.cell` cartridges, spanning: math (`clamp`/`min`/`max`/`abs_diff`/`divmod`/
   `weighted_sum`) · grid (`manhattan`/`legal_move`/`nearest`/`direction`) · scoring
   (`distance`/`risk`/`reward`/`combine`) · validation (`range`/`action`/`capacity`/
