@@ -84,13 +84,16 @@ pub(crate) fn lower_local(
             }
         }
         syn::Expr::Repeat(r) => {
+            // `[v; N]` — a block fill (one evaluation of `v`, repeated over N slots).
             let n = array_len(&r.len, ctx)?;
             let elem = elem_width(&r.expr);
             let base = ctx.vars.declare(&name, n, None, elem);
-            for i in 0..n {
-                let v = lower_expr(&r.expr, ctx)?.0;
-                body.push(Stmt::StoreIndex(base, Expr::Lit(i as u16), v, elem));
-            }
+            let value = lower_expr(&r.expr, ctx)?.0;
+            body.push(Stmt::Fill {
+                base,
+                count: n,
+                value,
+            });
         }
         syn::Expr::Array(arr) => {
             let elem = arr.elems.first().map(elem_width).unwrap_or(Width::Word);

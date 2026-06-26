@@ -485,7 +485,13 @@ spectrum-mode codegen simply never emits it). Per-op lowering table:
   program with `a*b + a/b + a%b` matches rustc and appends no runtime, while the Spectrum
   compile still does. (Authentic Spectrum keeps the software routines — and their
   early-exit/fast-path wins.)
-- [ ] **3 · Block memory ops** (`memcpy`/`clr`/`fill`) — agents touch arrays/structs.
+- [x] **3 · Block memory op (fill)** — `[v; N]` array init is now one `Stmt::Fill` (value
+  evaluated once) instead of N unrolled stores. Spectrum: a first-slot store + `LDIR`
+  (compact + fast — a games win too). Cell: an `ED FE` FILL16 trap (`0x20`: `BC` slots of
+  `DE` at `HL`), serviced host-native (writes are still tracked, so the next run resets
+  them). A `[0u16; 64]` cell dropped from ~450 B of stores to **28 B**. Differential-tested
+  (word const/zero/runtime + `u8`) — every element is one 2-byte slot, so the fill is
+  slot-stride. *(memcpy awaits an element-copy construct.)*
 - [ ] **4 · Typed I/O regions + clean halt/return** — fixed input/output memory the runner
   maps JSON ↔ typed state; `ED FE HALT` for a structured `{halt, result[], cycles}`.
 - [ ] **5 · (optional) trace markers + seeded RNG** — debug tier only; RNG seeded + reported

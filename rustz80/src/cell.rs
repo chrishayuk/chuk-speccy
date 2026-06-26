@@ -132,16 +132,24 @@ struct CellBus<'a> {
     cycles: u64,
 }
 
-impl z80::Bus for CellBus<'_> {
-    fn read(&mut self, a: u16) -> u8 {
-        self.mem[a as usize]
-    }
-    fn write(&mut self, a: u16, v: u8) {
+impl CellBus<'_> {
+    /// Write a byte and record it as touched (so the next run resets it) — shared by the
+    /// CPU's `write` and the fill traps.
+    fn touch_write(&mut self, a: u16, v: u8) {
         self.mem[a as usize] = v;
         if !self.seen[a as usize] {
             self.seen[a as usize] = true;
             self.touched.push(a);
         }
+    }
+}
+
+impl z80::Bus for CellBus<'_> {
+    fn read(&mut self, a: u16) -> u8 {
+        self.mem[a as usize]
+    }
+    fn write(&mut self, a: u16, v: u8) {
+        self.touch_write(a, v);
     }
     fn input(&mut self, _: u16) -> u8 {
         0xFF
@@ -169,6 +177,15 @@ impl z80::Bus for CellBus<'_> {
                         regs.set_de(bc % de);
                     }
                     None => regs.set_hl(0xFFFF), // divide-by-zero (a bug) — bounded, not a panic
+                }
+            }
+            0x20 => {
+                // FILL16: BC slots (2-byte words) of DE at HL — array `[v; N]` init.
+                let (mut addr, count, val) = (regs.hl(), regs.bc(), regs.de());
+                for _ in 0..count {
+                    self.touch_write(addr, val as u8);
+                    self.touch_write(addr.wrapping_add(1), (val >> 8) as u8);
+                    addr = addr.wrapping_add(2);
                 }
             }
             _ => {}
