@@ -6,11 +6,18 @@
 &nbsp;License: MIT OR Apache-2.0
 
 **A deterministic ZX Spectrum you can play, let agents drive, and compile Rust
-games for.** Underneath is a cycle-accurate, **ZEXALL-clean** 48K emulator in Rust;
-the point is what sits on top — an agent-controllable, bit-exact-reproducible *game
-lab*. The core is a pure, deterministic, headless `Machine`; everything else is a
-thin consumer of it (`frontend → spectrum → z80`; the `z80` crate never knows what
+games for — and a tiny deterministic compute-cell for AI agents grown from the same
+Rust→Z80 compiler.** Underneath is a cycle-accurate, **ZEXALL-clean** 48K emulator in
+Rust; the point is what sits on top — an agent-controllable, bit-exact-reproducible
+*game lab*. The core is a pure, deterministic, headless `Machine`; everything else is
+a thin consumer of it (`frontend → spectrum → z80`; the `z80` crate never knows what
 a Spectrum is).
+
+The compiler ([`rustz80`](./rustz80)) has two targets: **authentic Z80** (real Spectrum
+games / `.tap`) and **Cell80** — `rustz80-cell`, a flat-RAM micro-VM that runs restricted
+Rust as **microsecond-scale, sandboxed, inspectable tool capsules** for agents (no ROM, no
+I/O, bounded, deterministic, cacheable as a ~70-byte image). One frontend, two audiences:
+*play Spectrum games* and *run millions of tiny safe tools.* ([Cell80 ABI](./docs/09-cell80-abi.md) · [jump to the cell](#run-tiny-rust-as-a-deterministic-agent-cell-rustz80-cell))
 
 ![Snake, written in the rustz80 dialect, compiled to Z80 and running on the emulator](docs/assets/demo.gif)
 
@@ -130,7 +137,7 @@ Any dialect `.rs` with a no-arg `fn main()` compiles the same way (the autoloade
 The same compiler also targets a headless **micro-VM**: compile a small program and run it
 on a flat-RAM Z80 — no ROM, no I/O, no syscalls — under a cycle budget, returning a
 structured report (result, cost, symbol layout, touched memory, halt reason). Compile once
-and run it thousands of times with different typed inputs, reading typed state back.
+and run it thousands of times with different typed inputs, reading typed state back by name.
 Deterministic, bounded, capability-gated — a *safe executable scratchpad* for agents.
 
 ```bash
@@ -139,8 +146,14 @@ cargo run -p rustz80 --features cell --bin rustz80-cell -- run score.rs --args 1
 
 It compiles in **Cell80** mode — a Z80 *superset* where `*`/`/`/`%` and `[v; N]` fills
 lower to `ED FE` host traps (native, fast) while the game path stays authentic Z80. A
-realistic snippet warm-runs in **~0.24 µs (~4M/s)**; see [`cell-bench`](./cell-bench) for
-the cross-runtime comparison (native Rust · Wasmtime · the cell · Python).
+realistic snippet warm-runs in **~0.24 µs**, or **~0.05 µs batched** via a decode-once fast
+executor (~4× off native-JIT Wasm, but ~1070× smaller code and ~5× cheaper to start). The
+compiled cell serializes to a **~70-byte cartridge** you can cache, hash, and reload in
+~1 µs without re-parsing. See the [Cell80 ABI](./docs/09-cell80-abi.md), and
+[`cell-bench`](./cell-bench) for the cross-runtime comparison (native Rust · Wasmtime · the
+cell · Python). The roadmap's [B6](./docs/roadmap.md) tracks where it's headed: a `.cell`
+cartridge format, an MCP server, and a tool index — *millions of tiny tools agents discover
+and run without loading their schemas.*
 
 ## Workspace layout
 
@@ -153,10 +166,11 @@ the cross-runtime comparison (native Rust · Wasmtime · the cell · Python).
 | [`wos`](./wos) | World of Spectrum search + download (ZXInfo API), shared by the CLI and MCP. |
 | [`speccy-sdk`](./speccy-sdk) | Native Rust game SDK: `Game`, `Frame`, `Controls`, `Rng`, `Entities`, the `SymbolMap`. The game-compile flow (`impl Game` → `.tap` + `.sym.toml`, the `speccy-compile` CLI) is behind its **`compile` feature** (runtime use stays `syn`-free). |
 | [`speccy-games`](./speccy-games) | Demo games built **on** the SDK (`snake` / `keytest` / `typing` / `mover`) + a name→installer registry. Content, not library. |
-| [`rustz80`](./rustz80) | **Generic** restricted Rust → Z80 compiler (`syn` frontend, own IR/codegen, mul/div micro-runtime). Knows nothing about games — the SDK's `compile` feature builds the game layer on it. |
+| [`rustz80`](./rustz80) | **Generic** restricted Rust → Z80 compiler (`syn` frontend, own IR/codegen). Knows nothing about games — the SDK's `compile` feature builds the game layer on it. Two targets: authentic `Spectrum48` and **`Cell80`**. Behind **`--features cell`**: `rustz80-cell`, the deterministic agent micro-VM (`Runner`/`CellPool`/`StateCell`, image cartridges, the `rustz80-cell` CLI) — see the [Cell80 ABI](./docs/09-cell80-abi.md). |
 | [`speccy-env`](./speccy-env) | Agent environments: read typed game state off a running `.tap` via the symbol map, run the host `Game`'s `reward`/`done`/`observe`; bit-exact `reset`. |
 | [`zxspec_py`](./zxspec_py) | PyO3 binding exposing the core to Python (maturin). |
 | [`chuk-mcp-spectrum`](./chuk-mcp-spectrum) | The MCP server (two endpoints + autonomy plane). |
+| [`cell-bench`](./cell-bench) | Standalone comparison benchmark — `rustz80-cell` vs native Rust · Wasmtime · Python (own workspace, so Wasmtime's deps stay out of the emulator build). |
 
 Published on **crates.io** (v0.1.0): the libraries as `chuk-speccy-z80` / `-spectrum`
 / `-display` / `-wos` / `-sdk` (import names stay short — `use spectrum`), and the
