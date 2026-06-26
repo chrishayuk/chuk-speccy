@@ -8,6 +8,8 @@ pub const USAGE: &str = "usage:\n  \
      rustz80-cell compile <file.rs> -o <file.cell> [--entry NAME] [--id ID] \
      [--summary TEXT] [--tags a,b] [safety]\n  \
      rustz80-cell inspect <file.cell> [--json]\n  \
+     rustz80-cell index <dir>                 (list the cell library in <dir>)\n  \
+     rustz80-cell search <query> <dir>        (rank library cells by relevance)\n  \
      safety (sandboxed by default): [--allow-raw-memory] [--allow-ports] \
      [--max-code-bytes N] [--max-touched N]";
 
@@ -77,9 +79,138 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
         Some("run") => cmd_run(&args[1..]),
         Some("compile") => cmd_compile(&args[1..]),
         Some("inspect") => cmd_inspect(&args[1..]),
+        Some("index") => cmd_index(&args[1..]),
+        Some("search") => cmd_search(&args[1..]),
         Some(other) => Err(format!("unknown command `{other}`\n{USAGE}")),
         None => Err(USAGE.into()),
     }
+}
+
+/// Parse a cell source's leading `//!` header → `(summary, tags, entry)`.
+fn parse_meta(src: &str) -> (String, Vec<String>, Option<String>) {
+    let (mut summary, mut tags, mut entry) = (String::new(), Vec::new(), None);
+    for line in src.lines() {
+        let l = line.trim();
+        if let Some(rest) = l.strip_prefix("//!") {
+            let rest = rest.trim();
+            if let Some(t) = rest.strip_prefix("tags:") {
+                tags = t
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            } else if let Some(e) = rest.strip_prefix("entry:") {
+                entry = Some(e.trim().to_string());
+            } else if summary.is_empty() {
+                summary = rest.to_string();
+            }
+        } else if !l.is_empty() && !l.starts_with("//") {
+            break; // first code line — header done
+        }
+    }
+    (summary, tags, entry)
+}
+
+/// Build a cartridge from a library `.rs` (id = file stem, metadata from the `//!` header)
+/// or load a `.cell`. Returns `None` for any other extension.
+fn library_cartridge(path: &std::path::Path) -> Option<Result<Cartridge, String>> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("rs") => Some((|| {
+            let src =
+                std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let (summary, tags, entry) = parse_meta(&src);
+            let id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("cell")
+                .to_string();
+            Cartridge::compile(
+                &src,
+                CellConfig::sandboxed(),
+                CartridgeOpts {
+                    id: Some(id),
+                    entry,
+                    summary,
+                    tags,
+                },
+            )
+        })()),
+        Some("cell") => Some(
+            std::fs::read(path)
+                .map_err(|e| format!("{}: {e}", path.display()))
+                .and_then(|b| Cartridge::from_bytes(&b)),
+        ),
+        _ => None,
+    }
+}
+
+/// Build an index over every cell (`.rs` / `.cell`) in `dir`, sorted by id.
+fn index_dir(dir: &str) -> Result<CellIndex, String> {
+    let mut idx = CellIndex::new();
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .map_err(|e| format!("{dir}: {e}"))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    paths.sort();
+    for path in paths {
+        if let Some(c) = library_cartridge(&path) {
+            idx.add(c?.manifest);
+        }
+    }
+    Ok(idx)
+}
+
+fn render(m: &crate::cell::Manifest) -> String {
+    format!(
+        "  {} — {}  [{}]  ({})",
+        m.id,
+        if m.summary.is_empty() {
+            "(no summary)"
+        } else {
+            &m.summary
+        },
+        m.tags.join(", "),
+        m.signature.to_decl(&m.entry),
+    )
+}
+
+/// `index <dir>` — list the cell library (in id order).
+fn cmd_index(args: &[String]) -> Result<String, String> {
+    let dir = args.first().ok_or(USAGE)?;
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .map_err(|e| format!("{dir}: {e}"))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    paths.sort();
+    let mut rows = Vec::new();
+    for path in paths {
+        if let Some(c) = library_cartridge(&path) {
+            rows.push(render(&c?.manifest));
+        }
+    }
+    Ok(format!(
+        "cell library `{dir}` ({} cells):\n{}",
+        rows.len(),
+        rows.join("\n")
+    ))
+}
+
+/// `search <query> <dir>` — rank the library by relevance to `query`.
+fn cmd_search(args: &[String]) -> Result<String, String> {
+    let query = args.first().ok_or(USAGE)?;
+    let dir = args.get(1).ok_or("search needs a directory")?;
+    let idx = index_dir(dir)?;
+    let hits = idx.search(query, 10);
+    let mut out = format!(
+        "indexed {} cells; query `{query}` → {} match(es):\n",
+        idx.len(),
+        hits.len()
+    );
+    for m in hits {
+        out += &render(m);
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 /// `compile <file.rs> -o <file.cell> [--entry] [--id] [--summary] [--tags] [safety]` —

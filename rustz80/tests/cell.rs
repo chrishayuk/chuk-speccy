@@ -379,6 +379,93 @@ fn cartridge_roundtrip_and_inspect() {
 }
 
 #[test]
+fn cell_index_search_ranks_by_relevance() {
+    use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig, CellIndex};
+    let mut idx = CellIndex::new();
+    assert!(idx.is_empty());
+    for (id, tags) in [
+        ("manhattan", vec!["grid", "distance", "score"]),
+        ("range_check", vec!["validation", "range", "bounds"]),
+        ("gcd", vec!["math", "bench"]),
+    ] {
+        let c = Cartridge::compile(
+            "fn run(a: u16, b: u16) -> u16 { a + b }",
+            CellConfig::sandboxed(),
+            CartridgeOpts {
+                id: Some(id.into()),
+                summary: format!("the {id} cell"),
+                tags: tags.iter().map(|s| s.to_string()).collect(),
+                entry: None,
+            },
+        )
+        .unwrap();
+        idx.add(c.manifest);
+    }
+    assert_eq!(idx.len(), 3);
+    assert_eq!(idx.search("grid distance", 5)[0].id, "manhattan"); // tag hits win
+    assert!(idx.search("xyzzy", 5).is_empty()); // no match → empty
+    assert!(idx.search("cell", 1).len() <= 1); // limit respected ("cell" is in every summary)
+}
+
+#[test]
+fn cli_index_and_search_the_seed_library() {
+    let dir = format!("{}/cells", env!("CARGO_MANIFEST_DIR"));
+    let listing = cell::run_cli(&["index".into(), dir.clone()]).unwrap();
+    assert!(listing.contains("manhattan") && listing.contains("Pts::run() -> u16"));
+    assert!(listing.contains("range_check") && listing.contains("8 cells"));
+
+    // search surfaces the most relevant cell first (line 0 is the header).
+    let g = cell::run_cli(&[
+        "search".into(),
+        "grid distance to a target".into(),
+        dir.clone(),
+    ])
+    .unwrap();
+    assert!(g.lines().nth(1).unwrap().contains("manhattan"), "got: {g}");
+    let v = cell::run_cli(&["search".into(), "validate a value is in range".into(), dir]).unwrap();
+    assert!(
+        v.lines().nth(1).unwrap().contains("range_check"),
+        "got: {v}"
+    );
+
+    // error paths.
+    assert!(cell::run_cli(&["search".into(), "q".into()]).is_err()); // no dir
+    assert!(cell::run_cli(&["index".into(), "/no/such/dir".into()]).is_err());
+}
+
+#[test]
+fn cli_index_mixed_dir_with_compiled_cells() {
+    // A library dir may hold both `.rs` sources and pre-compiled `.cell` cartridges
+    // (and ignores anything else) — covers loading a `.cell` from the index.
+    use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig};
+    let dir = std::env::temp_dir().join("rustz80_lib_mixed");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("doubler.rs"),
+        "//! Double a value.\n//! tags: math, scale\nfn run(a: u16) -> u16 { a * 2u16 }",
+    )
+    .unwrap();
+    let cart = Cartridge::compile(
+        "fn run(a: u16, b: u16) -> u16 { a + b }",
+        CellConfig::sandboxed(),
+        CartridgeOpts {
+            id: Some("adder".into()),
+            summary: "Add two numbers.".into(),
+            tags: vec!["math".into(), "add".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::write(dir.join("adder.cell"), cart.to_bytes()).unwrap();
+    std::fs::write(dir.join("notes.txt"), "ignored").unwrap();
+
+    let out = cell::run_cli(&["index".into(), dir.to_str().unwrap().to_string()]).unwrap();
+    assert!(out.contains("2 cells"), "got: {out}"); // .rs + .cell, not .txt
+    assert!(out.contains("doubler") && out.contains("adder"));
+}
+
+#[test]
 fn cartridge_carries_typed_signature() {
     use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig};
     // fn-args signature, surviving the round-trip + surfaced in inspect.
