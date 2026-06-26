@@ -151,6 +151,30 @@ impl z80::Bus for CellBus<'_> {
     fn tick(&mut self, c: u32) {
         self.cycles += c as u64; // the single source of truth for elapsed time
     }
+    /// Cell80 host intrinsics (`ED FE`, id in `A`). Matches `spectrum::host::math_traps`:
+    /// `0x10` MUL16 (`HL = BC*DE`), `0x11` DIVMOD16 (`HL = BC/DE`, `DE = BC%DE`). Done
+    /// host-native, so a `var*var` multiply/divide costs a few T-states instead of a
+    /// software loop.
+    fn host_trap(&mut self, regs: &mut z80::Regs) -> u32 {
+        match regs.a {
+            0x10 => {
+                let p = regs.bc().wrapping_mul(regs.de());
+                regs.set_hl(p);
+            }
+            0x11 => {
+                let (bc, de) = (regs.bc(), regs.de());
+                match bc.checked_div(de) {
+                    Some(q) => {
+                        regs.set_hl(q);
+                        regs.set_de(bc % de);
+                    }
+                    None => regs.set_hl(0xFFFF), // divide-by-zero (a bug) — bounded, not a panic
+                }
+            }
+            _ => {}
+        }
+        4 // a fast hardware op (cell cycle accounting)
+    }
 }
 
 /// A **compiled** cell: the result of parse + lower + codegen under a policy. Cheap to
@@ -175,7 +199,9 @@ impl CellProgram {
     pub fn compile_with_config(src: &str, cfg: CellConfig) -> Result<Self, String> {
         let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
         check_caps(&file, &cfg)?;
-        let prog = crate::compile_file(&file)?;
+        // The cell runs in Cell80 mode: `*`/`/`/`%` lower to `ED FE` host traps that the
+        // bus services natively (no software mul/div runtime appended).
+        let prog = crate::compile_file(&file, crate::Target::Cell)?;
         if let Some(max) = cfg.max_code_bytes {
             if prog.code.len() > max {
                 return Err(format!(

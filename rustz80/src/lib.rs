@@ -22,7 +22,7 @@ mod ir;
 mod lower;
 mod tap;
 
-pub use codegen::codegen_loop;
+pub use codegen::{codegen_loop, Target};
 pub use ir::Func;
 pub use lower::{lower_program, PreludeConfig};
 pub use tap::to_tap;
@@ -80,14 +80,14 @@ impl Program {
 /// [`ORG`]; calls resolve by name; the mul/div micro-runtime is appended if used.
 pub fn compile_program(src: &str) -> Result<Program, String> {
     let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
-    compile_file(&file)
+    compile_file(&file, Target::Spectrum48)
 }
 
-/// Compile an already-parsed file — lets a caller that has parsed the source (e.g. the
-/// cell's capability scan) avoid a second parse.
-pub(crate) fn compile_file(file: &syn::File) -> Result<Program, String> {
+/// Compile an already-parsed file for `target` — lets a caller that has parsed the source
+/// (e.g. the cell's capability scan) avoid a second parse, and pick the backend.
+pub(crate) fn compile_file(file: &syn::File, target: Target) -> Result<Program, String> {
     let funcs = lower_program(file, &PreludeConfig::default())?;
-    let (code, symbols) = codegen::codegen_program(&funcs, ORG, None);
+    let (code, symbols) = codegen::codegen_program(&funcs, ORG, None, target);
     Ok(Program { code, symbols })
 }
 
@@ -137,7 +137,7 @@ pub fn compile_to_tap(src: &str, entry: &str, name: &str) -> Result<Vec<u8>, Str
         return Err(format!("no `{entry}` function"));
     }
     // Emit a DI/EI trampoline at ORG and boot into it (`USR ORG`).
-    let (code, _) = codegen::codegen_program(&funcs, ORG, Some(entry));
+    let (code, _) = codegen::codegen_program(&funcs, ORG, Some(entry), Target::Spectrum48);
     Ok(to_tap(&code, ORG, ORG, name))
 }
 
@@ -147,6 +147,6 @@ pub fn compile_fn(src: &str) -> Result<Vec<u8>, String> {
     let item: syn::ItemFn = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
     let name = item.sig.ident.to_string();
     let func = lower::lower(&item)?;
-    let (code, _) = codegen::codegen_program(&[(name, func)], ORG, None);
+    let (code, _) = codegen::codegen_program(&[(name, func)], ORG, None, Target::Spectrum48);
     Ok(code)
 }
