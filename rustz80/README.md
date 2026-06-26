@@ -184,6 +184,23 @@ let prog = rustz80::cell::CellProgram::compile(src)?;  // ~19 µs, cache by sour
 let mut cell = rustz80::cell::Runner::new(&prog);       // ~1.2 µs — no re-parse
 ```
 
+**Cacheable image (the cartridge).** A `CellProgram` serializes to a compact,
+self-contained image — code + symbols + policy, no syn, no source — so a tool can be
+cached by hash, shipped, and reloaded without compiling at all:
+
+```rust
+let image: Vec<u8> = prog.to_bytes();                  // ~77 bytes for the score cell
+let prog = rustz80::cell::CellProgram::from_bytes(&image)?;  // reload + run in ~1.2 µs (16× < compile)
+```
+
+**Batch the hot loop.** `run_many_fast(entry, &arg_sets, budget)` resolves the entry once
+and runs each input — the "score N candidates" path, ~20% under per-call `run_fast`
+(0.20 vs 0.25 µs/call):
+
+```rust
+let scores = cell.run_many_fast(None, &[&[3, 1], &[6, 5], &[10, 0]], budget)?;
+```
+
 **Fast path for tight loops.** `Runner::run_fast` returns just the result registers,
 cycles, and halt — no symbol-map clone / size report / memory-diff (no per-call
 allocations). Use `run` when you want the rich report, `run_fast` in the inner loop.

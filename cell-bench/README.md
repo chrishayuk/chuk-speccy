@@ -68,3 +68,39 @@ isn't a faster parser; it's *not re-parsing*: compile to a cacheable `CellProgra
 then `Runner::new` instantiates a fresh machine in **~1.2 µs** (~16× cheaper). For an agent
 that re-runs known snippets, cold setup effectively disappears — and vs Wasm's ~3 ms JIT
 that's ~2500× cheaper.
+
+## The full lifecycle (the disposable-tool story)
+
+Startup matters more than peak throughput for agent tools: generate a tiny function,
+compile, run once, discard — or retrieve a tool, instantiate, score 20 candidates, discard.
+The harness prints every phase against a usefulness band:
+
+```
+parse source (syn)                     15.5 µs   realistic agent snippet
+compile source → image                 18.0 µs   realistic agent snippet
+instantiate runner (cached image)       1.1 µs   hot-loop cell/tool call
+warm run_fast — tiny (overhead floor)   0.06 µs   excellent warm primitive
+warm run_fast — realistic (score)       0.25 µs   excellent warm primitive
+batch run_many_fast — per-call          0.20 µs   excellent warm primitive
+cold: compile source + 1 run           18.9 µs   realistic agent snippet
+cold: cached image + 1 run              1.0 µs   hot-loop cell/tool call
+cold: image bytes + 1 run               1.2 µs   hot-loop cell/tool call
+```
+
+Reading it:
+
+- **The per-call overhead floor is ~0.06 µs** (a trivial cell) — reset + trampoline + CPU
+  setup. The score's 0.25 µs is mostly the ~0.19 µs of actual Z80 emulation, not framework
+  cost. `run_fast` is genuinely an inner-loop primitive.
+- **`run_many_fast` (0.20 µs/call)** resolves the entry once instead of per call — a real
+  ~20% trim on the "score N candidates" path, the router's hot loop.
+- **A whole disposable tool — instantiate + run — is ~1 µs.** That's the "million tiny
+  tools" number: retrieve by manifest, instantiate cheaply, run deterministically, discard.
+- **The cell image is a 77-byte cartridge.** `CellProgram::to_bytes()` serializes code +
+  symbols + policy with no syn; `from_bytes()` reloads + runs in **~1.2 µs — 16× cheaper
+  than compiling the 235-byte source**. Cache it by hash, ship it, index it.
+
+Against the usefulness thresholds (`<1 µs` warm primitive, `1–10 µs` hot-loop call,
+`10–100 µs` realistic snippet, `100–500 µs` cold tool), every phase here lands in a useful
+band. The claim isn't "faster than Wasm" — it's **smaller to start, cheaper to throw away,
+easier to bound and inspect**: a microsecond-scale safe tool capsule.

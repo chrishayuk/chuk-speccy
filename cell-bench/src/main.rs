@@ -109,6 +109,103 @@ fn cold_breakdown() {
     );
 }
 
+/// The lifecycle/startup table — the real story: every phase (parse → compile →
+/// instantiate → warm run → cold one-shot → batch) and where the µs go. A disposable
+/// tool's whole life, broken down.
+fn lifecycle() {
+    use rustz80::cell::{CellProgram, Runner};
+    const TINY: &str = "fn run() -> u16 { 0u16 }"; // isolates fixed per-call overhead
+
+    // Build phases.
+    let parse = time_op(|| {
+        let _f: syn::File = black_box(syn::parse_str(black_box(CELL_SRC)).unwrap());
+    });
+    let compile = time_op(|| black_box(CellProgram::compile(CELL_SRC)).map(drop).unwrap());
+    let cached = CellProgram::compile(CELL_SRC).unwrap();
+    let instantiate = time_op(|| {
+        black_box(Runner::new(black_box(&cached)));
+    });
+
+    // Warm runs: tiny (overhead floor) vs realistic (the score).
+    let tiny_prog = CellProgram::compile(TINY).unwrap();
+    let mut tiny_r = Runner::new(&tiny_prog);
+    let warm_tiny = time_op(|| {
+        black_box(tiny_r.run_fast(None, &[], CELL_BUDGET).unwrap().result);
+    });
+    let mut score_r = Runner::new(&cached);
+    let warm_real = time_op(|| {
+        black_box(score_r.run_fast(None, &[7, 5], CELL_BUDGET).unwrap().result);
+    });
+
+    // Batch: run_many_fast over N candidates (entry resolved once), per-call.
+    let argsets: Vec<[u16; 2]> = (0..N).map(|i| cand(i).into()).collect();
+    let refs: Vec<&[u16]> = argsets.iter().map(|a| a.as_slice()).collect();
+    let (many_pc, _) = bench(|| {
+        score_r
+            .run_many_fast(None, &refs, CELL_BUDGET)
+            .unwrap()
+            .iter()
+            .map(|f| f.result as u64)
+            .sum()
+    });
+
+    // Cold one-shots: from source (compile + run) vs from a cached image (instantiate + run).
+    let cold_src = time_op(|| {
+        let mut r = Runner::compile(CELL_SRC).unwrap();
+        black_box(r.run_fast(None, &[7, 5], CELL_BUDGET).unwrap().result);
+    });
+    let cold_img = time_op(|| {
+        let mut r = Runner::new(black_box(&cached));
+        black_box(r.run_fast(None, &[7, 5], CELL_BUDGET).unwrap().result);
+    });
+    // From a serialized image (the "cartridge"): deserialize + instantiate + run, no syn.
+    let image = cached.to_bytes();
+    let cold_imgbytes = time_op(|| {
+        let p = CellProgram::from_bytes(black_box(&image)).unwrap();
+        let mut r = Runner::new(&p);
+        black_box(r.run_fast(None, &[7, 5], CELL_BUDGET).unwrap().result);
+    });
+
+    let band = |s: f64| {
+        let t = s * 1e6;
+        match t {
+            _ if t < 1.0 => "excellent warm primitive",
+            _ if t < 10.0 => "hot-loop cell/tool call",
+            _ if t < 100.0 => "realistic agent snippet",
+            _ if t < 500.0 => "cold generated tool",
+            _ => "still useful, less tiny",
+        }
+    };
+    let line = |case: &str, s: f64| println!("  {case:<34} {:>9} µs   {}", us(s), band(s));
+
+    println!("\nlifecycle / startup (the disposable-tool story):");
+    line("parse source (syn)", parse);
+    line("compile source → image", compile);
+    line("instantiate runner (cached image)", instantiate);
+    line("warm run_fast — tiny (overhead floor)", warm_tiny);
+    line("warm run_fast — realistic (score)", warm_real);
+    line("batch run_many_fast — per-call", many_pc);
+    line("cold: compile source + 1 run", cold_src);
+    line("cold: cached image + 1 run", cold_img);
+    line("cold: image bytes + 1 run", cold_imgbytes);
+    println!(
+        "  → per-call overhead ~{} µs (tiny); the score adds ~{} µs of pure emulation;\n    \
+         run_many_fast trims the per-call name-resolve, landing at ~{} µs.",
+        us(warm_tiny),
+        us((warm_real - warm_tiny).max(0.0)),
+        us(many_pc),
+    );
+    println!(
+        "  → cell image = {} bytes (vs {}-byte source): cache/ship/hash it and reload in\n    \
+         ~{} µs — {:.0}× cheaper than compiling from source ({} µs).",
+        image.len(),
+        CELL_SRC.len(),
+        us(cold_imgbytes),
+        cold_src / cold_imgbytes,
+        us(cold_src),
+    );
+}
+
 fn main() {
     println!("cell-bench — score(x,y) = x*x + y*y + x*3, over N={N} candidates\n");
 
@@ -223,6 +320,7 @@ fn main() {
         us((cell_pc - cell_fast_pc).max(0.0)),
     );
     cold_breakdown();
+    lifecycle();
     println!(
         "\npython per-call is amortized over the batch (one interpreter startup ≈ its cold column);\n\
          a fresh subprocess *per* candidate would pay that startup 1000×.\n\
