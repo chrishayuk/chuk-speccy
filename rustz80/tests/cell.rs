@@ -100,6 +100,88 @@ fn cell_pool_reuses_buses() {
 }
 
 #[test]
+fn run_many_fast_fast_path_matches_authentic() {
+    // A straight-line cell exercising much of the fast executor — mul/div/rem traps, the
+    // 8-bit bitwise path, const shift-add — must match the authentic interpreter exactly
+    // (result + cycles + halt) on every input. This is the differential guard on the fast
+    // engine: any divergence fails here.
+    let mut r = Runner::compile(
+        "fn run(a: u16, b: u16) -> u16 { (a * b + a / b) % 100u16 + (a & b) + a * 3u16 }",
+    )
+    .unwrap();
+    let sets: [&[u16]; 5] = [&[60, 7], &[1000, 3], &[7, 7], &[40000, 123], &[3, 9]];
+    let many = r.run_many_fast(None, &sets, DEFAULT_CYCLES).unwrap();
+    for (f, s) in many.iter().zip(sets.iter()) {
+        let auth = r.run_fast(None, s, DEFAULT_CYCLES).unwrap();
+        assert_eq!(
+            (f.result, f.cycles, f.halt),
+            (auth.result, auth.cycles, auth.halt),
+            "fast vs authentic diverged on {s:?}"
+        );
+    }
+}
+
+#[test]
+fn fast_executor_matches_authentic_across_ops() {
+    // Drive a spread of straight-line cells through the fast path and assert each matches
+    // the authentic interpreter (result + cycles + halt) — covering and validating the
+    // executor's opcode arms: traps, bitwise, const-mul, array indexing (HL loads + INC),
+    // tuples (BC), and raw memory.
+    let cells = [
+        "fn run(a: u16, b: u16) -> u16 { a * b + a / b + a % b }",
+        "fn run(a: u16, b: u16) -> u16 { (a & b) + (a | b) + (a ^ b) }",
+        "fn run(a: u16, b: u16) -> u16 { a * 7u16 + b * 3u16 }",
+        "fn run(i: u16, a: u16, b: u16) -> u16 { let arr = [a, b, a + b]; arr[i as usize] }",
+        "fn run(a: u16, b: u16) -> (u16, u16, u16) { (a * b, a + b, a) }",
+        "fn run(a: u16, b: u16) -> u16 { let arr = [a; 4]; arr[0] + b }", // [v; N] fill
+    ];
+    // last input has b = 0 → exercises the divide-by-zero arm (both engines agree).
+    let inputs: [&[u16]; 5] = [
+        &[2, 3, 5],
+        &[60, 4, 9],
+        &[1, 1000, 7],
+        &[2, 40000, 255],
+        &[5, 0, 2],
+    ];
+    for src in cells {
+        let mut r = Runner::compile(src).unwrap();
+        let many = r.run_many_fast(None, &inputs, DEFAULT_CYCLES).unwrap();
+        for (f, inp) in many.iter().zip(inputs.iter()) {
+            let auth = r.run_fast(None, inp, DEFAULT_CYCLES).unwrap();
+            assert_eq!(
+                (f.result, f.cycles, f.halt),
+                (auth.result, auth.cycles, auth.halt),
+                "fast vs authentic diverged: `{src}` on {inp:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn run_many_fast_falls_back_for_branches() {
+    // A looping cell is not straight-line → run_many_fast transparently falls back to the
+    // authentic interpreter, still correct per input.
+    let mut r = Runner::compile(
+        "fn run(n: u16) -> u16 {
+             let mut s = 0u16; let mut i = 0u16;
+             while i < n { s = s + i; i = i + 1u16; } s
+         }",
+    )
+    .unwrap();
+    let sets: [&[u16]; 3] = [&[0], &[5], &[100]];
+    let many = r.run_many_fast(None, &sets, DEFAULT_CYCLES).unwrap();
+    for (f, s) in many.iter().zip(sets.iter()) {
+        let auth = r.run_fast(None, s, DEFAULT_CYCLES).unwrap();
+        assert_eq!(
+            (f.result, f.cycles, f.halt),
+            (auth.result, auth.cycles, auth.halt)
+        );
+    }
+    assert_eq!(many[1].result, 10); // 0+1+2+3+4
+    assert_eq!(many[2].result, 4950); // sum 0..100
+}
+
+#[test]
 fn cell_image_roundtrip() {
     use rustz80::cell::{CellConfig, CellProgram};
     let src = "fn run(a: u16, b: u16) -> u16 { a * b }";
