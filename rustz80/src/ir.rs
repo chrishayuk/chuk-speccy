@@ -84,6 +84,9 @@ pub enum Expr {
     Shift32 { left: bool, e: Box<Expr>, k: u8 },
     /// Truncate a `u32` to its low `u16` (`x as u16`) — the bridge back to 16-bit.
     Trunc32(Box<Expr>),
+    /// `halt(code)` — a Cell80 intrinsic: stop the run with a status code (the `ED FE`
+    /// HALT trap). A no-op on real hardware / the Spectrum target.
+    Halt(Box<Expr>),
 }
 
 /// A boolean condition (a single comparison — no `&&`/`||` in Stage 0).

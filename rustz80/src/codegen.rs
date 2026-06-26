@@ -479,6 +479,11 @@ fn gen_expr(a: &mut Asm, e: &Expr) {
         }
         // `x as u16` — the low word of a `u32` value (the high word is discarded).
         Expr::Trunc32(e) => gen_expr32(a, e),
+        // `halt(code)` — code in HL, then the HALT trap (no-op on real hardware).
+        Expr::Halt(code) => {
+            gen_expr(a, code);
+            gen_trap(a, TRAP_HALT);
+        }
         Expr::Lit32(_) | Expr::Var32(_) | Expr::Bin32(..) | Expr::Shift32 { .. } => {
             unreachable!("u32 node used in a 16-bit context (u32 params/returns unsupported)")
         }
@@ -588,6 +593,7 @@ fn gen_trap(a: &mut Asm, id: u8) {
 }
 
 const TRAP_FILL16: u8 = 0x20; // fill `BC` slots (2-byte words) at `HL` with `DE`
+const TRAP_HALT: u8 = 0x30; // stop the run with status code `HL`
 
 /// Fill `count` slots at local `base` with `value`. Every array element is one 2-byte
 /// slot (a `u8` lives in the low byte, `H = 0`), so the fill is always slot-stride.

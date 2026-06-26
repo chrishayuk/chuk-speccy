@@ -124,6 +124,11 @@ pub(crate) fn lower_expr(expr: &syn::Expr, ctx: &mut Ctx) -> Result<(Expr, Width
                     Width::Byte,
                 ));
             }
+            // `halt(code)` — Cell80: stop the run with a status code (no-op on Spectrum).
+            if name == "halt" {
+                let code = c.args.first().ok_or("halt(code) needs a code")?;
+                return Ok((Expr::Halt(Box::new(lower_expr(code, ctx)?.0)), Width::Word));
+            }
             if c.args.len() > 3 {
                 return Err("more than 3 call arguments not supported yet".into());
             }

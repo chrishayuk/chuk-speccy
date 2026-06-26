@@ -445,7 +445,7 @@ inspectable, deterministic, for the tiny-snippet class.*
   generated-code stress, trace mode) × {cold, warm, warm-batch-10k, fast/report/trace},
   and publish — proving usability, not raw compute.
 
-### B4. Cell80 — a Z80 *superset* for the cell — **dual-target + native mul/div + fill built**
+### B4. Cell80 — a Z80 *superset* for the cell — **dual-target + intrinsics (mul/div · fill · halt) built**
 The cell keeps hitting Z80's limits (software mul/div, no block ops, no typed I/O, return
 via the calling convention). Rather than make *authentic* Z80 do everything, treat Z80 as
 the **base** and define a small **superset for cell mode** — two backends off the one
@@ -498,8 +498,12 @@ spectrum-mode codegen simply never emits it). Per-op lowering table:
   `run(budget)` → `get("score")`, resolving names to addresses via the struct layout (the
   program is `impl State { fn run(&mut self) … }`); `fields()` lists them, reuse is
   leak-clean. The JSON↔state surface the MCP adapter (P6) needs. The structured
-  `{halt, result, cycles}` is already the `Report`. *(Next: `ED FE HALT` for a
-  program-driven halt code / early exit; multi-slot field get/set.)*
+  `{halt, result, cycles}` is already the `Report`.
+- [x] **4b · `ED FE HALT`** — a `halt(code)` dialect intrinsic (Cell80; a no-op `ED FE` on
+  real hardware) stops the run early with a `u16` status code, surfaced as
+  `Halt::Halted(code)` (+ `halt_code` in the JSON report). The run loop breaks right after
+  the trap — letting a cell signal found/not-found/error-N or bail on an assertion (the
+  XHALT_OK/XHALT_ERR contract). *(Next: multi-slot field get/set on `StateCell`.)*
 - [ ] **5 · (optional) trace markers + seeded RNG** — debug tier only; RNG seeded + reported
   to keep replay deterministic.
 - [ ] **6 · Formalise the *Cell80* ABI** — Z80-compatible deterministic VM: 64K flat RAM,
