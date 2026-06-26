@@ -379,6 +379,106 @@ fn cartridge_roundtrip_and_inspect() {
 }
 
 #[test]
+fn cell_host_warm_session() {
+    use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig, CellHost};
+    let scalar = |id: &str, src: &str, summary: &str, tags: Vec<&str>| {
+        Cartridge::compile(
+            src,
+            CellConfig::sandboxed(),
+            CartridgeOpts {
+                id: Some(id.into()),
+                summary: summary.into(),
+                tags: tags.iter().map(|s| s.to_string()).collect(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+
+    let mut host = CellHost::new();
+    assert!(host.is_empty());
+    host.add(scalar(
+        "add",
+        "fn run(a: u16, b: u16) -> u16 { a + b }",
+        "add two",
+        vec!["math"],
+    ));
+    host.add(scalar(
+        "mul",
+        "fn run(a: u16, b: u16) -> u16 { a * b }",
+        "multiply two",
+        vec!["math"],
+    ));
+    host.add(
+        Cartridge::compile(
+            "struct S { x: u16, y: u16, sum: u16 }
+             impl S { fn run(&mut self) -> u16 { self.sum = self.x + self.y; self.sum } }",
+            CellConfig::sandboxed(),
+            CartridgeOpts {
+                id: Some("accum".into()),
+                entry: Some("S::run".into()),
+                summary: "sum two fields".into(),
+                tags: vec!["state".into()],
+            },
+        )
+        .unwrap(),
+    );
+    assert_eq!(host.len(), 3);
+
+    // Discover + inspect.
+    assert_eq!(host.search("multiply", 5)[0].id, "mul");
+    assert_eq!(host.manifest("add").unwrap().signature.params.len(), 2);
+    assert!(host.manifest("ghost").is_none());
+
+    // Load once → run MANY on the warm handle (reused, deterministic — no re-instantiate).
+    let h = host.load("mul").unwrap();
+    assert_eq!(host.live_count(), 1);
+    assert_eq!(
+        host.run_fast(h, &[6, 7], DEFAULT_CYCLES).unwrap().result,
+        42
+    );
+    assert_eq!(host.run_fast(h, &[3, 3], DEFAULT_CYCLES).unwrap().result, 9);
+    assert_eq!(
+        host.run(h, &[10, 2], &[], DEFAULT_CYCLES).unwrap().result,
+        20
+    );
+
+    // A loaded state cell: typed inputs in, named field out — by handle.
+    let hs = host.load("accum").unwrap();
+    let base = 0xB000u16;
+    let rep = host
+        .run(
+            hs,
+            &[base],
+            &[(base, Ty::U16, 4), (base + 2, Ty::U16, 5)],
+            DEFAULT_CYCLES,
+        )
+        .unwrap();
+    assert_eq!(rep.result, 9);
+    assert_eq!(
+        host.read_named(hs, &[("sum".into(), base + 4, Ty::U16)])
+            .unwrap(),
+        vec![("sum".into(), 9u64)]
+    );
+    assert_eq!(host.live_count(), 2);
+
+    // Unload returns the bus to the pool; the freed handle slot is reused next load.
+    host.unload(h).unwrap();
+    assert_eq!(host.live_count(), 1);
+    let h2 = host.load("mul").unwrap();
+    assert_eq!(h2, h, "freed handle slot reused");
+    assert_eq!(
+        host.run_fast(h2, &[5, 5], DEFAULT_CYCLES).unwrap().result,
+        25
+    );
+
+    // Bad id / bad handle error, not panic.
+    assert!(host.load("ghost").is_err());
+    assert!(host.run_fast(999, &[1, 1], DEFAULT_CYCLES).is_err());
+    assert!(host.unload(999).is_err());
+}
+
+#[test]
 fn cli_exec_runs_a_compiled_cartridge() {
     use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig};
     let dir = std::env::temp_dir().join("rustz80_exec_test");
