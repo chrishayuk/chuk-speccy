@@ -536,6 +536,100 @@ virtual chip; `speccy-sdk` authoring + a future `cell-sdk`. *Pitch:* "Cell80 —
 deterministic virtual chip for agent-generated programs; restricted Rust in, falls back to
 real Z80 for Spectrum output, structured execution reports out."
 
+### B5. Cell80 spin-out — extract the cell into a standalone runtime (staged)
+The cell concept has outgrown "a module in a Spectrum repo." These are now **two audiences**:
+`chuk-speccy` = *"build & run Spectrum games, let agents play them"*; Cell80 = *"run tiny
+deterministic sandboxed programs as agent tools"* — and the second is much bigger than the
+Spectrum. Buried in a retro-emulator repo, it undersells; a standalone repo lets it be
+positioned as **"Cell80 — microsecond-scale safe executable tool capsules for agents"**
+(the "millions of tiny tools, not millions of tool schemas" story). **But don't split early**
+— the API (traps, typed I/O, manifest, CLI, MCP, inter-cell, tool index) is still moving;
+a premature split creates dependency friction. Do it **staged**:
+
+- [x] **Phase 1 · clean internal boundary** — the cell path must **not** depend on the
+  Spectrum emulator (ULA, video, audio, keyboard, TAP, SDK `Frame`/`Input`). **Verified
+  met:** `rustz80`'s only deps are `syn` + `z80` (the generic CPU) — no `spectrum`/SDK; the
+  `Frame`/`Input` references are dialect *type-name* recognition, not a crate dependency.
+  The test *("copy `rustz80` + the cell into a new repo without the emulator?")* passes
+  today. The `cell/` + `codegen/` module split sharpened it further.
+- [ ] **Phase 2 · settle the identity** — name the product **Cell80** (Z80-derived, a cell
+  runtime, not just Spectrum). Future crates: `cell80-core` (VM/runner/reports/fast path),
+  `cell80-compiler` (frontend/IR/Cell80 backend), `cell80-cartridge` (`.cell` manifest +
+  format), `cell80-cli`, `cell80-mcp`. Start coarse (`cell80` + `cell80-mcp`), split later.
+- [ ] **Phase 3 · extract once the `.cell` cartridge lands** — wait for a minimal cartridge
+  format so the new repo has a crisp object: `source.rs → .cell → run/inspect/bench/MCP`.
+  Without it the repo reads as "a module from chuk-speccy"; with it, "a new executable
+  artifact format for tiny agent tools." (The image format `to_bytes`/`from_bytes` is the
+  seed of `.cell`; a named, versioned, manifest-bearing artifact is the gate.)
+
+**The compiler is the shared part.** Short term: it stays in `chuk-speccy`, cell as a
+subcrate. Long term: extract compiler/core to `cell80`, and `chuk-speccy` depends on it for
+the Spectrum target. **What moves out:** flat-RAM runner, Cell80 traps, manifests/cartridges,
+typed I/O ABI, MCP cell tools, the tool registry/inter-cell graph. **What stays:** ULA/
+video/audio/keyboard, TAP/TZX as Spectrum media, ROM integration, 48K timing, the game SDK
+`Frame`/`Input`, `SpectrumEnv`, agents *playing* games.
+
+**Break-it-out decision rule** (all true): ① cell API stable enough for external users · ②
+`.cell` artifact/manifest exists · ③ CLI compiles/runs/inspects independently · ④ no
+Spectrum-emulator dependency in cell mode · ⑤ README explains the value in 30 s · ⑥ MCP
+server is plausible as a separate adapter. **Risk = fragmentation:** keep the two
+mutually reinforcing, not competing — Cell80 README: *"began as the compute-cell layer of
+chuk-speccy; still targets authentic Z80/Spectrum where needed"*; `chuk-speccy`: *"uses
+Cell80/rustz80 for compiled game logic and agent-cell execution."* Order: **internal
+boundary → rename → `.cell` → CLI polish → extract.**
+
+### B6. Cell80 as an agent-tool substrate — the product sequence
+The cell roadmap now shifts from *"prove the cell can exist"* (done — it runs, it's fast,
+safe, tiny, deterministic) to **"make cells a usable agent/tool substrate."** North star:
+
+> **Agents discover, inspect, compose, and run *millions of tiny executable tools* without
+> loading their schemas into context. Each tool is a self-describing `.cell` cartridge —
+> bounded, deterministic, fast to start, cheap to run, safe by default.**
+
+Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
+
+1. ☐ **Freeze the cell ABI (v1)** — the contract every CLI/MCP/index/cartridge relies on:
+   entry + args/input-memory, `HL`/`DE`/`BC` return regs, typed read-back, cycle budget,
+   halt status, capability flags, **`Report` JSON v1**, stable `CellConfig` defaults +
+   documented register/memory/capability ABI. *Foundation — freeze before adding surface.*
+2. ~ **`.cell` cartridge format** — code image + entry table + compact manifest + I/O schema
+   + symbol table + capability reqs + limits + **source-hash + compiler version** (+ optional
+   tests). The image (`to_bytes`/`from_bytes`) is the seed; the gate is a *named, versioned,
+   manifest-bearing* artifact. Unlocks portable tool objects (compile once → ship → run).
+3. ☐ **Native CLI polish** — `compile`(→`.cell`) · `run`(source) · `exec`(`.cell`) ·
+   `inspect` · `bench` · `verify` · `trace`. **Separate run-source (dev loop) from
+   exec-image (runtime/registry loop).**
+4. ~ **Typed schema from structs** — emit `{input:{…}, output:{…}}` JSON from `Input`/`Output`
+   struct defs so callers use **named JSON, not raw addresses** (`StateCell` already does the
+   runtime name↔addr mapping; this auto-derives the schema). The agent-friendliness unlock.
+5. ✓ **Batch API `run_many_fast`** — one cell, many inputs → many outputs (decode-once fast
+   path, ~0.05 µs/call). *(Next: CLI `exec --batch candidates.json`.)*
+6. ☐ **MCP server (P6)** — start small (`cell_compile`/`inspect`/`run`/`exec`/`bench`), then
+   cached sessions (`cell_load → id`, `cell_run_cached(id, input)`, `cell_unload`) to keep
+   the warm-run edge; later `cell_search`/`trace`/`verify`/`graph_run`.
+7. ☐ **Tool manifest + local index/search** — the bridge to "millions of tools without
+   millions of schemas": each cell carries a compact manifest (id/summary/tags/io/limits/
+   caps); `cell index add *.cell` + `cell search "…"` returns *summaries*, and the model
+   loads only the selected tool's schema — not the whole library.
+8. ☐ **CellGraph / inter-cell messaging** — composition; v1 deliberately constrained: static
+   graph, bounded mailboxes, fixed message size, deterministic scheduler, **no dynamic spawn,
+   no shared memory, every message traced**. Intrinsics `send`/`recv`/`poll`/`yield`
+   (planner→scorer→validator→decision; worker-swarm→reducer). The "tiny executable society."
+9. ~ **Cell80 extensions** — mul/div/fill/halt traps ✓; next: memcpy/memclr, trace/assert
+   traps, typed-I/O traps, message send/recv traps. Keep `Spectrum48` = real Z80, `Cell` =
+   Z80 + safe virtual chip — never pollute the Spectrum side.
+10. ☐ **Extraction** — see [B5](#b5-cell80-spin-out--extract-the-cell-into-a-standalone-runtime-staged);
+    split once `.cell` + CLI + MCP exist and the artifact boundary is crisp.
+11. ☐ **Reference demos** — calculator · scorer (1000 candidates) · typed-state (Input/Output
+    JSON) · repair benchmark (agent patches a broken gcd/sort) · tool-search (retrieve + run
+    from the index) · cell-graph (planner/scorer/validator) · Spectrum-bridge (same compiler
+    still emits a `.tap`). *Scorer + tool-search are the key agent-tool proofs.*
+
+**Immediate next 5 PRs:** ① `Report` JSON v1 + ABI docs · ② `.cell` cartridge + `inspect` ·
+③ `exec` compiled `.cell` + cached-runner path · ④ typed `Input`/`Output` schema generation
+· ⑤ batch CLI (`exec --batch`) — the `run_many_fast` core is already done. Then ⑥ MCP MVP ·
+⑦ manifest/index/search · ⑧ CellGraph MVP.
+
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
   Python `chat.py` (`ChatSession`, pluggable responder, optional `llm_responder`
@@ -800,3 +894,11 @@ artifacts* with the compiler emitting the symbol map. Don't build the studio fir
 **prove the seam on Snake**, then the kit, then a slice, then the MCP studio last.
 Everything else (frontends D, the rest of reach F, the accuracy tail) is independent
 and parallel, all below E.
+
+A second strategic arc has since opened up alongside E: **B6, Cell80 as an agent-tool
+substrate**. The cell layer (B3/B4) is built and fast; B6 turns it into a *platform* —
+freeze the ABI → `.cell` cartridges → CLI → typed schemas → MCP → a tool index → cell
+graphs — toward the north star of *"millions of tiny executable tools agents discover and
+run without loading their schemas."* It shares the `rustz80` frontend with E but targets a
+different (and bigger-than-Spectrum) audience, and is where current momentum sits. Immediate
+next: the B6 5-PR sequence (ABI v1 → cartridge → exec/cached → typed schema → batch CLI).
