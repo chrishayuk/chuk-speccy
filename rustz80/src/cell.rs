@@ -239,6 +239,97 @@ impl CellProgram {
     pub fn program(&self) -> &Program {
         &self.prog
     }
+
+    /// Serialize to a compact, self-contained **image** — code + symbols + policy, no syn,
+    /// no source. Cache it (by hash), ship it, retrieve it; [`from_bytes`](Self::from_bytes)
+    /// reloads it in ~µs, skipping the parse-dominated (~16 µs) compile. The cell
+    /// "cartridge": a few dozen bytes you can hash, index, and hand around cheaply.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(IMAGE_MAGIC);
+        b.push(IMAGE_VER);
+        b.extend_from_slice(&(self.prog.code.len() as u16).to_le_bytes());
+        b.extend_from_slice(&self.prog.code);
+        let syms = sorted_symbols(&self.prog.symbols); // deterministic → stable hash
+        b.extend_from_slice(&(syms.len() as u16).to_le_bytes());
+        for (name, addr) in &syms {
+            b.push(name.len() as u8);
+            b.extend_from_slice(name.as_bytes());
+            b.extend_from_slice(&addr.to_le_bytes());
+        }
+        let c = &self.cfg;
+        let flags = (c.allow_raw_memory as u8)
+            | (c.allow_ports as u8) << 1
+            | (c.max_code_bytes.is_some() as u8) << 2
+            | (c.max_touched.is_some() as u8) << 3;
+        b.push(flags);
+        b.extend_from_slice(&(c.max_code_bytes.unwrap_or(0) as u32).to_le_bytes());
+        b.extend_from_slice(&(c.max_touched.unwrap_or(0) as u32).to_le_bytes());
+        b
+    }
+
+    /// Reload an image written by [`to_bytes`](Self::to_bytes) — no parse, no compile.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let mut r = ImageReader { b: bytes, i: 0 };
+        if r.take(4)? != IMAGE_MAGIC {
+            return Err("not a CZ80 cell image".into());
+        }
+        let ver = r.u8()?;
+        if ver != IMAGE_VER {
+            return Err(format!("unsupported cell-image version {ver}"));
+        }
+        let code_len = r.u16()? as usize;
+        let code = r.take(code_len)?.to_vec();
+        let nsym = r.u16()?;
+        let mut symbols = HashMap::with_capacity(nsym as usize);
+        for _ in 0..nsym {
+            let nlen = r.u8()? as usize;
+            let name = std::str::from_utf8(r.take(nlen)?)
+                .map_err(|_| "bad symbol name in image")?
+                .to_string();
+            symbols.insert(name, r.u16()?);
+        }
+        let flags = r.u8()?;
+        let max_code = r.u32()? as usize;
+        let max_touched = r.u32()? as usize;
+        Ok(CellProgram {
+            prog: Program { code, symbols },
+            cfg: CellConfig {
+                allow_raw_memory: flags & 1 != 0,
+                allow_ports: flags & 2 != 0,
+                max_code_bytes: (flags & 4 != 0).then_some(max_code),
+                max_touched: (flags & 8 != 0).then_some(max_touched),
+            },
+        })
+    }
+}
+
+const IMAGE_MAGIC: &[u8; 4] = b"CZ80";
+const IMAGE_VER: u8 = 1;
+
+/// A tiny bounds-checked cursor for [`CellProgram::from_bytes`].
+struct ImageReader<'a> {
+    b: &'a [u8],
+    i: usize,
+}
+impl<'a> ImageReader<'a> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
+        let end = self.i.checked_add(n).ok_or("cell image truncated")?;
+        let s = self.b.get(self.i..end).ok_or("cell image truncated")?;
+        self.i = end;
+        Ok(s)
+    }
+    fn u8(&mut self) -> Result<u8, String> {
+        Ok(self.take(1)?[0])
+    }
+    fn u16(&mut self) -> Result<u16, String> {
+        let s = self.take(2)?;
+        Ok(u16::from_le_bytes([s[0], s[1]]))
+    }
+    fn u32(&mut self) -> Result<u32, String> {
+        let s = self.take(4)?;
+        Ok(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    }
 }
 
 /// A compiled cell, runnable many times. One 64 KiB bus is allocated up front and the
@@ -340,13 +431,51 @@ impl Runner {
         args: &[u16],
         budget: u64,
     ) -> Result<Fast, String> {
-        let (_, entry_addr) = self.resolve_entry(entry)?;
+        let entry_addr = self.resolve_addr(entry)?;
+        Ok(self.exec_fast(entry_addr, args, budget))
+    }
+
+    /// Run the same entry over many argument sets, reusing **all** setup — the "score N
+    /// candidates" path. The entry is resolved once (no per-call name allocation/lookup);
+    /// each element is reset + re-run. One [`Fast`] per input set, in order.
+    pub fn run_many_fast(
+        &mut self,
+        entry: Option<&str>,
+        arg_sets: &[&[u16]],
+        budget: u64,
+    ) -> Result<Vec<Fast>, String> {
+        let entry_addr = self.resolve_addr(entry)?;
+        Ok(arg_sets
+            .iter()
+            .map(|args| self.exec_fast(entry_addr, args, budget))
+            .collect())
+    }
+
+    /// `exec` + pack a [`Fast`] — the shared body of `run_fast`/`run_many_fast`.
+    fn exec_fast(&mut self, entry_addr: u16, args: &[u16], budget: u64) -> Fast {
         let (regs, cycles, halt) = self.exec(entry_addr, args, &[], budget);
-        Ok(Fast {
+        Fast {
             result: regs[0],
             regs,
             cycles,
             halt,
+        }
+    }
+
+    /// Resolve just the entry **address** (default `run`, then `main`) — no name
+    /// allocation, for the hot path. The named [`resolve_entry`](Self::resolve_entry) is
+    /// for the `Report` path, which needs the name.
+    fn resolve_addr(&self, entry: Option<&str>) -> Result<u16, String> {
+        let name = match entry {
+            Some(e) => e,
+            None if self.prog.symbols.contains_key("run") => "run",
+            None if self.prog.symbols.contains_key("main") => "main",
+            None => return Err("no `run` or `main` entry — pass an explicit entry".into()),
+        };
+        self.prog.symbols.get(name).copied().ok_or_else(|| {
+            let mut names: Vec<String> = self.prog.symbols.keys().cloned().collect();
+            names.sort();
+            format!("no entry `{name}`; available: {}", names.join(", "))
         })
     }
 

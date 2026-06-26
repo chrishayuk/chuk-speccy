@@ -390,9 +390,11 @@ inspectable, deterministic, for the tiny-snippet class.*
 - [x] **P1 · Warm execution** — compile-once/run-many `Runner`, O(touched) reset (above).
 - [~] **P2 · Run modes** — `Runner::run_fast` (just regs + cycles + halt, **no per-call
   allocations** — no symbol-map clone / size report / memory-diff coalesce) splits the hot
-  path from `run`'s rich `Report`. `cell-bench` shows the Report costs ~0.34 µs/call (~15%
-  of a tiny call): full 2.3 µs vs fast 1.9 µs. *Next:* `run_trace` (per-instruction +
-  writes + optional disasm) for the debug tier.
+  path from `run`'s rich `Report`, and `run_many_fast(entry, &arg_sets, budget)` resolves
+  the entry once for the "score N candidates" loop. Lifecycle bench (cell-bench): per-call
+  overhead floor **~0.06 µs** (a trivial cell), the score **0.25 µs** (mostly Z80
+  emulation, not framework), `run_many_fast` **0.20 µs** (~20% under per-call). *Next:*
+  `run_trace` (per-instruction + writes + optional disasm) for the debug tier.
 - [x] **P3 · Full register capture** — `regs = [HL, DE, BC]`; tuple returns read back.
 - [x] **P4 · Typed I/O** — typed *read-back* (`read_named`/`--read`) **and typed inputs**
   (`Runner::run_with_inputs`, CLI `--set addr:ty=val`, written after the reset + cleaned
@@ -406,10 +408,12 @@ inspectable, deterministic, for the tiny-snippet class.*
   setup is ~90% syn parse, ≈16 µs; bus alloc is amortized-free) is now separate from
   `Runner::new(&program)`, which instantiates a fresh machine in **~1.2 µs** (no re-parse,
   ~16× cheaper; vs Wasm's ~3 ms JIT, ~2500×). So a cached `CellProgram` makes re-running a
-  known snippet's cold setup effectively vanish. *Next:* surface it on the CLI —
-  `compile` (source → `.cell`), `exec` (precompiled), `inspect` (symbols/size/helpers) —
-  and persist `CellProgram` as a `.cell` artifact (z80 image + entry + symbols + source
-  hash + compiler/ABI version).
+  known snippet's cold setup effectively vanish. **The image format landed:**
+  `CellProgram::to_bytes()` / `from_bytes()` is a compact self-contained cartridge (code +
+  symbols + policy, no syn — **77 bytes** for the score cell) that reloads + runs in
+  ~1.2 µs (16× under compiling the source) — cache by hash, ship, index. *Next:* surface it
+  on the CLI — `compile` (source → `.cell`), `exec` (precompiled image), `inspect`
+  (symbols/size/helpers) — and stamp the artifact with a source hash + compiler/ABI version.
 - [ ] **P6 · MCP server** — `chuk-mcp-cell` over the core: `cell.compile`, `cell.run`,
   `cell.compile_and_run`, `cell.inspect`; then cached-runner sessions
   (`compile → cell_id`, `run_cell(cell_id, args)`) for warm-path agent performance.

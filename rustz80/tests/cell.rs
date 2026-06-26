@@ -53,6 +53,54 @@ fn state_cell_named_io() {
 }
 
 #[test]
+fn run_many_fast_matches_single() {
+    // The batch path (entry resolved once) agrees with per-call run_fast.
+    let mut r = Runner::compile("fn run(x: u16, y: u16) -> u16 { x * x + y }").unwrap();
+    let sets: [&[u16]; 3] = [&[3, 1], &[6, 5], &[10, 0]];
+    let many = r.run_many_fast(None, &sets, DEFAULT_CYCLES).unwrap();
+    assert_eq!(
+        many.iter().map(|f| f.result).collect::<Vec<_>>(),
+        vec![10, 41, 100]
+    );
+    for (f, s) in many.iter().zip(sets.iter()) {
+        let single = r.run_fast(None, s, DEFAULT_CYCLES).unwrap();
+        assert_eq!(
+            (f.result, f.cycles, f.halt),
+            (single.result, single.cycles, single.halt)
+        );
+    }
+}
+
+#[test]
+fn cell_image_roundtrip() {
+    use rustz80::cell::{CellConfig, CellProgram};
+    let src = "fn run(a: u16, b: u16) -> u16 { a * b }";
+    let prog = CellProgram::compile_with_config(src, CellConfig::sandboxed()).unwrap();
+    let bytes = prog.to_bytes();
+    assert!(
+        bytes.len() < 128,
+        "image should be tiny (got {})",
+        bytes.len()
+    );
+
+    // Reload without re-parsing — same code + symbols, runs to the same result, policy kept.
+    let back = CellProgram::from_bytes(&bytes).unwrap();
+    assert_eq!(back.program().code, prog.program().code);
+    assert_eq!(back.program().symbols, prog.program().symbols);
+    assert_eq!(
+        Runner::new(&back)
+            .run(None, &[6, 7], DEFAULT_CYCLES)
+            .unwrap()
+            .result,
+        42
+    );
+
+    // Foreign / truncated bytes are rejected, not panicked.
+    assert!(CellProgram::from_bytes(b"nope").is_err());
+    assert!(CellProgram::from_bytes(&bytes[..bytes.len() - 3]).is_err());
+}
+
+#[test]
 fn cell80_halt_with_code() {
     use rustz80::cell::Halt;
     // `halt(code)` stops the run early with a status code.
