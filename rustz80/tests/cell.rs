@@ -599,6 +599,7 @@ fn cli_index_and_search_the_seed_library() {
     // error paths.
     assert!(cell::run_cli(&["search".into(), "q".into()]).is_err()); // no dir
     assert!(cell::run_cli(&["index".into(), "/no/such/dir".into()]).is_err());
+    assert!(cell::run_cli(&["serve".into()]).is_err()); // serve needs a dir
 }
 
 #[test]
