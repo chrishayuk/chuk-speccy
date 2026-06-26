@@ -1036,6 +1036,31 @@ fn array_fill() {
 }
 
 #[test]
+fn square_same_var() {
+    // `x * x` (same variable) takes the load-once square path; must match `x * y` and rustc
+    // across widths, including overflow wrap.
+    fn host() -> u16 {
+        let v = [0u16, 1u16, 7u16, 255u16, 256u16, 1000u16, 40000u16];
+        let mut s = 0u16;
+        for i in 0..7 {
+            s = s.wrapping_add(v[i].wrapping_mul(v[i])); // square
+        }
+        s
+    }
+    let src = "
+        fn run() -> u16 {
+            let v = [0u16, 1u16, 7u16, 255u16, 256u16, 1000u16, 40000u16];
+            let mut s = 0u16;
+            let mut i = 0u16;
+            while i < 7u16 { let x = v[i as usize]; s = s.wrapping_add(x * x); i = i + 1u16; }
+            s
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host());
+}
+
+#[test]
 fn mul16_operand_widths() {
     // The multiplier-terminated `__mul16` must be correct across multiplier widths: 0
     // (immediate return), 1 bit, full 16 bits, and in between. `a[i] * b[i]` is var*var,

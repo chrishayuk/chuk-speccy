@@ -539,19 +539,35 @@ const TRAP_DIVMOD16: u8 = 0x11;
 /// `HL = l * r` (full 16-bit, neither operand constant). Spectrum: the software runtime.
 /// Cell: an `ED FE` host trap, serviced natively by the cell bus.
 fn gen_mul(a: &mut Asm, l: &Expr, r: &Expr) {
+    // `x * x` (one variable squared) — load it once and fan it out to the operand
+    // registers, instead of evaluating + reloading the operand twice. Restricted to a bare
+    // `Var` so it stays side-effect-free (`f() * f()` must still evaluate twice).
+    let square = matches!((l, r), (Expr::Var(s1), Expr::Var(s2)) if s1 == s2);
     match a.target {
         Target::Spectrum48 => {
-            gen_pair(a, l, r); // HL = r, DE = l
-            a.call("__mul16"); // HL = l * r
+            if square {
+                gen_expr(a, l); // HL = x
+                a.byte(0x54);
+                a.byte(0x5D); // ld d,h ; ld e,l   (DE = x)
+            } else {
+                gen_pair(a, l, r); // HL = r, DE = l
+            }
+            a.call("__mul16"); // HL = HL * DE
             a.needs_mul = true;
         }
         Target::Cell => {
-            gen_expr(a, l);
-            a.byte(0xE5); // PUSH HL  (l)
-            gen_expr(a, r);
+            if square {
+                gen_expr(a, l); // HL = x
+                a.byte(0x54);
+                a.byte(0x5D); // ld d,h ; ld e,l   (DE = x)
+            } else {
+                gen_expr(a, l);
+                a.byte(0xE5); // PUSH HL  (l)
+                gen_expr(a, r); // HL = r
+                a.byte(0xD1); // POP DE   (DE = l)
+            }
             a.byte(0x44);
-            a.byte(0x4D); // ld b,h ; ld c,l   (BC = r)
-            a.byte(0xD1); // POP DE   (DE = l)
+            a.byte(0x4D); // ld b,h ; ld c,l   (BC = the value left in HL)
             gen_trap(a, TRAP_MUL16); // HL = BC * DE
         }
     }
