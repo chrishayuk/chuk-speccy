@@ -1,6 +1,11 @@
 //! Run outcome types — `Halt`, `Fast`, `Report` (+ `Ty`) and their formatters.
 use std::collections::HashMap;
 
+/// The frozen cell ABI / report-schema version (`"abi"` in [`Report::to_json`]). Bump only
+/// on a breaking change to the register/memory/capability contract or the JSON shape. See
+/// `docs/09-cell80-abi.md`.
+pub const ABI_VERSION: u32 = 1;
+
 /// Why a run stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Halt {
@@ -54,6 +59,8 @@ pub struct Fast {
     pub result: u16,
     /// All three result registers `[HL, DE, BC]`.
     pub regs: [u16; 3],
+    /// T-states elapsed. **See the caveat on [`Report::cycles`] — this is a deterministic
+    /// *relative* cost, not authentic Z80 time, and must not be used as an RL reward.**
     pub cycles: u64,
     pub halt: Halt,
 }
@@ -72,7 +79,13 @@ pub struct Report {
     /// Named typed values decoded from post-run memory (empty unless requested via
     /// [`Runner::read_named`](crate::cell::Runner::read_named) / the CLI `--read`).
     pub reads: Vec<(String, u64)>,
-    /// T-states elapsed, and the budget it ran under.
+    /// T-states elapsed, and the budget it ran under. **Caveat — not authentic Z80 time:**
+    /// in Cell mode `*`/`/`/`%` and `[v; N]` fills are `ED FE` host traps serviced natively
+    /// and charged a flat ~4 T-states, *not* the real software-routine cost. So `cycles` is
+    /// a **deterministic relative cost metric** — correct for liveness (the budget) and
+    /// replay, but it must **not** be read as hardware-fidelity time or used as an RL reward
+    /// (that would reward shoving work into traps that read as "free"). See
+    /// `docs/09-cell80-abi.md`.
     pub cycles: u64,
     pub budget: u64,
     /// Did the entry return cleanly (`true`)? (Shorthand for `halt == Halt::Returned`.)
@@ -166,9 +179,10 @@ impl Report {
             _ => String::new(),
         };
         format!(
-            "{{\"entry\":\"{}\",\"entry_addr\":{},\"result\":{},\"regs\":[{},{},{}],\"cycles\":{},\
+            "{{\"abi\":{},\"entry\":\"{}\",\"entry_addr\":{},\"result\":{},\"regs\":[{},{},{}],\"cycles\":{},\
              \"budget\":{},\"halt\":\"{}\"{},\"code_bytes\":{},\"functions\":{},\"symbols\":{{{}}},\
              \"memory_touched\":[{}],\"reads\":{{{}}}}}",
+            ABI_VERSION,
             self.entry,
             self.entry_addr,
             self.result,

@@ -588,10 +588,15 @@ safe, tiny, deterministic) to **"make cells a usable agent/tool substrate."** No
 
 Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
 
-1. ☐ **Freeze the cell ABI (v1)** — the contract every CLI/MCP/index/cartridge relies on:
-   entry + args/input-memory, `HL`/`DE`/`BC` return regs, typed read-back, cycle budget,
-   halt status, capability flags, **`Report` JSON v1**, stable `CellConfig` defaults +
-   documented register/memory/capability ABI. *Foundation — freeze before adding surface.*
+1. ✓ **Freeze the cell ABI (v1)** — `ABI_VERSION = 1`; `Report` JSON leads with `"abi":1`
+   (schema locked by test). Full contract in
+   [`docs/09-cell80-abi.md`](./09-cell80-abi.md): memory map, calling convention
+   (`HL`/`DE`/`BC`), typed I/O, cycle budget + the **`cycles` trap-cost caveat** (loud
+   comment: not authentic Z80 time, never an RL reward), halt statuses, capability model,
+   JSON schema, image format. **B3 seam now closed against the host oracle:**
+   `struct_field_state_matches_host` runs a struct program through the cell, reads *every*
+   field via `struct_layout`, and asserts equality with the same logic under rustc — the
+   field-state differential `diff.rs` only did for `HL` before.
 2. ~ **`.cell` cartridge format** — code image + entry table + compact manifest + I/O schema
    + symbol table + capability reqs + limits + **source-hash + compiler version** (+ optional
    tests). The image (`to_bytes`/`from_bytes`) is the seed; the gate is a *named, versioned,

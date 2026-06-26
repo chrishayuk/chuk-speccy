@@ -53,6 +53,119 @@ fn state_cell_named_io() {
 }
 
 #[test]
+fn report_json_is_abi_v1() {
+    // The frozen v1 report schema: leads with the ABI version, then the documented keys.
+    use rustz80::cell::ABI_VERSION;
+    assert_eq!(ABI_VERSION, 1);
+    let mut r = Runner::compile("fn run(a: u16, b: u16) -> u16 { a * b }").unwrap();
+    let json = r.run(None, &[6, 7], DEFAULT_CYCLES).unwrap().to_json();
+    assert!(
+        json.starts_with(&format!("{{\"abi\":{ABI_VERSION},")),
+        "got: {json}"
+    );
+    for key in [
+        "\"entry\":\"run\"",
+        "\"result\":42",
+        "\"regs\":[42,",
+        "\"cycles\":",
+        "\"budget\":",
+        "\"halt\":\"returned\"",
+        "\"code_bytes\":",
+        "\"functions\":",
+        "\"symbols\":{",
+        "\"memory_touched\":[",
+        "\"reads\":{",
+    ] {
+        assert!(json.contains(key), "v1 schema missing `{key}` in {json}");
+    }
+}
+
+#[test]
+fn struct_field_state_matches_host() {
+    // Closes the B3 seam against the host oracle (not against hardcoded literals): run a
+    // struct program through the cell, snapshot EVERY field via `struct_layout`, and assert
+    // field-by-field equality with the same logic under rustc. This proves the
+    // host-vs-cell *field-state* equality through the layout map — the literal B3 claim —
+    // the way `diff.rs` proves it for the `HL` return value.
+    let src = "struct State { x: u16, y: u16, sum: u16, prod: u16, big: u16 }
+               impl State {
+                   fn run(&mut self) -> u16 {
+                       self.sum = self.x.wrapping_add(self.y);
+                       self.prod = self.x.wrapping_mul(self.y);
+                       if self.x > self.y { self.big = self.x; } else { self.big = self.y; }
+                       self.sum
+                   }
+               }";
+    // The rustc oracle — the identical logic on a host struct.
+    #[derive(Default)]
+    struct State {
+        x: u16,
+        y: u16,
+        sum: u16,
+        prod: u16,
+        big: u16,
+    }
+    impl State {
+        fn run(&mut self) -> u16 {
+            self.sum = self.x.wrapping_add(self.y);
+            self.prod = self.x.wrapping_mul(self.y);
+            if self.x > self.y {
+                self.big = self.x;
+            } else {
+                self.big = self.y;
+            }
+            self.sum
+        }
+    }
+
+    const BASE: u16 = 0xB000;
+    let layout = rustz80::struct_layout(src, "State").unwrap();
+    let addr = |f: &str| BASE + layout.iter().find(|l| l.name == f).unwrap().offset * 2;
+    let mut r = Runner::compile(src).unwrap();
+
+    for (x, y) in [
+        (3u16, 4u16),
+        (40000, 40000),
+        (7, 7),
+        (0, 9),
+        (255, 256),
+        (12345, 9999),
+    ] {
+        // cell: set inputs by name, run, read every field back through the layout map.
+        let inputs = vec![
+            (addr("x"), Ty::U16, x as u64),
+            (addr("y"), Ty::U16, y as u64),
+        ];
+        let result = r
+            .run_with_inputs(Some("State::run"), &[BASE], &inputs, DEFAULT_CYCLES)
+            .unwrap()
+            .result;
+        // host: the same program under rustc.
+        let mut host = State {
+            x,
+            y,
+            ..Default::default()
+        };
+        let host_result = host.run();
+
+        assert_eq!(result, host_result, "return value ({x},{y})");
+        for (name, hv) in [
+            ("x", host.x),
+            ("y", host.y),
+            ("sum", host.sum),
+            ("prod", host.prod),
+            ("big", host.big),
+        ] {
+            assert_eq!(
+                r.peek_u16(addr(name)),
+                hv,
+                "field `{name}` diverged from host on ({x},{y})"
+            );
+        }
+    }
+}
+
+#[test]
 fn run_many_fast_matches_single() {
     // The batch path (entry resolved once) agrees with per-call run_fast.
     let mut r = Runner::compile("fn run(x: u16, y: u16) -> u16 { x * x + y }").unwrap();

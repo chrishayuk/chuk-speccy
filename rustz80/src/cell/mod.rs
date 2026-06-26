@@ -25,6 +25,6 @@ mod state;
 pub use cli::{parse_args, run_cli, USAGE};
 pub use config::CellConfig;
 pub use program::CellProgram;
-pub use report::{Fast, Halt, Report, Ty};
+pub use report::{Fast, Halt, Report, Ty, ABI_VERSION};
 pub use runner::{run, CellPool, Runner};
 pub use state::{StateCell, STATE_BASE};
