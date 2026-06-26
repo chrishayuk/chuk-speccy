@@ -68,6 +68,7 @@ fn report_json_is_abi_v1() {
         "\"result\":42",
         "\"regs\":[42,",
         "\"cycles\":",
+        "\"trapped_ops\":",
         "\"budget\":",
         "\"halt\":\"returned\"",
         "\"code_bytes\":",
@@ -78,6 +79,30 @@ fn report_json_is_abi_v1() {
     ] {
         assert!(json.contains(key), "v1 schema missing `{key}` in {json}");
     }
+}
+
+#[test]
+fn report_counts_trapped_ops() {
+    // The honest cost companion to `cycles`: `mul`/`div` traps read as ~free in cycles, so
+    // count them so a reward function can't be gamed by routing work through traps.
+    let mut r = Runner::compile("fn run(a: u16, b: u16) -> u16 { a * b + a * b + a / b }").unwrap();
+    let rep = r.run(None, &[6, 2], DEFAULT_CYCLES).unwrap();
+    assert_eq!(rep.result, 27); // 12 + 12 + 3
+    assert_eq!(rep.trapped_ops, 3); // two muls + one div
+    assert!(rep.to_json().contains("\"trapped_ops\":3"));
+
+    // Pure add/shift code traps nothing.
+    let mut add = Runner::compile("fn run(a: u16, b: u16) -> u16 { a + b + a }").unwrap();
+    assert_eq!(
+        add.run(None, &[6, 2], DEFAULT_CYCLES).unwrap().trapped_ops,
+        0
+    );
+
+    // The fast (batch) path reports the same count — input-independent for straight-line.
+    let many = r
+        .run_many_fast(None, &[&[6, 2], &[3, 3]], DEFAULT_CYCLES)
+        .unwrap();
+    assert!(many.iter().all(|f| f.trapped_ops == 3));
 }
 
 #[test]

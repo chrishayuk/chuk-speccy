@@ -59,9 +59,11 @@ pub struct Fast {
     pub result: u16,
     /// All three result registers `[HL, DE, BC]`.
     pub regs: [u16; 3],
-    /// T-states elapsed. **See the caveat on [`Report::cycles`] — this is a deterministic
-    /// *relative* cost, not authentic Z80 time, and must not be used as an RL reward.**
+    /// T-states elapsed. **See the caveat on [`Report::cycles`] — a deterministic *relative*
+    /// cost, not authentic Z80 time; pair it with `trapped_ops` before using as a signal.**
     pub cycles: u64,
+    /// Count of cost-bearing `ED FE` host traps (`mul`/`div`/fill) — see [`Report::trapped_ops`].
+    pub trapped_ops: u64,
     pub halt: Halt,
 }
 
@@ -84,10 +86,15 @@ pub struct Report {
     /// and charged a flat ~4 T-states, *not* the real software-routine cost. So `cycles` is
     /// a **deterministic relative cost metric** — correct for liveness (the budget) and
     /// replay, but it must **not** be read as hardware-fidelity time or used as an RL reward
-    /// (that would reward shoving work into traps that read as "free"). See
-    /// `docs/09-cell80-abi.md`.
+    /// (that would reward shoving work into traps that read as "free"). Pair it with
+    /// `trapped_ops` to make a faithful cost signal. See `docs/09-cell80-abi.md`.
     pub cycles: u64,
     pub budget: u64,
+    /// How many cost-bearing `ED FE` host traps (`mul`/`div`/fill) the run executed — the
+    /// honest companion to `cycles`. Each trap is charged a flat ~4 T-states, so a program
+    /// with high `trapped_ops` did real work that `cycles` undercounts. A reward function
+    /// should weight or refuse trap-heavy programs rather than treat low `cycles` as cheap.
+    pub trapped_ops: u64,
     /// Did the entry return cleanly (`true`)? (Shorthand for `halt == Halt::Returned`.)
     pub returned: bool,
     /// Why the run stopped (returned / cycle budget / memory limit).
@@ -136,7 +143,7 @@ impl Report {
             "entry      {} @ {:#06x}\n\
              result     {} ({:#06x})\n\
              regs       HL={} DE={} BC={}\n\
-             cycles     {} / {} T-states\n\
+             cycles     {} / {} T-states ({} trapped op(s) — see ABI note)\n\
              halt       {halt}\n\
              code       {} bytes, {} functions\n\
              symbols    {}\n\
@@ -150,6 +157,7 @@ impl Report {
             self.regs[2],
             self.cycles,
             self.budget,
+            self.trapped_ops,
             self.code_bytes,
             self.fn_count,
             syms.join(", "),
@@ -180,8 +188,8 @@ impl Report {
         };
         format!(
             "{{\"abi\":{},\"entry\":\"{}\",\"entry_addr\":{},\"result\":{},\"regs\":[{},{},{}],\"cycles\":{},\
-             \"budget\":{},\"halt\":\"{}\"{},\"code_bytes\":{},\"functions\":{},\"symbols\":{{{}}},\
-             \"memory_touched\":[{}],\"reads\":{{{}}}}}",
+             \"trapped_ops\":{},\"budget\":{},\"halt\":\"{}\"{},\"code_bytes\":{},\"functions\":{},\
+             \"symbols\":{{{}}},\"memory_touched\":[{}],\"reads\":{{{}}}}}",
             ABI_VERSION,
             self.entry,
             self.entry_addr,
@@ -190,6 +198,7 @@ impl Report {
             self.regs[1],
             self.regs[2],
             self.cycles,
+            self.trapped_ops,
             self.budget,
             self.halt.as_str(),
             halt_code,

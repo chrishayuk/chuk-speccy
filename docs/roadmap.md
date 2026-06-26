@@ -632,10 +632,19 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
     from the index) · cell-graph (planner/scorer/validator) · Spectrum-bridge (same compiler
     still emits a `.tap`). *Scorer + tool-search are the key agent-tool proofs.*
 
-**Immediate next 5 PRs:** ① `Report` JSON v1 + ABI docs · ② `.cell` cartridge + `inspect` ·
-③ `exec` compiled `.cell` + cached-runner path · ④ typed `Input`/`Output` schema generation
+**Immediate next 5 PRs:** ① `Report` JSON v1 + ABI docs ✓ · ② `.cell` cartridge + `inspect` ✓
+· ③ `exec` compiled `.cell` + cached-runner path · ④ typed `Input`/`Output` schema generation
 · ⑤ batch CLI (`exec --batch`) — the `run_many_fast` core is already done. Then ⑥ MCP MVP ·
 ⑦ manifest/index/search · ⑧ CellGraph MVP.
+
+**Trustworthiness hardening** (proving the properties before pointing an LLM at the cell):
+✓ **ABI v1** frozen + spec'd; ✓ **field-state differential** vs rustc (`struct_field_state_matches_host`);
+✓ **`trapped_ops`** — honest cost signal so `cycles` can't be reward-hacked; ✓ **determinism +
+reset-completeness fuzzer** (`cell_fuzz.rs`: random programs × inputs, bit-identical
+`(result, cycles, halt, touched)` across rerun / fresh runner / image round-trip / fast-vs-
+authentic, + cross-program bus-reuse leak probe). *Next:* a `check_state!` single-source
+macro covering arrays/post-array offsets; a structured `Outcome` enum (distinguish
+unknown-trap-id).
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:

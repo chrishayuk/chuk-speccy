@@ -12,6 +12,7 @@ struct CellBus<'a> {
     touched: &'a mut Vec<u16>,
     cycles: u64,
     halt: Option<u16>, // set by the HALT trap (`halt(code)`)
+    trapped_ops: u64,  // count of cost-bearing ED FE traps (mul/div/fill) this run
 }
 
 impl CellBus<'_> {
@@ -50,6 +51,7 @@ impl z80::Bus for CellBus<'_> {
             0x10 => {
                 let p = regs.bc().wrapping_mul(regs.de());
                 regs.set_hl(p);
+                self.trapped_ops += 1;
             }
             0x11 => {
                 let (bc, de) = (regs.bc(), regs.de());
@@ -60,6 +62,7 @@ impl z80::Bus for CellBus<'_> {
                     }
                     None => regs.set_hl(0xFFFF), // divide-by-zero (a bug) — bounded, not a panic
                 }
+                self.trapped_ops += 1;
             }
             0x20 => {
                 // FILL16: BC slots (2-byte words) of DE at HL — array `[v; N]` init.
@@ -69,11 +72,12 @@ impl z80::Bus for CellBus<'_> {
                     self.touch_write(addr.wrapping_add(1), (val >> 8) as u8);
                     addr = addr.wrapping_add(2);
                 }
+                self.trapped_ops += 1;
             }
-            0x30 => self.halt = Some(regs.hl()), // HALT: stop with status code HL
+            0x30 => self.halt = Some(regs.hl()), // HALT: stop with status code HL (not a cost trap)
             _ => {}
         }
-        4 // a fast hardware op (cell cycle accounting)
+        4 // a fast hardware op (cell cycle accounting) — see the `trapped_ops` caveat
     }
 }
 
@@ -145,7 +149,7 @@ impl Runner {
         budget: u64,
     ) -> Result<Report, String> {
         let (entry, entry_addr) = self.resolve_entry(entry)?;
-        let (regs, cycles, halt) = self.exec(entry_addr, args, inputs, budget);
+        let (regs, cycles, trapped_ops, halt) = self.exec(entry_addr, args, inputs, budget);
         // Observability: clone the symbol map + size report + coalesce the memory diff.
         // The hot path skips all of this — see `run_fast`.
         self.touched.sort_unstable();
@@ -155,6 +159,7 @@ impl Runner {
             result: regs[0],
             regs,
             cycles,
+            trapped_ops,
             budget,
             returned: halt == Halt::Returned,
             halt,
@@ -202,7 +207,9 @@ impl Runner {
             // budget. If the cell doesn't return cleanly (shouldn't for straight-line), or
             // there are no inputs, fall through to the authentic path.
             if let Some(first) = arg_sets.first() {
-                let (_, cycles, halt) = self.exec(entry_addr, first, &[], budget);
+                // Straight-line ⇒ cycles + trapped_ops are input-independent, so one
+                // calibration run gives both for the whole batch.
+                let (_, cycles, trapped_ops, halt) = self.exec(entry_addr, first, &[], budget);
                 if halt == Halt::Returned {
                     return Ok(arg_sets
                         .iter()
@@ -218,6 +225,7 @@ impl Runner {
                                 result: regs[0],
                                 regs,
                                 cycles,
+                                trapped_ops,
                                 halt: Halt::Returned,
                             }
                         })
@@ -234,11 +242,12 @@ impl Runner {
 
     /// `exec` + pack a [`Fast`] — the shared body of `run_fast`/`run_many_fast`.
     fn exec_fast(&mut self, entry_addr: u16, args: &[u16], budget: u64) -> Fast {
-        let (regs, cycles, halt) = self.exec(entry_addr, args, &[], budget);
+        let (regs, cycles, trapped_ops, halt) = self.exec(entry_addr, args, &[], budget);
         Fast {
             result: regs[0],
             regs,
             cycles,
+            trapped_ops,
             halt,
         }
     }
@@ -277,15 +286,15 @@ impl Runner {
     }
 
     /// Reset (zero last run's writes + restore code), lay the trampoline + inputs, and
-    /// step the CPU. Returns `(regs[HL,DE,BC], cycles, halt)`. The allocation-free core
-    /// shared by `run`/`run_fast` — the per-call cost is the computation, not bookkeeping.
+    /// step the CPU. Returns `(regs[HL,DE,BC], cycles, trapped_ops, halt)`. The
+    /// allocation-free core shared by `run`/`run_fast`.
     fn exec(
         &mut self,
         entry_addr: u16,
         args: &[u16],
         inputs: &[(u16, Ty, u64)],
         budget: u64,
-    ) -> ([u16; 3], u64, Halt) {
+    ) -> ([u16; 3], u64, u64, Halt) {
         // Reset only the bytes the previous run wrote, then restore the code (in case it
         // was poked).
         for &a in &self.touched {
@@ -336,6 +345,7 @@ impl Runner {
             touched: &mut self.touched,
             cycles: 0,
             halt: None,
+            trapped_ops: 0,
         };
         let mut cpu = z80::Cpu::new();
         cpu.reset();
@@ -364,6 +374,7 @@ impl Runner {
         (
             [cpu.regs.hl(), cpu.regs.de(), cpu.regs.bc()],
             bus.cycles,
+            bus.trapped_ops,
             halt,
         )
     }
