@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cellz-py"
+version = "0.1.0"
+description = "PyO3 bindings for the rustz80-cell micro-VM host (the warm session a cell MCP server drives)"
+requires-python = ">=3.11"
+classifiers = ["Programming Language :: Rust"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "cellz_py"

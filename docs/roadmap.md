@@ -627,9 +627,13 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
    **bare-stdio front**: `rustz80-cell serve <dir>` loads a library into a warm host and
    reads `search`/`inspect`/`load`/`run`/`unload` commands one per line — the host (index +
    runners) stays alive across the whole session, in one process. The line-handler
-   (`dispatch`) is the shared core. *Next:* a thin **MCP front** over the same `dispatch`
-   (`cell_search`/`inspect`/`load`/`run`/`unload`) — or a socket daemon / PyO3 binding; the
-   session layer is the warm-path, MCP/stdio/socket are interchangeable wrappers.
+   (`dispatch`) is the shared core. **MCP front landed** too — the same Rust-core → PyO3 →
+   Python-MCP pattern as `zxspec_py`/`chuk-mcp-spectrum`: `cellz_py` (a PyO3 binding wrapping
+   `CellHost` as a Python class) + `chuk-mcp-cell` (a `chuk-mcp-server` package holding a warm
+   library singleton, exposing **`cell_search`/`cell_inspect`/`cell_list`/`cell_run`** — a
+   thin router, *not* tool-per-cell, so millions can be indexed while only the searched
+   handful reach the model). `cell_run` hides handles (lazy warm load per id). The session
+   layer is the warm-path; stdio/MCP/socket are interchangeable wrappers over `dispatch`.
 7. ~ **Tool manifest + local index/search** — the bridge to "millions of tools without
    millions of schemas". **Landed:** `CellIndex` (add manifests; `search(query, limit)`
    ranks by token overlap — tags ×3, id ×2, summary ×1) + CLI `index <dir>` / `search
