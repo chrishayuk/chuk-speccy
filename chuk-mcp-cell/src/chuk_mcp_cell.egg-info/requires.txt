@@ -1,0 +1,2 @@
+chuk-mcp-server>=0.18
+cellz-py
