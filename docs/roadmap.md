@@ -618,10 +618,12 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
 6. ☐ **MCP server (P6)** — start small (`cell_compile`/`inspect`/`run`/`exec`/`bench`), then
    cached sessions (`cell_load → id`, `cell_run_cached(id, input)`, `cell_unload`) to keep
    the warm-run edge; later `cell_search`/`trace`/`verify`/`graph_run`.
-7. ☐ **Tool manifest + local index/search** — the bridge to "millions of tools without
-   millions of schemas": each cell carries a compact manifest (id/summary/tags/io/limits/
-   caps); `cell index add *.cell` + `cell search "…"` returns *summaries*, and the model
-   loads only the selected tool's schema — not the whole library.
+7. ~ **Tool manifest + local index/search** — the bridge to "millions of tools without
+   millions of schemas". **Landed:** `CellIndex` (add manifests; `search(query, limit)`
+   ranks by token overlap — tags ×3, id ×2, summary ×1) + CLI `index <dir>` / `search
+   <query> <dir>` over a library of `.rs`/`.cell` files; the model gets *summaries +
+   signatures*, not the whole library. *Next:* a persisted index + richer ranking (embed
+   the typed signature in scoring; capability/cost filters).
 8. ☐ **CellGraph / inter-cell messaging** — composition; v1 deliberately constrained: static
    graph, bounded mailboxes, fixed message size, deterministic scheduler, **no dynamic spawn,
    no shared memory, every message traced**. Intrinsics `send`/`recv`/`poll`/`yield`
@@ -685,15 +687,14 @@ graders · tool-router helpers · manifest/cartridge meta-cells · safety/decisi
 tiny game-env steps · reasoning-benchmark cells. **Most are buildable in the dialect today**
 (u16/u8/u32, structs, arrays, `Entities`, `xorshift`, bounded loops).
 
-- [ ] **Seed a standard cell library** — a curated first set (~30 → 100) as `.rs` sources
-  compiled to `.cell` cartridges, spanning: math (`clamp`/`min`/`max`/`abs_diff`/`divmod`/
-  `weighted_sum`) · grid (`manhattan`/`legal_move`/`nearest`/`direction`) · scoring
-  (`distance`/`risk`/`reward`/`combine`) · validation (`range`/`action`/`capacity`/
-  `transition`) · state (`door_key`/`retry`/`cooldown`) · memory (`visited_set_16`/
-  `recent_actions_4`) · data structures (`stack`/`ring`/`queue`/`entities`) · selection
-  (`best_of_8`/`top2_of_8`/`tie_break`) · bench (`gcd`/`checksum`/`sort8`/`rpn`). Enough to
-  demo discovery → typed run → candidate scoring → composition → repair → messaging.
-  *(Depends on B6 #2/#7 — the cartridge exists; the index is next.)*
+- [~] **Seed a standard cell library** — `.rs` sources (with a `//!` summary/tags/entry
+  header) compiled to tiny self-describing cartridges, indexed + searchable. **Seeded** in
+  `rustz80/cells/` (8 cells, all 36–70 B → "excellent" tier): math (`clamp`/`min`/`max`/
+  `abs_diff`/`weighted_sum`) · grid (`manhattan`, typed state) · validation (`range_check`)
+  · bench (`gcd`). `rustz80-cell index cells/` lists them; `search "grid distance" cells/`
+  ranks `manhattan` first — the whole discovery loop runs. *Next:* grow toward ~100 across
+  the remaining categories (scoring/state/memory/data-structures/selection/sort/RNG); add
+  the `divmod`/`top-k`/`stack` etc. (some want signed `i16`, see below).
 
 ### C. Spectrum-native chatbot / agent (spec 04)
 - [x] **`CHAT_*` host protocol + event queue** — over the trap ABI, both host-side:
