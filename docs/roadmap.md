@@ -606,9 +606,13 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
 3. ~ **Native CLI** — `compile`(→`.cell`) ✓ · `run`(source) ✓ · `inspect`(`.cell`) ✓.
    *Next:* `exec`(`.cell`, the runtime/registry loop, vs `run`-source the dev loop) ·
    `bench` · `verify` · `trace`.
-4. ~ **Typed schema from structs** — emit `{input:{…}, output:{…}}` JSON from `Input`/`Output`
-   struct defs so callers use **named JSON, not raw addresses** (`StateCell` already does the
-   runtime name↔addr mapping; this auto-derives the schema). The agent-friendliness unlock.
+4. ✓ **Typed schema from structs** — `entry_signature(src, entry)` derives the entry's
+   typed I/O via syn: value params `(name, type)` + return type for a free fn, or the
+   receiver struct's fields `(name, type)` for a `&mut self` method. It rides in the
+   **cartridge manifest** (cartridge bumped to v2) and shows in `inspect` (`signature:
+   run(a: u16, b: u16) -> u16`; `state: { x: u16, … }`) — so a registry/MCP presents the
+   interface and validates **named JSON, not raw addresses**, without re-parsing source.
+   (`StateCell` does the runtime name↔addr mapping; this is the self-describing schema.)
 5. ✓ **Batch API `run_many_fast`** — one cell, many inputs → many outputs (decode-once fast
    path, ~0.05 µs/call). *(Next: CLI `exec --batch candidates.json`.)*
 6. ☐ **MCP server (P6)** — start small (`cell_compile`/`inspect`/`run`/`exec`/`bench`), then

@@ -379,6 +379,58 @@ fn cartridge_roundtrip_and_inspect() {
 }
 
 #[test]
+fn cartridge_carries_typed_signature() {
+    use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig};
+    // fn-args signature, surviving the round-trip + surfaced in inspect.
+    let c = Cartridge::compile(
+        "fn run(a: u16, b: u16) -> u16 { a + b }",
+        CellConfig::sandboxed(),
+        CartridgeOpts::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        c.manifest.signature.params,
+        vec![("a".into(), "u16".into()), ("b".into(), "u16".into())]
+    );
+    assert_eq!(c.manifest.signature.ret, "u16");
+    assert!(c.manifest.signature.state.is_empty());
+    let back = Cartridge::from_bytes(&c.to_bytes()).unwrap();
+    assert_eq!(back.manifest, c.manifest); // signature round-trips
+    assert!(back
+        .to_human()
+        .contains("signature: run(a: u16, b: u16) -> u16"));
+    assert!(back.to_json().contains(
+        "\"signature\":{\"params\":[[\"a\",\"u16\"],[\"b\",\"u16\"]],\"ret\":\"u16\",\"state\":[]}"
+    ));
+
+    // `&mut self` method → the named typed state (struct fields with types).
+    let src = "struct State { x: u16, y: u16, score: u16 }
+               impl State { fn run(&mut self) -> u16 { self.score = self.x + self.y; self.score } }";
+    let s = Cartridge::compile(
+        src,
+        CellConfig::sandboxed(),
+        CartridgeOpts {
+            entry: Some("State::run".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(s.manifest.signature.params.is_empty());
+    assert_eq!(
+        s.manifest.signature.state,
+        vec![
+            ("x".into(), "u16".into()),
+            ("y".into(), "u16".into()),
+            ("score".into(), "u16".into())
+        ]
+    );
+    assert!(Cartridge::from_bytes(&s.to_bytes())
+        .unwrap()
+        .to_human()
+        .contains("state: { x: u16, y: u16, score: u16 }"));
+}
+
+#[test]
 fn cartridge_permissive_and_empty_manifest_branches() {
     use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig};
     // Permissive (no ceilings → ∞/null) + empty summary/tags (→ "(no summary)" / "—").

@@ -127,6 +127,136 @@ pub fn struct_layout(src: &str, name: &str) -> Result<Vec<FieldLayout>, String> 
     Ok(out)
 }
 
+/// The typed I/O signature of a cell entry — what a caller/registry needs to map named
+/// JSON to args/state without re-parsing the source. For a free `fn run(a, b) -> R`,
+/// `params` are the args; for a `&mut self` method, `params` is empty and `state` carries
+/// the owning struct's fields (the named typed state).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Signature {
+    /// Value parameters `(name, type)` in order.
+    pub params: Vec<(String, String)>,
+    /// Return type (`"()"` if none).
+    pub ret: String,
+    /// The receiver struct's fields `(name, type)`, for a `&mut self` method entry.
+    pub state: Vec<(String, String)>,
+}
+
+impl Signature {
+    /// A one-line declaration, e.g. `run(a: u16, b: u16) -> u16`.
+    pub fn to_decl(&self, entry: &str) -> String {
+        let ps: Vec<String> = self
+            .params
+            .iter()
+            .map(|(n, t)| format!("{n}: {t}"))
+            .collect();
+        format!("{entry}({}) -> {}", ps.join(", "), self.ret)
+    }
+}
+
+/// Stringify a dialect type (`u16`, `[u16; 4]`, `(u16, u16)`, `&mut State`, …).
+fn type_str(ty: &syn::Type) -> String {
+    match ty {
+        syn::Type::Path(p) => p
+            .path
+            .segments
+            .last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_default(),
+        syn::Type::Array(a) => {
+            let len = match &a.len {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Int(i),
+                    ..
+                }) => i.base10_digits().to_string(),
+                syn::Expr::Path(p) => p
+                    .path
+                    .segments
+                    .last()
+                    .map(|s| s.ident.to_string())
+                    .unwrap_or_default(),
+                _ => "?".into(),
+            };
+            format!("[{}; {}]", type_str(&a.elem), len)
+        }
+        syn::Type::Tuple(t) => format!(
+            "({})",
+            t.elems.iter().map(type_str).collect::<Vec<_>>().join(", ")
+        ),
+        syn::Type::Reference(r) => format!(
+            "&{}{}",
+            if r.mutability.is_some() { "mut " } else { "" },
+            type_str(&r.elem)
+        ),
+        _ => "?".into(),
+    }
+}
+
+/// Extract the typed I/O [`Signature`] of `entry` (`"run"` or `"State::run"`) from `src`.
+pub fn entry_signature(src: &str, entry: &str) -> Result<Signature, String> {
+    let file: syn::File = syn::parse_str(src).map_err(|e| format!("parse error: {e}"))?;
+    let (ty_name, fn_name) = match entry.split_once("::") {
+        Some((t, m)) => (Some(t), m),
+        None => (None, entry),
+    };
+    // Find the entry's signature — a free `fn`, or a method in `impl Type`.
+    let sig = file.items.iter().find_map(|item| match item {
+        syn::Item::Fn(f) if ty_name.is_none() && f.sig.ident == fn_name => Some(&f.sig),
+        syn::Item::Impl(im) if ty_name.is_some() => {
+            let is_target = matches!(&*im.self_ty, syn::Type::Path(p)
+                if p.path.segments.last().map(|s| s.ident.to_string()).as_deref() == ty_name);
+            is_target.then(|| {
+                im.items.iter().find_map(|it| match it {
+                    syn::ImplItem::Fn(m) if m.sig.ident == fn_name => Some(&m.sig),
+                    _ => None,
+                })
+            })?
+        }
+        _ => None,
+    });
+    let sig = sig.ok_or_else(|| format!("no entry `{entry}`"))?;
+
+    let mut params = Vec::new();
+    let mut has_self = false;
+    for arg in &sig.inputs {
+        match arg {
+            syn::FnArg::Receiver(_) => has_self = true,
+            syn::FnArg::Typed(pt) => {
+                let name = match &*pt.pat {
+                    syn::Pat::Ident(i) => i.ident.to_string(),
+                    _ => "_".into(),
+                };
+                params.push((name, type_str(&pt.ty)));
+            }
+        }
+    }
+    let ret = match &sig.output {
+        syn::ReturnType::Default => "()".to_string(),
+        syn::ReturnType::Type(_, t) => type_str(t),
+    };
+    // For a `&mut self` method, the receiver struct's fields are the named typed state.
+    let state = match (has_self, ty_name) {
+        (true, Some(tn)) => file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Struct(s) if s.ident == tn => match &s.fields {
+                    syn::Fields::Named(named) => Some(
+                        named
+                            .named
+                            .iter()
+                            .map(|f| (f.ident.as_ref().unwrap().to_string(), type_str(&f.ty)))
+                            .collect(),
+                    ),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    Ok(Signature { params, ret, state })
+}
+
 /// Compile a program and wrap it as a bootable `.tap` that runs from `entry`
 /// (a function name, default `"main"`). The autoloader `CLEAR`s below [`ORG`],
 /// `LOAD`s the code there, and `RANDOMIZE USR`s the entry.
