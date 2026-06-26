@@ -1,2 +1,0 @@
-[console_scripts]
-chuk-mcp-cell = chuk_mcp_cell.agent:main

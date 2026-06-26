@@ -24,8 +24,13 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
-          for p in chuk-speccy-z80 chuk-speccy-display chuk-speccy-wos \
-                   chuk-speccy-spectrum chuk-speccy-sdk rustz80 speccy; do
+          # `chuk-speccy-z80` and `rustz80` publish from the cell80 repo
+          # (https://github.com/chrishayuk/cell80); this repo's spectrum/sdk depend on those
+          # releases. NOTE: until spectrum/sdk reference z80/rustz80 as crates.io versions
+          # (not the current git deps), `cargo publish` of those two will fail — flip them to
+          # version deps once cell80's crates are on crates.io.
+          for p in chuk-speccy-display chuk-speccy-wos \
+                   chuk-speccy-spectrum chuk-speccy-sdk speccy; do
             echo "::group::publish $p"
             cargo publish -p "$p"
             echo "::endgroup::"

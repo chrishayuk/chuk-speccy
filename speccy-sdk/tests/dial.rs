@@ -6,11 +6,11 @@
 
 const BOUNCE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../rustz80/samples/bounce.rs"
+    "/samples/bounce.rs"
 ));
 const MOVE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../rustz80/samples/move.rs"
+    "/samples/move.rs"
 ));
 
 /// Host side: the same sample texts, compiled here by `rustc` against `speccy-sdk`.
@@ -24,7 +24,7 @@ fn host_games_are_valid_rust() {
         use speccy_sdk::*;
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../rustz80/samples/bounce.rs"
+            "/samples/bounce.rs"
         ));
         pub fn check() {
             fn is_game<T: Game + Default>() {}
@@ -36,7 +36,7 @@ fn host_games_are_valid_rust() {
         use speccy_sdk::*;
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../rustz80/samples/move.rs"
+            "/samples/move.rs"
         ));
         pub fn check() {
             fn is_game<T: Game + Default>() {}

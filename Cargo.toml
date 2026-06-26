@@ -1,9 +1,12 @@
 # chuk-speccy workspace — see docs/01-core-emulator-spec.md §2 for the layout.
-# Dependency arrow is strictly: frontend -> spectrum -> z80.
+# Dependency arrow is strictly: frontend -> spectrum -> z80. The Z80 CPU core and the
+# rustz80 compiler now live in the standalone `cell80` repo
+# (https://github.com/chrishayuk/cell80); `spectrum`/`wos`/`zxspec_py` depend on its `z80`
+# and `speccy-sdk` on its `rustz80` (git deps, pending crates.io publish).
 # `wos` is a standalone host utility (no emulator deps) used by the frontend CLI.
 [workspace]
 resolver = "2"
-members = ["z80", "spectrum", "display", "frontend", "z80-tests", "wos", "speccy-sdk", "speccy-games", "rustz80", "speccy-env"]
+members = ["spectrum", "display", "frontend", "wos", "speccy-sdk", "speccy-games", "speccy-env"]
 
 [workspace.package]
 edition = "2021"

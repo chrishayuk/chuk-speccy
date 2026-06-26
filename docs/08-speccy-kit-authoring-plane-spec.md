@@ -1,7 +1,7 @@
 # 08 — Speccy Kit: the Authoring Plane (one typed source, three artifacts)
 
 Companion to the [SDK spec](./03-sdk-spec.md), the [MCP spec](./02-mcp-server-layer-spec.md),
-and the [`rustz80` spec](./07-rust-z80-compiler-spec.md). Spec 03 asked "an SDK so
+and the [`rustz80` spec](https://github.com/chrishayuk/cell80). Spec 03 asked "an SDK so
 people build games without hand-writing Z80," answered it with the fidelity dial,
 and — written before `rustz80` existed — recommended standing on z88dk/C for the
 front end. That recommendation is now **superseded**: the dial is closed *in Rust*

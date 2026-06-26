@@ -26,6 +26,6 @@ compile = ["dep:rustz80", "dep:syn"]
 
 [dependencies]
 spectrum = { package = "chuk-speccy-spectrum", version = "0.1.0", path = "../spectrum" }
-# Only for the `compile` feature (the game-compile flow).
-rustz80 = { version = "0.1.0", path = "../rustz80", optional = true }
+# Only for the `compile` feature (the game-compile flow). From the standalone cell80 repo.
+rustz80 = { version = "0.1.0", git = "https://github.com/chrishayuk/cell80", rev = "447c380f3b8309bea83fb153cc1fdf134aad99ca", optional = true }
 syn = { version = "2", features = ["full"], optional = true }

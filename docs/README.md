@@ -15,7 +15,7 @@ terminal) is a thin re-skin over one `Machine` and one trap ABI.
 | [04 — Spectrum-Native Chat / Agent](./04-spectrum-native-chat-spec.md) | L3 showpiece: a 32-column chatbot/agent where the Z80 is a dumb terminal and `chuk-llm` + `chuk-tool-processor` + MCP servers do the thinking. Two decoupled clocks + a typed-event poll. |
 | [05 — Frontends & Display Pipeline](./05-frontends-display-spec.md) | Multi-head (desktop/web/TUI/MCP) over one core, and the shared theme + filter pipeline (palette remap / duotone ramp / effect chain). One `DisplayConfig`, every head. |
 | [06 — Roles, Sessions & Autonomy](./06-roles-autonomy-spec.md) | Admin vs agent capability tiers, implicit per-session machines, and the autonomy plane (always-on recording, snapshot timeline, reaping) — agents as pure consumers. |
-| [07 — Rust → Z80 Compiler](./07-rust-z80-compiler-spec.md) | `rustz80` (**built**): a restricted Rust dialect that's *also real Rust*, compiled to a bootable `.tap` via `syn` + own IR/codegen + a micro-runtime. One source, both compilers — a dialect Snake boots on the real ROM. See the [`rustz80` README](../rustz80/README.md). |
+| 07 — Rust → Z80 Compiler | `rustz80` (**built**, now in [cell80](https://github.com/chrishayuk/cell80)): a restricted Rust dialect that's *also real Rust*, compiled to a bootable `.tap` via `syn` + own IR/codegen + a micro-runtime. One source, both compilers — a dialect Snake boots on the real ROM. The spec + cell micro-VM live in the cell80 repo. |
 | [08 — Speccy Kit: the Authoring Plane](./08-speccy-kit-authoring-plane-spec.md) | The synthesis on top of the closed dial: **one typed source → three artifacts** (host build · pure `.tap` · agent env), bridged by a compiler-emitted **symbol map**. Pins the kit (L1), assets (L0), the typed env surface, the two MCP planes, and the sequencing (prove the seam on Snake first). |
 | [Getting Started](./getting-started.md) | **Start here** — install, supply a ROM, run a game, write one in Rust, drive it over MCP. |
 | [Roadmap](./roadmap.md) | **Delivery tracker** — what's built (core M0–M8 + the layers) and what's next (Game-trait prelude, frontends, RL env, accuracy tail). |
@@ -28,9 +28,9 @@ snapshots, and `.tap` tape — with two heads (terminal + native pixel window) o
 one themeable `display` pipeline, plus a **World of Spectrum** game fetcher and an
 MCP server. **On top of the core, also built:** the MCP server + autonomy plane
 (spec 02/06), a **native Rust game SDK** (spec 03, [`speccy-sdk`](../speccy-sdk/README.md)),
-a **Spectrum-native chatbot** (spec 04), and the **`rustz80`** compiler (spec 07,
-[`rustz80`](../rustz80/README.md)) — a restricted-Rust→Z80 compiler whose output
-**boots on the real ROM** (a dialect Snake runs). Try it:
+a **Spectrum-native chatbot** (spec 04), and (via the **`rustz80`** compiler, now in
+[cell80](https://github.com/chrishayuk/cell80)) a restricted-Rust→Z80 game-compile flow
+whose output **boots on the real ROM** (a dialect Snake runs). Try it:
 
 ```
 # A local file…
@@ -39,7 +39,7 @@ cargo run --release --bin speccy-gui -- testroms/48.rom testroms/manic.z80   # p
 cargo run --release --bin speccy-gui -- testroms/48.rom "Skool Daze"          # add `fullscreen` to project it
 cargo run --release --bin speccy     -- testroms/48.rom testroms/manic.z80 terminal   # themed TUI
 # …or write a game in Rust and boot it:
-cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- speccy-sdk/samples/snake.rs -o snake.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 ```
 
