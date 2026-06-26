@@ -597,13 +597,15 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
    `struct_field_state_matches_host` runs a struct program through the cell, reads *every*
    field via `struct_layout`, and asserts equality with the same logic under rustc — the
    field-state differential `diff.rs` only did for `HL` before.
-2. ~ **`.cell` cartridge format** — code image + entry table + compact manifest + I/O schema
-   + symbol table + capability reqs + limits + **source-hash + compiler version** (+ optional
-   tests). The image (`to_bytes`/`from_bytes`) is the seed; the gate is a *named, versioned,
-   manifest-bearing* artifact. Unlocks portable tool objects (compile once → ship → run).
-3. ☐ **Native CLI polish** — `compile`(→`.cell`) · `run`(source) · `exec`(`.cell`) ·
-   `inspect` · `bench` · `verify` · `trace`. **Separate run-source (dev loop) from
-   exec-image (runtime/registry loop).**
+2. ~ **`.cell` cartridge format** — **landed:** `Cartridge` = a `Manifest` (id · summary ·
+   tags · entry · source-hash · compiler + ABI version) wrapping the `CellProgram` image
+   (`CELL` magic, `to_bytes`/`from_bytes`); CLI `compile <file.rs> -o <file.cell>` +
+   `inspect <file.cell> [--json]`. A *named, versioned, manifest-bearing* artifact —
+   portable tool objects (compile once → ship → inspect → run). *(Next: the typed entry
+   I/O schema in the manifest — step 4; optional embedded tests.)*
+3. ~ **Native CLI** — `compile`(→`.cell`) ✓ · `run`(source) ✓ · `inspect`(`.cell`) ✓.
+   *Next:* `exec`(`.cell`, the runtime/registry loop, vs `run`-source the dev loop) ·
+   `bench` · `verify` · `trace`.
 4. ~ **Typed schema from structs** — emit `{input:{…}, output:{…}}` JSON from `Input`/`Output`
    struct defs so callers use **named JSON, not raw addresses** (`StateCell` already does the
    runtime name↔addr mapping; this auto-derives the schema). The agent-friendliness unlock.

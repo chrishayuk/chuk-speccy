@@ -14,6 +14,7 @@ const SP_TOP: u16 = 0xFFF0;
 /// A generous default T-state budget (well past any bounded computation).
 pub const DEFAULT_CYCLES: u64 = 2_000_000;
 
+mod cartridge;
 mod cli;
 mod config;
 mod fast;
@@ -22,6 +23,7 @@ mod report;
 mod runner;
 mod state;
 
+pub use cartridge::{Cartridge, CartridgeOpts, Manifest};
 pub use cli::{parse_args, run_cli, USAGE};
 pub use config::CellConfig;
 pub use program::CellProgram;
