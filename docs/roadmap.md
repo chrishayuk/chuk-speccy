@@ -603,9 +603,12 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
    `inspect <file.cell> [--json]`. A *named, versioned, manifest-bearing* artifact —
    portable tool objects (compile once → ship → inspect → run). *(Next: the typed entry
    I/O schema in the manifest — step 4; optional embedded tests.)*
-3. ~ **Native CLI** — `compile`(→`.cell`) ✓ · `run`(source) ✓ · `inspect`(`.cell`) ✓.
-   *Next:* `exec`(`.cell`, the runtime/registry loop, vs `run`-source the dev loop) ·
-   `bench` · `verify` · `trace`.
+3. ~ **Native CLI** — `compile`(→`.cell`) ✓ · `run`(source) ✓ · `exec`(`.cell`, no
+   recompile, entry from the manifest) ✓ · `inspect` ✓ · `index`/`search` ✓. *Next:*
+   `bench` · `verify` · `trace`. **But:** the CLI is the dev/scripting loop, *not* the hot
+   LLM connection — per-call **process spawn is ~10 ms**, dwarfing the ~0.05 µs warm run
+   and re-paying startup every call (the Python-subprocess trap). The hot path needs a
+   **persistent in-process host** (B6 #6) that keeps the index + warm runners + pool alive.
 4. ✓ **Typed schema from structs** — `entry_signature(src, entry)` derives the entry's
    typed I/O via syn: value params `(name, type)` + return type for a free fn, or the
    receiver struct's fields `(name, type)` for a `&mut self` method. It rides in the

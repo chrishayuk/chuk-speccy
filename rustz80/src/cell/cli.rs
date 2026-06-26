@@ -7,6 +7,8 @@ pub const USAGE: &str = "usage:\n  \
      [--set addr:ty=val,...] [--read name@addr:ty,...] [--json]\n  \
      rustz80-cell compile <file.rs> -o <file.cell> [--entry NAME] [--id ID] \
      [--summary TEXT] [--tags a,b] [safety]\n  \
+     rustz80-cell exec <file.cell> [--entry NAME] [--cycles N] [--args a,b,c] \
+     [--set addr:ty=val,...] [--read name@addr:ty,...] [--json]\n  \
      rustz80-cell inspect <file.cell> [--json]\n  \
      rustz80-cell index <dir>                 (list the cell library in <dir>)\n  \
      rustz80-cell search <query> <dir>        (rank library cells by relevance)\n  \
@@ -78,6 +80,7 @@ pub fn run_cli(args: &[String]) -> Result<String, String> {
     match args.first().map(String::as_str) {
         Some("run") => cmd_run(&args[1..]),
         Some("compile") => cmd_compile(&args[1..]),
+        Some("exec") => cmd_exec(&args[1..]),
         Some("inspect") => cmd_inspect(&args[1..]),
         Some("index") => cmd_index(&args[1..]),
         Some("search") => cmd_search(&args[1..]),
@@ -309,13 +312,80 @@ fn cmd_run(args: &[String]) -> Result<String, String> {
     }
     let src = std::fs::read_to_string(file).map_err(|e| format!("{file}: {e}"))?;
     let mut runner = Runner::compile_with_config(&src, cfg)?;
-    let mut report = runner.run_with_inputs(entry.as_deref(), &call_args, &sets, cycles)?;
+    run_and_format(
+        &mut runner,
+        entry.as_deref(),
+        &call_args,
+        &sets,
+        &reads,
+        cycles,
+        json,
+    )
+}
+
+/// Run `entry` on a ready `Runner`, decode any `--read` fields, and format the report —
+/// the shared tail of `run` (from source) and `exec` (from a `.cell`).
+fn run_and_format(
+    runner: &mut Runner,
+    entry: Option<&str>,
+    args: &[u16],
+    sets: &[(u16, Ty, u64)],
+    reads: &[(String, u16, Ty)],
+    cycles: u64,
+    json: bool,
+) -> Result<String, String> {
+    let mut report = runner.run_with_inputs(entry, args, sets, cycles)?;
     if !reads.is_empty() {
-        report.reads = runner.read_named(&reads); // decode typed fields from post-run memory
+        report.reads = runner.read_named(reads); // decode typed fields from post-run memory
     }
     Ok(if json {
         report.to_json()
     } else {
         report.to_human()
     })
+}
+
+/// `exec <file.cell> [--entry] [--cycles] [--args] [--set] [--read] [--json]` — run a
+/// **precompiled** cartridge (no recompile); the entry defaults to the manifest's. This is
+/// the runtime/registry loop (vs `run`, the source dev loop). The cartridge carries its own
+/// capability policy, so there are no safety flags here.
+fn cmd_exec(args: &[String]) -> Result<String, String> {
+    let mut it = args.iter();
+    let file = it.next().ok_or(USAGE)?;
+    let mut entry: Option<String> = None;
+    let mut cycles = DEFAULT_CYCLES;
+    let mut call_args: Vec<u16> = Vec::new();
+    let mut sets: Vec<(u16, Ty, u64)> = Vec::new();
+    let mut reads: Vec<(String, u16, Ty)> = Vec::new();
+    let mut json = false;
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--entry" => entry = Some(it.next().ok_or("--entry needs a name")?.clone()),
+            "--cycles" => {
+                cycles = it
+                    .next()
+                    .ok_or("--cycles needs a number")?
+                    .parse()
+                    .map_err(|_| "bad --cycles (want a positive integer)")?
+            }
+            "--args" => call_args = parse_args(it.next().ok_or("--args needs values")?)?,
+            "--set" => sets = parse_sets(it.next().ok_or("--set needs a spec")?)?,
+            "--read" => reads = parse_reads(it.next().ok_or("--read needs a spec")?)?,
+            "--json" => json = true,
+            other => return Err(format!("unknown option `{other}`\n{USAGE}")),
+        }
+    }
+    let cart = Cartridge::from_bytes(&std::fs::read(file).map_err(|e| format!("{file}: {e}"))?)?;
+    // Default to the cartridge's own entry (the manifest knows it).
+    let entry = entry.unwrap_or_else(|| cart.manifest.entry.clone());
+    let mut runner = Runner::new(&cart.program);
+    run_and_format(
+        &mut runner,
+        Some(&entry),
+        &call_args,
+        &sets,
+        &reads,
+        cycles,
+        json,
+    )
 }

@@ -379,6 +379,74 @@ fn cartridge_roundtrip_and_inspect() {
 }
 
 #[test]
+fn cli_exec_runs_a_compiled_cartridge() {
+    use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig};
+    let dir = std::env::temp_dir().join("rustz80_exec_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let cellfile = dir.join("ws.cell");
+    let cart = Cartridge::compile(
+        "fn run(a: u16, b: u16, c: u16) -> u16 { a + b * 2u16 + c * 3u16 }",
+        CellConfig::sandboxed(),
+        CartridgeOpts::default(),
+    )
+    .unwrap();
+    std::fs::write(&cellfile, cart.to_bytes()).unwrap();
+    let cf = cellfile.to_str().unwrap().to_string();
+
+    // exec a precompiled cell (no recompile); the entry defaults to the manifest's.
+    let out = cell::run_cli(&[
+        "exec".into(),
+        cf.clone(),
+        "--args".into(),
+        "5,1,9".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+    assert!(out.contains("\"result\":34"), "got: {out}"); // 5 + 1*2 + 9*3
+    assert!(
+        cell::run_cli(&["exec".into(), cf.clone(), "--args".into(), "1,1,1".into()])
+            .unwrap()
+            .contains("result")
+    ); // human format
+
+    // A state cell, exec'd by explicit entry with --cycles + typed --set/--read.
+    let scfile = dir.join("state.cell");
+    let state = Cartridge::compile(
+        "struct S { x: u16, y: u16, sum: u16 }
+         impl S { fn run(&mut self) -> u16 { self.sum = self.x + self.y; self.sum } }",
+        CellConfig::sandboxed(),
+        CartridgeOpts {
+            entry: Some("S::run".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::write(&scfile, state.to_bytes()).unwrap();
+    let scf = scfile.to_str().unwrap().to_string();
+    let out = cell::run_cli(&[
+        "exec".into(),
+        scf,
+        "--entry".into(),
+        "S::run".into(),
+        "--cycles".into(),
+        "100000".into(),
+        "--args".into(),
+        "0xB000".into(),
+        "--set".into(),
+        "0xB000:u16=4,0xB002:u16=5".into(),
+        "--read".into(),
+        "sum@0xB004:u16".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+    assert!(out.contains("\"sum\":9"), "got: {out}"); // 4 + 5
+
+    // errors: missing file, unknown option.
+    assert!(cell::run_cli(&["exec".into(), "/no/such.cell".into()]).is_err());
+    assert!(cell::run_cli(&["exec".into(), cf, "--bogus".into()]).is_err());
+}
+
+#[test]
 fn cell_index_search_ranks_by_relevance() {
     use rustz80::cell::{Cartridge, CartridgeOpts, CellConfig, CellIndex};
     let mut idx = CellIndex::new();
@@ -459,10 +527,13 @@ fn cli_index_mixed_dir_with_compiled_cells() {
     .unwrap();
     std::fs::write(dir.join("adder.cell"), cart.to_bytes()).unwrap();
     std::fs::write(dir.join("notes.txt"), "ignored").unwrap();
+    // a source with no `//!` header → renders as "(no summary)".
+    std::fs::write(dir.join("bare.rs"), "fn run(a: u16) -> u16 { a }").unwrap();
 
     let out = cell::run_cli(&["index".into(), dir.to_str().unwrap().to_string()]).unwrap();
-    assert!(out.contains("2 cells"), "got: {out}"); // .rs + .cell, not .txt
+    assert!(out.contains("3 cells"), "got: {out}"); // 2 .rs + 1 .cell, not .txt
     assert!(out.contains("doubler") && out.contains("adder"));
+    assert!(out.contains("bare — (no summary)")); // header-less source
 }
 
 #[test]
