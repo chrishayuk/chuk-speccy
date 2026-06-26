@@ -618,9 +618,14 @@ Ordered sequence (consolidates B3/B4/B5; ✓ done · ~ partial · ☐ next):
    (`StateCell` does the runtime name↔addr mapping; this is the self-describing schema.)
 5. ✓ **Batch API `run_many_fast`** — one cell, many inputs → many outputs (decode-once fast
    path, ~0.05 µs/call). *(Next: CLI `exec --batch candidates.json`.)*
-6. ☐ **MCP server (P6)** — start small (`cell_compile`/`inspect`/`run`/`exec`/`bench`), then
-   cached sessions (`cell_load → id`, `cell_run_cached(id, input)`, `cell_unload`) to keep
-   the warm-run edge; later `cell_search`/`trace`/`verify`/`graph_run`.
+6. ~ **Persistent host (P6)** — the real content is a long-lived, in-process **session**
+   that keeps runners warm *across* calls (the CLI can't: process spawn ~10 ms re-pays
+   startup every call). **Landed:** `CellHost` — a catalog of cartridges + a `CellIndex` +
+   a `CellPool`, with `search` / `manifest` (inspect) / **`load(id) → handle` / `run(handle,
+   …)` / `run_fast` / `read_named` / `unload`** (cached-runner sessions: load once → run
+   many warm, freed handle slots reused, buses recycled). Transport-agnostic. *Next:* put a
+   thin **MCP front** (`cell_search`/`inspect`/`load`/`run`/`unload`) on it — or a bare
+   stdio daemon / PyO3 binding; the session layer is the warm-path, MCP is just one wrapper.
 7. ~ **Tool manifest + local index/search** — the bridge to "millions of tools without
    millions of schemas". **Landed:** `CellIndex` (add manifests; `search(query, limit)`
    ranks by token overlap — tags ×3, id ×2, summary ×1) + CLI `index <dir>` / `search
