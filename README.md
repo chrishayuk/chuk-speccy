@@ -153,7 +153,7 @@ microsecond-scale, inspectable tool capsules for agents) all live in
 Published on **crates.io** (v0.1.0): the libraries as `chuk-speccy-spectrum` / `-display`
 / `-wos` / `-sdk` (import names stay short — `use spectrum`), and the binaries as
 **`speccy`** (the `frontend` bins). The `z80` core and the `rustz80` compiler are published
-from [cell80](https://github.com/chrishayuk/cell80) (`chuk-speccy-z80`, `rustz80`).
+from [cell80](https://github.com/chrishayuk/cell80) (`cell80-z80`, `rustz80`).
 `zxspec_py` → PyPI is pending; `chuk-mcp-spectrum` is the Python MCP server.
 
 ## Status & design

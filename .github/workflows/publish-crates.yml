@@ -24,7 +24,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
-          # `chuk-speccy-z80` and `rustz80` publish from the cell80 repo
+          # `cell80-z80` and `rustz80` publish from the cell80 repo
           # (https://github.com/chrishayuk/cell80); this repo's spectrum/sdk depend on those
           # releases. NOTE: until spectrum/sdk reference z80/rustz80 as crates.io versions
           # (not the current git deps), `cargo publish` of those two will fail — flip them to
