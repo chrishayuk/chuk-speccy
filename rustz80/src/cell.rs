@@ -72,6 +72,8 @@ impl Default for CellConfig {
 pub enum Halt {
     /// The entry returned (clean).
     Returned,
+    /// The program called `halt(code)` (Cell80 `ED FE` HALT) — an explicit stop.
+    Halted(u16),
     /// The T-state budget was reached first.
     CycleBudget,
     /// The `max_touched` memory ceiling was reached.
@@ -82,6 +84,7 @@ impl Halt {
     fn as_str(self) -> &'static str {
         match self {
             Halt::Returned => "returned",
+            Halt::Halted(_) => "halted",
             Halt::CycleBudget => "cycle_budget",
             Halt::MemoryLimit => "memory_limit",
         }
@@ -130,6 +133,7 @@ struct CellBus<'a> {
     seen: &'a mut [bool],
     touched: &'a mut Vec<u16>,
     cycles: u64,
+    halt: Option<u16>, // set by the HALT trap (`halt(code)`)
 }
 
 impl CellBus<'_> {
@@ -188,6 +192,7 @@ impl z80::Bus for CellBus<'_> {
                     addr = addr.wrapping_add(2);
                 }
             }
+            0x30 => self.halt = Some(regs.hl()), // HALT: stop with status code HL
             _ => {}
         }
         4 // a fast hardware op (cell cycle accounting)
@@ -420,6 +425,7 @@ impl Runner {
             seen: &mut self.seen,
             touched: &mut self.touched,
             cycles: 0,
+            halt: None,
         };
         let mut cpu = z80::Cpu::new();
         cpu.reset();
@@ -428,12 +434,17 @@ impl Runner {
         let mut mem_limit = false;
         while !cpu.halted && bus.cycles < budget {
             cpu.step(&mut bus);
+            if bus.halt.is_some() {
+                break; // `halt(code)` — stop right after the trap
+            }
             if matches!(max_touched, Some(m) if bus.touched.len() > m) {
                 mem_limit = true;
                 break;
             }
         }
-        let halt = if cpu.halted {
+        let halt = if let Some(code) = bus.halt {
+            Halt::Halted(code)
+        } else if cpu.halted {
             Halt::Returned
         } else if mem_limit {
             Halt::MemoryLimit
@@ -631,6 +642,7 @@ impl Report {
     pub fn to_human(&self) -> String {
         let halt = match self.halt {
             Halt::Returned => "returned".to_string(),
+            Halt::Halted(c) => format!("halted (code {c})"),
             Halt::CycleBudget => format!("CYCLE BUDGET EXCEEDED (≥ {} T-states)", self.budget),
             Halt::MemoryLimit => "MEMORY LIMIT EXCEEDED".to_string(),
         };
@@ -696,9 +708,14 @@ impl Report {
             .iter()
             .map(|(n, v)| format!("\"{n}\":{v}"))
             .collect();
+        // `halt_code` only appears for an explicit `halt(code)`.
+        let halt_code = match self.halt {
+            Halt::Halted(c) => format!(",\"halt_code\":{c}"),
+            _ => String::new(),
+        };
         format!(
             "{{\"entry\":\"{}\",\"entry_addr\":{},\"result\":{},\"regs\":[{},{},{}],\"cycles\":{},\
-             \"budget\":{},\"halt\":\"{}\",\"code_bytes\":{},\"functions\":{},\"symbols\":{{{}}},\
+             \"budget\":{},\"halt\":\"{}\"{},\"code_bytes\":{},\"functions\":{},\"symbols\":{{{}}},\
              \"memory_touched\":[{}],\"reads\":{{{}}}}}",
             self.entry,
             self.entry_addr,
@@ -709,6 +726,7 @@ impl Report {
             self.cycles,
             self.budget,
             self.halt.as_str(),
+            halt_code,
             self.code_bytes,
             self.fn_count,
             syms.join(","),

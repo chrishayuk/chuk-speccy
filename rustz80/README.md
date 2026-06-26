@@ -51,6 +51,7 @@ Supported today (all differential-tested):
 | Generics | Generic *free functions* (`fn max<T: Ord>(…)`, `fn buf<const N: usize>()`), monomorphized per call — a type argument (turbofish or inferred) sets the instance's width, a const argument (turbofish) sizes arrays and substitutes as a value. Generic *structs* + methods (`struct Pair<T>`): type args erased to 16-bit. **Const-generic structs** (`struct Buf<const N: usize> { data: [u16; N], … }`) are monomorphized per `N` — a per-instance layout + methods (`Buf$8::push`), `N` inferred at the struct literal from the array field's length. The field may itself be an array of structs — **`Entities<Cell, const N> { data: [Cell; N], … }`**, the fixed-capacity entity pool. |
 | Tuples | Multiple return values: `fn divmod(…) -> (u16, u16)` (in `HL`/`DE`/`BC`) destructured with `let (q, r) = …` — a tuple literal or a call. |
 | Raw I/O | `poke(addr, val)` / `peek(addr)` (memory) and `inport(port)` (I/O ports, e.g. the keyboard at `0xFE`). |
+| Cell80 | `halt(code)` — stop the cell early with a status code (`ED FE` host trap; surfaces as `Halt::Halted(code)` in the report). A no-op on real hardware, so it's harmless in a Spectrum build. |
 
 Out of scope (use `rustc`-only host code, or wait for later stages): recursion
 (needs stack frames — Stage 4), references / `&mut` params, `>3` params, slices,

@@ -53,6 +53,32 @@ fn state_cell_named_io() {
 }
 
 #[test]
+fn cell80_halt_with_code() {
+    use rustz80::cell::Halt;
+    // `halt(code)` stops the run early with a status code.
+    let mut r = Runner::compile(
+        "fn run(n: u16) -> u16 {
+             let mut i = 0u16;
+             while i < 1000u16 { if i == n { halt(7u16); } i = i + 1u16; }
+             0u16
+         }",
+    )
+    .unwrap();
+    let early = r.run(None, &[5], DEFAULT_CYCLES).unwrap();
+    assert_eq!(early.halt, Halt::Halted(7));
+    assert!(!early.returned);
+
+    // n never hit → the loop completes and returns normally.
+    let full = r.run(None, &[2000], DEFAULT_CYCLES).unwrap();
+    assert_eq!(full.halt, Halt::Returned);
+    assert_eq!(full.result, 0);
+    assert!(early.cycles < full.cycles, "halt(5) should stop far sooner");
+
+    // `halt` compiles for the authentic Spectrum target too (a no-op `ED FE` there).
+    assert!(rustz80::compile_program("fn run() -> u16 { halt(1u16); 0u16 }").is_ok());
+}
+
+#[test]
 fn cell80_array_init_is_a_block_op() {
     use rustz80::cell::{CellProgram, Runner};
     // A big `[v; N]` init is one block op, not N unrolled stores — so the code stays tiny
