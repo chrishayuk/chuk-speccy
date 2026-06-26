@@ -133,7 +133,8 @@ fn fast_executor_matches_authentic_across_ops() {
         "fn run(a: u16, b: u16) -> u16 { a * 7u16 + b * 3u16 }",
         "fn run(i: u16, a: u16, b: u16) -> u16 { let arr = [a, b, a + b]; arr[i as usize] }",
         "fn run(a: u16, b: u16) -> (u16, u16, u16) { (a * b, a + b, a) }",
-        "fn run(a: u16, b: u16) -> u16 { let arr = [a; 4]; arr[0] + b }", // [v; N] fill
+        "fn run(a: u16, b: u16) -> u16 { let arr = [a; 4]; arr[0] + b }", // [v; N] fill → fallback
+        "fn run(a: u16, b: u16) -> u16 { halt(a); b }",                   // halt trap → fallback
     ];
     // last input has b = 0 → exercises the divide-by-zero arm (both engines agree).
     let inputs: [&[u16]; 5] = [
@@ -564,13 +565,15 @@ fn run_cli_typed_read() {
         "run".into(),
         p.clone(),
         "--allow-raw-memory".into(),
+        "--set".into(),
+        "0x9c42:u16=0x00ff".into(), // hex addr + hex value (exercises the hex parse paths)
         "--read".into(),
-        "score@40000:u8,lives@0x9c41:u8".into(), // 0x9c41 = 40001 (hex addr)
+        "score@40000:u8,lives@0x9c41:u8,extra@0x9c42:u16".into(), // 0x9c41 = 40001 (hex addr)
         "--json".into(),
     ])
     .unwrap();
     assert!(
-        out.contains("\"reads\":{\"score\":42,\"lives\":7}"),
+        out.contains("\"reads\":{\"score\":42,\"lives\":7,\"extra\":255}"),
         "got: {out}"
     );
 
