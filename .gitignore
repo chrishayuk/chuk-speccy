@@ -1,8 +1,19 @@
-/target
+# Rust build output (any workspace, incl. the zxspec_py sub-workspace)
+target/
 Cargo.lock
 **/*.rs.bk
+
+# Python (zxspec_py wheels, chuk-mcp-spectrum)
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.whl
+*.so
+.venv/
+.pytest_cache/
+
 .DS_Store
 /testroms
 
-# generated dialect tapes (rustz80 speccy-compile output)
+# generated dialect tapes (speccy-compile output)
 /*.tap

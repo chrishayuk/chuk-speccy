@@ -16,7 +16,7 @@ writing games.
 **Fastest path (no clone):** install from crates.io —
 ```bash
 cargo install speccy        # player + tools: speccy-gui, speccy, speccy-library, speccy-gif
-cargo install rustz80       # the Rust → Z80 compiler (speccy-compile)
+# the rustz80 compiler + cell micro-VM are in cell80: cargo install rustz80
 ```
 — or grab a prebuilt binary for your OS from the
 [latest release](https://github.com/chrishayuk/chuk-speccy/releases/latest). You
@@ -73,10 +73,10 @@ cargo run --release --bin speccy-gui -- testroms/48.rom snake   # the SDK demo
 
 **(b) Restricted-Rust → Z80 — `rustz80`** (pure; boots on real hardware). Write a
 subset of Rust that's *also real Rust*, compile it to a bootable `.tap`. See the
-**[`rustz80` README](../rustz80/README.md)**.
+**[`rustz80` README](https://github.com/chrishayuk/cell80)**.
 
 ```bash
-cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- rustz80/samples/snake.rs -o snake.tap
+cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- speccy-sdk/samples/snake.rs -o snake.tap
 cargo run --release --bin speccy-gui -- testroms/48.rom snake.tap
 ```
 
@@ -114,5 +114,5 @@ that load a game); network tests are `#[ignore]`.
   frontends, autonomy, compiler).
 - **[Roadmap](./roadmap.md)** — what's built and what's next.
 - **Crate READMEs**: [`speccy-sdk`](../speccy-sdk/README.md),
-  [`rustz80`](../rustz80/README.md),
+  [`rustz80`](https://github.com/chrishayuk/cell80),
   [`chuk-mcp-spectrum`](../chuk-mcp-spectrum/README.md), [`wos`](../wos/README.md).

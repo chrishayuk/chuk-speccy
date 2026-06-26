@@ -40,7 +40,7 @@ impl FromState for Reach {
 fn reach_source() -> String {
     std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../rustz80/samples/reach.rs"
+        "/../speccy-sdk/samples/reach.rs"
     ))
     .expect("read reach.rs")
 }
