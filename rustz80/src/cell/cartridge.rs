@@ -5,10 +5,28 @@
 use super::program::{put_string, ImageReader};
 use super::report::sorted_symbols;
 use super::*;
+use crate::Signature;
 use std::hash::{Hash, Hasher};
 
 const MAGIC: &[u8; 4] = b"CELL";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2; // v2 added the typed I/O signature
+
+/// Serialize / read a `(name, type)` pair list (signature params / state fields).
+fn put_pairs(b: &mut Vec<u8>, v: &[(String, String)]) {
+    b.extend_from_slice(&(v.len() as u16).to_le_bytes());
+    for (n, t) in v {
+        put_string(b, n);
+        put_string(b, t);
+    }
+}
+fn read_pairs(r: &mut ImageReader) -> Result<Vec<(String, String)>, String> {
+    let n = r.u16()?;
+    let mut v = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        v.push((r.string()?, r.string()?));
+    }
+    Ok(v)
+}
 
 /// Self-describing metadata carried by a `.cell` cartridge.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +45,9 @@ pub struct Manifest {
     pub compiler_version: String,
     /// The [`ABI_VERSION`] the cartridge targets.
     pub abi_version: u32,
+    /// The typed I/O signature of the entry — so a registry/MCP can present the interface
+    /// and validate named inputs **without re-parsing** the source.
+    pub signature: Signature,
 }
 
 /// Options for [`Cartridge::compile`] (all optional).
@@ -60,6 +81,7 @@ impl Cartridge {
         };
         let mut h = std::collections::hash_map::DefaultHasher::new();
         src.hash(&mut h);
+        let signature = crate::entry_signature(src, &entry)?;
         Ok(Cartridge {
             manifest: Manifest {
                 id: opts.id.unwrap_or_else(|| entry.clone()),
@@ -69,6 +91,7 @@ impl Cartridge {
                 source_hash: h.finish(),
                 compiler_version: env!("CARGO_PKG_VERSION").to_string(),
                 abi_version: ABI_VERSION,
+                signature,
             },
             program,
         })
@@ -90,6 +113,9 @@ impl Cartridge {
         put_string(&mut b, &m.entry);
         b.extend_from_slice(&m.source_hash.to_le_bytes());
         put_string(&mut b, &m.compiler_version);
+        put_pairs(&mut b, &m.signature.params);
+        put_string(&mut b, &m.signature.ret);
+        put_pairs(&mut b, &m.signature.state);
         let img = self.program.to_bytes();
         b.extend_from_slice(&(img.len() as u32).to_le_bytes());
         b.extend_from_slice(&img);
@@ -117,6 +143,11 @@ impl Cartridge {
         let entry = r.string()?;
         let source_hash = r.u64()?;
         let compiler_version = r.string()?;
+        let signature = Signature {
+            params: read_pairs(&mut r)?,
+            ret: r.string()?,
+            state: read_pairs(&mut r)?,
+        };
         let img_len = r.u32()? as usize;
         let program = CellProgram::from_bytes(r.take(img_len)?)?;
         Ok(Cartridge {
@@ -128,6 +159,7 @@ impl Cartridge {
                 source_hash,
                 compiler_version,
                 abi_version,
+                signature,
             },
             program,
         })
@@ -150,10 +182,21 @@ impl Cartridge {
             .iter()
             .map(|(n, a)| format!("{n}@0x{a:04X}"))
             .collect();
+        let state = if m.signature.state.is_empty() {
+            String::new()
+        } else {
+            let fs: Vec<String> = m
+                .signature
+                .state
+                .iter()
+                .map(|(n, t)| format!("{n}: {t}"))
+                .collect();
+            format!("\n  state: {{ {} }}", fs.join(", "))
+        };
         format!(
-            "cell `{}`  (abi {}, compiler {})\n  {}\n  tags: {}\n  entry: {} @ 0x{:04X}\n  \
-             code: {} bytes, {} functions\n  capabilities: {}\n  symbols: {}\n  \
-             source_hash: 0x{:016x}",
+            "cell `{}`  (abi {}, compiler {})\n  {}\n  tags: {}\n  signature: {}{}\n  \
+             entry: {} @ 0x{:04X}\n  code: {} bytes, {} functions\n  capabilities: {}\n  \
+             symbols: {}\n  source_hash: 0x{:016x}",
             m.id,
             m.abi_version,
             m.compiler_version,
@@ -167,6 +210,8 @@ impl Cartridge {
             } else {
                 m.tags.join(", ")
             },
+            m.signature.to_decl(&m.entry),
+            state,
             m.entry,
             entry_addr,
             p.code.len(),
@@ -187,9 +232,16 @@ impl Cartridge {
             .iter()
             .map(|(n, a)| format!("\"{n}\":{a}"))
             .collect();
+        let pairs_json = |v: &[(String, String)]| -> String {
+            v.iter()
+                .map(|(n, t)| format!("[\"{n}\",\"{t}\"]"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
         format!(
             "{{\"id\":\"{}\",\"abi\":{},\"compiler\":\"{}\",\"summary\":\"{}\",\"tags\":[{}],\
-             \"entry\":\"{}\",\"code_bytes\":{},\"functions\":{},\"source_hash\":\"0x{:016x}\",\
+             \"entry\":\"{}\",\"signature\":{{\"params\":[{}],\"ret\":\"{}\",\"state\":[{}]}},\
+             \"code_bytes\":{},\"functions\":{},\"source_hash\":\"0x{:016x}\",\
              \"capabilities\":{{\"raw_memory\":{},\"ports\":{},\"max_code\":{},\"max_touched\":{}}},\
              \"symbols\":{{{}}}}}",
             m.id,
@@ -198,6 +250,9 @@ impl Cartridge {
             m.summary,
             tags.join(","),
             m.entry,
+            pairs_json(&m.signature.params),
+            m.signature.ret,
+            pairs_json(&m.signature.state),
             p.code.len(),
             p.size_report().len(),
             m.source_hash,
