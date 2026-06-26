@@ -8,13 +8,14 @@ ZEXALL-clean 48K Spectrum. On top of it, now **built**: the MCP server + autonom
 plane, a World-of-Spectrum game library, real-time `.tzx` loading, a disassembler,
 the `ED FE` trap ABI, the Spectrum-native chatbot, and a native Rust game SDK
 (Snake), and the `rustz80` compiler with a **full Snake written in the dialect** — compiled to Z80, run on the CPU, drawing to real screen RAM (differential-tested), a `.tap` emitter, and **the dial closed**: one `impl Game` source compiles under rustc (speccy-sdk) **and** rustz80 (a bootable tape that runs on the real ROM). The dialect has since grown into a **bounded data-structure language**: generics + const-generics, struct arrays / fixed-capacity pools (`Entities<Cell, const N>`), and a `u32` 32-bit xorshift RNG — all monomorphized, no heap, deterministic.
+That language now also runs headless as **`rustz80-cell`** (B3) — a *deterministic agent microVM*: compile-once/run-many on a flat-RAM Z80, cycle-budgeted, capability-gated, with typed inputs + state read-back and a structured report. It defaults to a **Cell80** backend (B4) — a Z80 *superset* where `*`/`/`/`%` and `[v; N]` fills lower to `ED FE` host traps (native, no software runtime), while the authentic `Spectrum48` target keeps real-Z80 output. Benchmarked vs Wasmtime + Python (`cell-bench`): a realistic snippet warm-runs in **~0.24 µs (~4M/s)** — ~18× off native-JIT Wasm but ~950× smaller code (53 B vs 50 KB) and ~5× lower cold setup.
 Plus **bit-exact `serialize_full` reset** (the RL gate), surfaced through PyO3 + MCP,
 and the crates published (`chuk-speccy-*` libs, `speccy`/`rustz80` CLIs). Headline
 next: the **authoring plane** ([spec 08](./08-speccy-kit-authoring-plane-spec.md)) —
 *one typed source → three artifacts* (host build · pure `.tap` · agent env), bridged
-by a compiler-emitted symbol map. First move: **prove the seam on Snake**. Then, in
-parallel: extra frontends (WASM), `rustz80` Stage 2 (optional), and the accuracy tail
-(128K/AY).
+by a compiler-emitted symbol map; and the **agent-microVM** track (typed I/O + an MCP
+adapter over the cell). Then, in parallel: extra frontends (WASM), `rustz80` Stage 2
+peephole (const-fold + strength-reduction already landed), and the accuracy tail (128K/AY).
 
 ---
 
@@ -444,7 +445,7 @@ inspectable, deterministic, for the tiny-snippet class.*
   generated-code stress, trace mode) × {cold, warm, warm-batch-10k, fast/report/trace},
   and publish — proving usability, not raw compute.
 
-### B4. Cell80 — a Z80 *superset* for the cell — **dual-target + native mul/div built**
+### B4. Cell80 — a Z80 *superset* for the cell — **dual-target + native mul/div + fill built**
 The cell keeps hitting Z80's limits (software mul/div, no block ops, no typed I/O, return
 via the calling convention). Rather than make *authentic* Z80 do everything, treat Z80 as
 the **base** and define a small **superset for cell mode** — two backends off the one

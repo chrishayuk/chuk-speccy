@@ -19,11 +19,20 @@ micro-runtime.
 > local, as a struct field, and the **`Entities<Cell, const N>`** combo — fixed-capacity
 > pools), and **`u32`** (two-slot, `HL:DE`) with bitwise + constant shifts — a 32-bit
 > xorshift RNG runs. Everything is differential-tested against `rustc` on the emulator
-> (`rustz80/tests/`); coverage is ≥90% line/region per file. Remaining: Stage 2
-> (peephole/strength-reduce, optional), and the *non-structural* pure-Snake glue (a
-> power-of-two `Rng::below` and a value-args tile/text draw path — SDK-side, see roadmap
-> Stage 4i). It stayed *escapable* throughout — the host-Rust SDK (spec 03) ships games
-> independently. See the [`rustz80` README](../rustz80/README.md) to write and compile one.
+> (`rustz80/tests/`); coverage is ≥90% line/region per file. Some Stage 2 peephole work
+> has landed too: const-fold, `× constant` via shift-and-add, `/ 2ⁿ`/`% 2ⁿ` via
+> shift/mask, and faster mul/div runtimes.
+>
+> **A second product shares the frontend: [`rustz80-cell`](../rustz80/src/cell.rs)** — a
+> deterministic agent micro-VM (compile-once/run-many on a flat-RAM Z80, cycle budget,
+> capability-gated intrinsics, typed inputs + state read-back, structured report). It uses
+> a **dual-target** backend: `Spectrum48` is authentic Z80 (games/`.tap`), while `Cell`
+> (**Cell80** — a Z80 superset) lowers `*`/`/`/`%` and `[v; N]` fills to `ED FE` host
+> traps the cell bus services natively. Realistic snippets warm-run in ~0.24 µs (see
+> `cell-bench`). The *non-structural* pure-Snake glue (a power-of-two `Rng::below`, a
+> value-args tile/text draw path) is SDK-side (roadmap Stage 4i). It stayed *escapable*
+> throughout — the host-Rust SDK (spec 03) ships games independently. See the
+> [`rustz80` README](../rustz80/README.md) to write and compile one.
 
 ---
 

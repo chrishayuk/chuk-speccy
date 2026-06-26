@@ -125,6 +125,23 @@ Any dialect `.rs` with a no-arg `fn main()` compiles the same way (the autoloade
 `CLEAR`s, `LOAD`s the code, and `RANDOMIZE USR`s it). See
 [spec 07](./docs/07-rust-z80-compiler-spec.md) and `rustz80/samples/`.
 
+## Run tiny Rust as a deterministic agent cell (`rustz80-cell`)
+
+The same compiler also targets a headless **micro-VM**: compile a small program and run it
+on a flat-RAM Z80 — no ROM, no I/O, no syscalls — under a cycle budget, returning a
+structured report (result, cost, symbol layout, touched memory, halt reason). Compile once
+and run it thousands of times with different typed inputs, reading typed state back.
+Deterministic, bounded, capability-gated — a *safe executable scratchpad* for agents.
+
+```bash
+cargo run -p rustz80 --features cell --bin rustz80-cell -- run score.rs --args 10,5 --json
+```
+
+It compiles in **Cell80** mode — a Z80 *superset* where `*`/`/`/`%` and `[v; N]` fills
+lower to `ED FE` host traps (native, fast) while the game path stays authentic Z80. A
+realistic snippet warm-runs in **~0.24 µs (~4M/s)**; see [`cell-bench`](./cell-bench) for
+the cross-runtime comparison (native Rust · Wasmtime · the cell · Python).
+
 ## Workspace layout
 
 | Crate | What |
