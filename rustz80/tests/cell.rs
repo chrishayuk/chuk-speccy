@@ -26,6 +26,27 @@ fn cell_program_compile_once_instantiate_cheap() {
 }
 
 #[test]
+fn cell80_array_init_is_a_block_op() {
+    use rustz80::cell::{CellProgram, Runner};
+    // A big `[v; N]` init is one block op, not N unrolled stores — so the code stays tiny
+    // (it would be ~hundreds of bytes unrolled). Result still correct.
+    let src = "fn run() -> u16 { let a = [9u16; 256]; a[0] + a[255] }";
+    let cp = CellProgram::compile(src).unwrap();
+    assert!(
+        cp.program().code.len() < 64,
+        "256-element fill should not unroll (got {} bytes)",
+        cp.program().code.len()
+    );
+    assert_eq!(
+        Runner::new(&cp)
+            .run(None, &[], DEFAULT_CYCLES)
+            .unwrap()
+            .result,
+        18
+    ); // 9 + 9
+}
+
+#[test]
 fn cell80_traps_mul_div_natively() {
     use rustz80::cell::{CellProgram, Runner};
     let src = "fn run(a: u16, b: u16) -> u16 { a * b + a / b + a % b }";

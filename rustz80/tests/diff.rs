@@ -989,6 +989,53 @@ fn struct_element_arrays() {
 }
 
 #[test]
+fn array_fill() {
+    // `[v; N]` block fill — word (const / zero / runtime value) and byte — vs rustc.
+    fn host() -> u16 {
+        let a = [7u16; 10]; // word, const
+        let b = [0u16; 5]; // zero
+        let n = 3u16;
+        let c = [n; 8]; // word, runtime value
+        let d = [5u8; 4]; // byte
+        let mut s = 0u16;
+        for i in 0..10 {
+            s = s.wrapping_add(a[i]);
+        }
+        for i in 0..5 {
+            s = s.wrapping_add(b[i]);
+        }
+        for i in 0..8 {
+            s = s.wrapping_add(c[i]);
+        }
+        for i in 0..4 {
+            s = s.wrapping_add(d[i] as u16);
+        }
+        s // 70 + 0 + 24 + 20 = 114
+    }
+    let src = "
+        fn run() -> u16 {
+            let a = [7u16; 10];
+            let b = [0u16; 5];
+            let n = 3u16;
+            let c = [n; 8];
+            let d = [5u8; 4];
+            let mut s = 0u16;
+            let mut i = 0u16;
+            while i < 10u16 { s = s.wrapping_add(a[i as usize]); i = i + 1u16; }
+            let mut j = 0u16;
+            while j < 5u16 { s = s.wrapping_add(b[j as usize]); j = j + 1u16; }
+            let mut k = 0u16;
+            while k < 8u16 { s = s.wrapping_add(c[k as usize]); k = k + 1u16; }
+            let mut m = 0u16;
+            while m < 4u16 { s = s.wrapping_add(d[m as usize] as u16); m = m + 1u16; }
+            s
+        }
+    ";
+    let prog = rustz80::compile_program(src).expect("compile");
+    assert_eq!(run_program(&prog, "run"), host()); // 114
+}
+
+#[test]
 fn mul16_operand_widths() {
     // The multiplier-terminated `__mul16` must be correct across multiplier widths: 0
     // (immediate return), 1 bit, full 16 bits, and in between. `a[i] * b[i]` is var*var,

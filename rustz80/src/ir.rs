@@ -118,6 +118,15 @@ pub enum Stmt {
     StoreAt(Expr, Expr, Width),
     /// Store a `u32` expression (evaluated in `HL:DE`) into a two-slot local.
     Assign32(usize, Expr),
+    /// Fill `count` consecutive slots from local slot `base` with `value` (a `[v; N]`
+    /// array initialiser — every element is one 2-byte slot, `u8` in the low byte). A
+    /// block op: Spectrum lowers it to a first store + `LDIR`; Cell to an `ED FE` fill
+    /// trap (host-native). `value` is evaluated once.
+    Fill {
+        base: usize,
+        count: usize,
+        value: Expr,
+    },
     /// Evaluate an expression for its side effect, discarding the result
     /// (e.g. a `void` function call as a statement).
     Eval(Expr),

@@ -587,6 +587,46 @@ fn gen_trap(a: &mut Asm, id: u8) {
     a.byte(0xFE);
 }
 
+const TRAP_FILL16: u8 = 0x20; // fill `BC` slots (2-byte words) at `HL` with `DE`
+
+/// Fill `count` slots at local `base` with `value`. Every array element is one 2-byte
+/// slot (a `u8` lives in the low byte, `H = 0`), so the fill is always slot-stride.
+/// Spectrum: store the first slot then `LDIR` (compact, fast — beats `N` unrolled stores).
+/// Cell: an `ED FE` fill trap (host-native).
+fn gen_fill(a: &mut Asm, base: usize, count: usize, value: &Expr) {
+    if count == 0 {
+        return;
+    }
+    let addr = slot_addr(a.base, base);
+    match a.target {
+        Target::Spectrum48 => {
+            gen_expr(a, value); // HL = value
+            a.byte(0x22); // LD (addr),HL    (first slot)
+            a.word(addr);
+            if count >= 2 {
+                a.byte(0x21); // LD HL, addr        (src)
+                a.word(addr);
+                a.byte(0x11); // LD DE, addr+2      (dst)
+                a.word(addr.wrapping_add(2));
+                a.byte(0x01); // LD BC, (count-1)*2
+                a.word((count as u16 - 1) * 2);
+                a.byte(0xED);
+                a.byte(0xB0); // LDIR  (propagates the slot forward)
+            }
+        }
+        Target::Cell => {
+            gen_expr(a, value);
+            a.byte(0xE5); // PUSH HL  (value)
+            a.byte(0x21); // LD HL, addr   (base)
+            a.word(addr);
+            a.byte(0x01); // LD BC, count  (slots)
+            a.word(count as u16);
+            a.byte(0xD1); // POP DE   (value)
+            gen_trap(a, TRAP_FILL16);
+        }
+    }
+}
+
 /// `HL >>= n` (logical), as `SRL H; RR L` per step.
 fn gen_shr_const(a: &mut Asm, n: u32) {
     for _ in 0..n {
@@ -859,6 +899,7 @@ fn gen_stmt(a: &mut Asm, s: &Stmt) {
             a.byte(0x53); // LD (addr+2),DE   high word
             a.word(addr.wrapping_add(2));
         }
+        Stmt::Fill { base, count, value } => gen_fill(a, *base, *count, value),
         Stmt::Eval(e) => {
             gen_expr(a, e); // result left in HL, discarded
         }
