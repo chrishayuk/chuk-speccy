@@ -260,6 +260,14 @@ dial is never multiplied before it's watched close:
   **dial canary**) + `chuk-speccy-assets` (PNG/Tiled/tracker → `const`; the
   **colour-clash report** is the cheap demo-magnet). Sound = const data, two players,
   both emitting real port-`0xFE` edges (never "nice generated audio").
+  **Split by what the dial allows:** the *composable pure* kit — `Sprite`/`TileMap`/`Hud`
+  as game-state **struct fields**, tile/font bitmaps, a text HUD — is **gated on cell80
+  frontend features** (nested struct fields, `[u8; N]` arrays, persisted `u32`/`i16`,
+  `&CONST → addr` const-data; the precise list is in [`cell80/docs/roadmap.md`](https://github.com/chrishayuk/cell80)
+  under *"features the chuk-speccy authoring-plane kit needs"*). So Stage 2 proceeds
+  **host-side now** — `chuk-speccy-assets` (asset/colour-clash tooling) and a host kit —
+  and the *pure* kit lands as cell80 ships those features. Pure games stay inside the
+  envelope until then (solid-cell sprites via `fill_cell`, `u16` RNG, `[u16; N]` pools).
 - [ ] **3 · Vertical slice** — `speccy new maze --template agent_maze`: splash ·
   tilemap · sprites · beeper SFX · HUD · RNG · typed probes · reward · env · random +
   scripted agents · host run · `.tap` · MP4.
