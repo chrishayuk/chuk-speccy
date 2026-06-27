@@ -132,7 +132,10 @@ over one shared `Supervisor`.
   Composes with every head/MCP/recording for free. This is the **host-composite**
   backend of the fidelity dial; the **pure-`.tap`** backend is the `rustz80`
   compiler (**B2**), and a z80-native blitter backend is a later option.
-- [ ] **L0** toolchain: one-command source → `.tap` → run-in-emulator; PNG→Spectrum asset pipeline.
+- [~] **L0** toolchain — *mostly built.* `speccy-compile` (source → `.tap` + `.sym.toml`),
+  `speccy-new` (scaffold a dual-compile game from a template), and `speccy-asset`
+  (PNG → Spectrum `.scr` + colour-clash report) all ship; *remaining:* a one-command
+  source → `.tap` → run-in-emulator wrapper.
 - [ ] **L1** framework over z88dk (sprites clash-aware + mono, tilemap, input, beeper SFX, fixed-point, RNG).
 - [x] **L2** trap ABI — `ED FE` (`HOSTCALL`, id in `A`) → defaulted `Bus::host_trap`
   → `spectrum::host` registry (`HostCalls`/`HostCtx`/`FnTable`) → PyO3 bridge
@@ -275,6 +278,11 @@ dial is never multiplied before it's watched close:
   **`speccy-asset`** CLI (`PNG → .scr` + printed clash report). The colour-clash report — the
   cheap demo-magnet — is built; tile/tracker→`const` and the *pure* tile-draw payoff wait on
   cell80's `&CONST → addr`.
+  *Also done — L0 scaffolding:* **`speccy new <name> [--template blank|snake]`** (the
+  `speccy-new` bin) emits a starter that already crosses the dial. A `speccy_sdk::templates`
+  module exposes the proven `samples/blank.rs` / `snake_game.rs` as templates, renamed to the
+  game's state struct; **`tests/dial.rs` holds every template's host+pure guarantee** (a
+  scaffolded game is dual-compilable by construction).
 - [ ] **3 · Vertical slice** — `speccy new maze --template agent_maze`: splash ·
   tilemap · sprites · beeper SFX · HUD · RNG · typed probes · reward · env · random +
   scripted agents · host run · `.tap` · MP4.

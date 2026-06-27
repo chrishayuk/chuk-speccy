@@ -19,6 +19,12 @@ name = "speccy-compile"
 path = "src/bin/speccy-compile.rs"
 required-features = ["compile"]
 
+# `speccy-new`: scaffold a dual-compile game from a template. Feature-free (scaffolding
+# is plain text), so it never pulls in the compiler.
+[[bin]]
+name = "speccy-new"
+path = "src/bin/speccy-new.rs"
+
 [features]
 # The host game-compile flow (`compile` module + the CLI). Off by default so the
 # runtime API (Game/Frame/Controls/Rng/Entities) doesn't drag in the compiler.

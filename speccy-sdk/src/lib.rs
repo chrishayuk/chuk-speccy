@@ -19,6 +19,10 @@ pub use spectrum::Spectrum;
 pub mod symbols;
 pub use symbols::{Symbol, SymbolMap};
 
+/// Starter game templates for `speccy new` (L0 ergonomics). Feature-free — scaffolding
+/// is plain text, so the bin doesn't pull in the compiler.
+pub mod templates;
+
 /// Compile an SDK `impl Game` to a bootable `.tap` + symbol map (spec 08). Behind
 /// the `compile` feature so runtime consumers don't pull in `rustz80`/`syn`.
 #[cfg(feature = "compile")]

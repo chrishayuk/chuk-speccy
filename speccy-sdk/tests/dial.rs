@@ -16,6 +16,10 @@ const SNAKE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/samples/snake_game.rs"
 ));
+const BLANK: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/samples/blank.rs"
+));
 
 /// Host side: the same sample texts, compiled here by `rustc` against `speccy-sdk`.
 /// If they type-check as `Game`s, this passes (a compile-time assertion).
@@ -59,19 +63,33 @@ fn host_games_are_valid_rust() {
             is_game::<Snake>();
         }
     }
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod blank {
+        use speccy_sdk::*;
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/samples/blank.rs"
+        ));
+        pub fn check() {
+            fn is_game<T: Game + Default>() {}
+            is_game::<Starter>();
+        }
+    }
     bounce::check();
     mover::check();
     snake::check();
+    blank::check();
 }
 
 /// Pure side: the same texts compile through `rustz80` to `.tap`s.
 #[test]
 fn games_compile_pure() {
     assert!(speccy_sdk::compile::has_game(BOUNCE) && speccy_sdk::compile::has_game(MOVE));
-    assert!(speccy_sdk::compile::has_game(SNAKE));
+    assert!(speccy_sdk::compile::has_game(SNAKE) && speccy_sdk::compile::has_game(BLANK));
     speccy_sdk::compile::compile_game(BOUNCE, "BOUNCE").expect("bounce compiles");
     speccy_sdk::compile::compile_game(MOVE, "MOVE").expect("move compiles");
     speccy_sdk::compile::compile_game(SNAKE, "SNAKE").expect("snake compiles");
+    speccy_sdk::compile::compile_game(BLANK, "BLANK").expect("blank compiles");
 }
 
 fn boot(rom: &[u8], tap: &[u8]) -> spectrum::Spectrum {
