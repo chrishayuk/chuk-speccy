@@ -268,6 +268,13 @@ dial is never multiplied before it's watched close:
   **host-side now** — `chuk-speccy-assets` (asset/colour-clash tooling) and a host kit —
   and the *pure* kit lands as cell80 ships those features. Pure games stay inside the
   envelope until then (solid-cell sprites via `fill_cell`, `u16` RNG, `[u16; N]` pools).
+  *Done since:* **`chuk-speccy-assets`** — `convert(rgb, 256, 192)` reduces each 8×8 cell to
+  two colours (ink/paper + shared bright, min-error over the 16 authentic colours from
+  `display::AUTHENTIC` — no duplicate palette), emits a drop-in **6912-byte `.scr`**, and
+  reports every **attribute clash** (a cell whose source wanted >2 colours). Surfaced as the
+  **`speccy-asset`** CLI (`PNG → .scr` + printed clash report). The colour-clash report — the
+  cheap demo-magnet — is built; tile/tracker→`const` and the *pure* tile-draw payoff wait on
+  cell80's `&CONST → addr`.
 - [ ] **3 · Vertical slice** — `speccy new maze --template agent_maze`: splash ·
   tilemap · sprites · beeper SFX · HUD · RNG · typed probes · reward · env · random +
   scripted agents · host run · `.tap` · MP4.

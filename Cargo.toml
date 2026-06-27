@@ -6,7 +6,7 @@
 # `wos` is a standalone host utility (no emulator deps) used by the frontend CLI.
 [workspace]
 resolver = "2"
-members = ["spectrum", "display", "frontend", "wos", "speccy-sdk", "speccy-games", "speccy-env"]
+members = ["spectrum", "display", "frontend", "wos", "speccy-sdk", "speccy-games", "speccy-env", "speccy-assets"]
 
 [workspace.package]
 edition = "2021"

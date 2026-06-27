@@ -1,0 +1,25 @@
+# Asset pipeline (host tooling): RGB image -> Spectrum screen data, reducing each
+# 8x8 cell to two colours (ink/paper + shared bright) and reporting attribute
+# clashes. Host-only — not on the runtime path, so it never burdens the SDK/core.
+# (docs/roadmap.md E.2 — the "colour-clash report is the cheap demo-magnet".)
+[package]
+name = "chuk-speccy-assets"
+description = "Convert RGB images to ZX Spectrum screen data with an attribute-clash report."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "speccy_assets"
+
+# `speccy-asset`: PNG -> .scr (+ a printed clash report) CLI.
+[[bin]]
+name = "speccy-asset"
+path = "src/bin/speccy-asset.rs"
+
+[dependencies]
+# The single source of truth for the 16 authentic Spectrum colours (no duplicate palette).
+display = { package = "chuk-speccy-display", version = "0.2.0", path = "../display" }
+# Pure-Rust PNG decode for the CLI loader (no system deps).
+png = "0.17"
