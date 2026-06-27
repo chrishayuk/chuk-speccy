@@ -186,7 +186,18 @@ struct and any artifact. The deterministic core + bit-exact reset are the founda
 already in place; this turns them into a research *product*. Sequenced (§10) so the
 dial is never multiplied before it's watched close:
 
-- [~] **1 · Prove the seam** (the headline) — *bridge proven; pure Snake pending.*
+- [x] **1 · Prove the seam** (the headline) — *done: a pure Snake boots on the real ROM.*
+  A subset-clean **Snake `impl Game` compiles from one source under both rustc (host)
+  and rustz80 (pure)** — `speccy-sdk/samples/snake_game.rs`, wired into `tests/dial.rs`.
+  On the real 48K ROM it **boots from tape, draws, animates, and its typed state reads
+  back off the tape** (`len`, `food_x`, … via the emitted `.sym.toml`) —
+  `snake_game_boots_animates_and_reads_back`. It uses the new subset-clean SDK
+  primitives: the `fill_cell`/`clear_cell` by-value cell draw and a `u16` xorshift RNG
+  (the body is parallel `[u16; 32]` arrays since struct fields are 16-bit slots). What it
+  omits is gated on **cell80** compiler features, not this repo: a text HUD
+  (font/string-by-address needs a `&CONST → addr` data section), `Entities<Cell>`/`u32`
+  state (16-bit slots only), self-collision death. The richer `chuk-speccy-games` Snake
+  keeps those host-side. *Original note retained below for the bridge details.*
   The minimal seam is closed: a typed `score` field round-trips (Rust decl → emitted
   addr → read off the running tape, see below). Done since: `chuk-speccy-sdk` ships
   the subset-clean primitives **`Entities<T, N>`** (fixed-cap vec) and **`Rng`**
@@ -198,11 +209,18 @@ dial is never multiplied before it's watched close:
   arrays — local, as a struct **field**, and the **`Entities<Cell, const N>` combo** ✓
   (`examples/entities`, instances `Entities$4`/`Entities$8`), `u32` bitwise/shift ✓ (a
   32-bit **xorshift** RNG runs — `examples/rng32`). **All structural compiler blockers
-  are done.** *What's left is SDK-side, not compiler-side* (see Stage 4i): a power-of-two
-  `Rng::below` (or `u32 %`), and a value-args drawing path — `Frame::tile`/`text` are an
-  SDK concern routed through the generic `PreludeConfig` (like `Frame::pixel`), gated only
-  by passing tile/string **data by address** rather than `&Tile`/`&str`. `Fx8_8` lands
-  with the kit, not here.
+  are done.** *What's left is SDK-side, not compiler-side* (see Stage 4i). Done since:
+  the **subset-clean ranged RNG** — `Rng::below_mask(mask)` (`next_u32() & mask`; u32 has
+  `&` but no `%`), with `Snake::spawn` drawing from a power-of-two and rejecting out-of-range
+  ✓; the **value-args drawing path** — `Frame::fill_cell(cx, cy, ink)` / `clear_cell`, a
+  data-free solid-cell sprite with the colour passed **by value** (3 args, fits the 3-register
+  convention), routed through `PreludeConfig` to `__frame_fill_cell`/`__frame_clear_cell` and
+  proven to compile pure (`compile::tests::solid_cell_draw_compiles_pure`); the demo Snake's
+  body/food now draw through it ✓. *Remaining for a fully-pure Snake:* a dialect **`Rng`** in
+  the prelude (so a pure game can call the RNG methods, not just the host one), and real
+  **tile-bitmap / font-text by address** (`Frame::tile`/`text` of a `&Tile`/`&str`) — which
+  needs a `&CONST → addr` data section in the compiler, now **cell80's** roadmap, not this
+  repo's. `Fx8_8` lands with the kit, not here.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;
@@ -409,10 +427,19 @@ artifacts* with the compiler emitting the symbol map. Don't build the studio fir
 Everything else (frontends D, the rest of reach F, the accuracy tail) is independent
 and parallel, all below E.
 
-A second strategic arc has since opened up alongside E: **B6, Cell80 as an agent-tool
-substrate**. The cell layer (B3/B4) is built and fast; B6 turns it into a *platform* —
-freeze the ABI → `.cell` cartridges → CLI → typed schemas → MCP → a tool index → cell
-graphs — toward the north star of *"millions of tiny executable tools agents discover and
-run without loading their schemas."* It shares the `rustz80` frontend with E but targets a
-different (and bigger-than-Spectrum) audience, and is where current momentum sits. Immediate
-next: the B6 5-PR sequence (ABI v1 → cartridge → exec/cached → typed schema → batch CLI).
+**Cell80 has since split off into its own repo** ([chrishayuk/cell80](https://github.com/chrishayuk/cell80),
+published 0.2.0) and now follows **its own roadmap** (`cell80/docs/roadmap.md`). The agent-tool
+substrate arc — B6: freeze the ABI → `.cell` cartridges → CLI → typed schemas → MCP → a tool index →
+cell graphs, toward *"millions of tiny executable tools agents discover and run without loading their
+schemas"* — lives **there**, not here. chuk-speccy depends on cell80 from crates.io but does **not**
+drive it.
+
+**This repo's focus is squarely E, the authoring plane — the SDK side of the house.** The immediate
+next move is SDK-side, not compiler-side: finish *prove-the-seam* with a **pure-compiling Snake**.
+Two gaps remain, both in `speccy-sdk`, neither in the (now-generic) compiler:
+1. a power-of-two `Rng::below` (mask `& (n-1)`, not `% n`) so RNG-driven placement is subset-clean on
+   the authentic `Spectrum48` target (which has no `/`/`%`);
+2. a by-address tile/text drawing path — `Frame::tile(&Tile)`/`text(&str)` take references; route
+   value/by-address variants through the generic `PreludeConfig`, exactly as `Frame::pixel` is wired.
+Then, in sequence: **2 · the kit (L1+L0)** → **3 · vertical slice** (`speccy new maze`) →
+**4 · authoring studio (LAST)**.

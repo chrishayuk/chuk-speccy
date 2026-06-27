@@ -46,6 +46,30 @@ fn __frame_clear(colour: u16) {
     while p < 22528u16 { poke(p, 0u8); p = p + 1u16; }
     while p < 23296u16 { poke(p, attr as u8); p = p + 1u16; }
 }
+fn __frame_fill_cell(cx: u16, cy: u16, colour: u16) {
+    // Solid 8x8 block in `colour` ink on black paper (mirrors `Frame::fill_cell`).
+    let ink = colour % 8u16;
+    let bright = (colour / 8u16) % 2u16;
+    let attr = bright * 64u16 + ink;
+    let x = cx * 8u16;
+    let y = cy * 8u16;
+    let mut r = 0u16;
+    while r < 8u16 {
+        poke(__px_addr(x, y + r), 255u8);
+        r = r + 1u16;
+    }
+    poke(22528u16 + cy * 32u16 + cx, attr as u8);
+}
+fn __frame_clear_cell(cx: u16, cy: u16) {
+    // Blank the 8x8 block; leave the attribute as-is (mirrors `Frame::clear_cell`).
+    let x = cx * 8u16;
+    let y = cy * 8u16;
+    let mut r = 0u16;
+    while r < 8u16 {
+        poke(__px_addr(x, y + r), 0u8);
+        r = r + 1u16;
+    }
+}
 fn __key(port: u16, bit: u16) -> u16 {
     let mut r = 0u16;
     if (inport(port) & bit) == 0u16 { r = 1u16; }
@@ -68,6 +92,8 @@ fn prelude_config() -> rustz80::PreludeConfig {
     rustz80::PreludeConfig::new()
         .route("Frame", "pixel", "__frame_pixel")
         .route("Frame", "clear", "__frame_clear")
+        .route("Frame", "fill_cell", "__frame_fill_cell")
+        .route("Frame", "clear_cell", "__frame_clear_cell")
         .route("Input", "held", "__input_held")
         .route("Input", "pressed", "__input_held")
 }
@@ -231,5 +257,27 @@ mod tests {
         assert_eq!(body.addr, GAME_STATE + 6); // after score(1) + head(2) = 3 slots
 
         assert_eq!(SymbolMap::from_toml(&map.to_toml()).unwrap(), map);
+    }
+
+    #[test]
+    fn solid_cell_draw_compiles_pure() {
+        // The data-free cell primitives (`fill_cell`/`clear_cell`, colour by value)
+        // route through the prelude and compile to a bootable tape — Snake's sprite
+        // path with no tile data to relocate. No `Rng` here, so this isolates the
+        // draw routing. (Args are u8 to also match the host `Frame` signature.)
+        let src = r#"
+#[derive(Default)]
+struct Walk { x: u8, started: u8 }
+impl Game for Walk {
+    fn update(&mut self, input: &Input, frame: &mut Frame) {
+        if self.started == 0u8 { frame.clear(Colour::Black); self.started = 1u8; }
+        frame.clear_cell(self.x, 5u8);
+        if input.held(Button::Right) { self.x = self.x + 1u8; }
+        frame.fill_cell(self.x, 5u8, Colour::BrightGreen);
+    }
+}
+"#;
+        assert!(has_game(src));
+        compile_game(src, "WALK").expect("solid-cell game compiles pure");
     }
 }

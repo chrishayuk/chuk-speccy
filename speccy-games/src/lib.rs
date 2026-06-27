@@ -68,10 +68,13 @@ impl Snake {
 
     fn spawn(&mut self) -> Cell {
         loop {
-            let x = self.rng.below(W as u32) as u8;
-            let y = TOP + self.rng.below((BOTTOM - TOP) as u32) as u8;
+            // Power-of-two masks keep this subset-clean (no u32 `%`): draw a full
+            // 0..32 column/row and reject rows outside the playfield — the loop
+            // already rejects body hits. W is 32, so x is always in range.
+            let x = self.rng.below_mask(31) as u8; // 0..32 == 0..W
+            let y = self.rng.below_mask(31) as u8; // 0..32, rejected to [TOP, BOTTOM)
             let c = Cell::new(x, y);
-            if !self.body.contains(&c) {
+            if (TOP..BOTTOM).contains(&y) && !self.body.contains(&c) {
                 return c;
             }
         }
@@ -120,14 +123,13 @@ impl Game for Snake {
         }
 
         frame.clear(Colour::Black);
-        frame.ink(Colour::BrightGreen);
+        // Solid-cell sprites (data-free, colour by value) — the subset-clean draw
+        // primitive, so the gameplay render is pure-tape shaped.
         for i in 0..self.body.len() {
             let c = self.body[i];
-            frame.tile(&BLOCK, c.x, c.y);
+            frame.fill_cell(c.x, c.y, Colour::BrightGreen);
         }
-        frame
-            .ink(Colour::BrightRed)
-            .tile(&BLOCK, self.food.x, self.food.y);
+        frame.fill_cell(self.food.x, self.food.y, Colour::BrightRed);
         frame.ink(Colour::White);
         frame.text(0, 0, "SNAKE   LEN");
         frame.text_u16(12, 0, self.body.len() as u16);

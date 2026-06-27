@@ -175,9 +175,20 @@ impl Rng {
         x
     }
 
-    /// A value in `[0, n)` (`n` must be non-zero).
+    /// A value in `[0, n)` (`n` must be non-zero). Uses a 32-bit `%`, so it is
+    /// host-only — **not** subset-clean for the pure tape. For the pure path use
+    /// [`Rng::below_mask`] (a power-of-two range via a bitwise mask).
     pub fn below(&mut self, n: u32) -> u32 {
         self.next_u32() % n
+    }
+
+    /// A value in `[0, mask + 1)` for a `mask` of the form `2^k - 1` — the
+    /// **subset-clean** ranged draw (spec 08 §1): just `next_u32() & mask`, which
+    /// compiles to the pure tape (u32 has `&` but no `%`). For a range that isn't a
+    /// power of two, draw from the next power of two and **reject** in the caller's
+    /// loop — see `Snake::spawn`.
+    pub fn below_mask(&mut self, mask: u32) -> u32 {
+        self.next_u32() & mask
     }
 }
 
@@ -444,6 +455,34 @@ impl Frame {
         self
     }
 
+    /// Draw a **solid 8×8 block** at cell `(cx, cy)` in `ink` on black paper — the
+    /// data-free sprite primitive. Unlike [`Frame::tile`] it carries no tile bytes,
+    /// so it routes straight through the compiler to the pure tape (the colour is a
+    /// by-value arg, not a `&Tile` to relocate); use it for grid sprites (Snake's
+    /// body/food, a blob). Assumes a black background — `clear(Colour::Black)` first,
+    /// or set the cell with [`Frame::attr`] for other paper.
+    pub fn fill_cell(&mut self, cx: u8, cy: u8, ink: Colour) -> &mut Self {
+        if cx < 32 && cy < 24 {
+            for r in 0..8 {
+                self.pixels[byte_index(cx as usize * 8, cy as usize * 8 + r)] = 0xFF;
+            }
+            self.attrs[cy as usize * 32 + cx as usize] = Attr::ink(ink).0;
+        }
+        self
+    }
+
+    /// Erase a cell's pixels (blank the 8×8 block; the attribute is left as-is) — the
+    /// companion to [`Frame::fill_cell`] for an erase-old → move → draw-new sprite
+    /// loop. Also routes to the pure tape.
+    pub fn clear_cell(&mut self, cx: u8, cy: u8) -> &mut Self {
+        if cx < 32 && cy < 24 {
+            for r in 0..8 {
+                self.pixels[byte_index(cx as usize * 8, cy as usize * 8 + r)] = 0x00;
+            }
+        }
+        self
+    }
+
     /// Set a cell's attribute explicitly.
     pub fn attr(&mut self, cx: u8, cy: u8, a: Attr) {
         if cx < 32 && cy < 24 {
@@ -657,6 +696,22 @@ mod tests {
     }
 
     #[test]
+    fn fill_cell_draws_solid_block_in_ink() {
+        let mut f = Frame::new();
+        f.clear(Colour::Black);
+        f.fill_cell(3, 4, Colour::BrightGreen);
+        // The whole 8×8 cell is lit (top and bottom pixel rows solid)...
+        assert_eq!(f.pixels[byte_index(3 * 8, 4 * 8)], 0xFF);
+        assert_eq!(f.pixels[byte_index(3 * 8, 4 * 8 + 7)], 0xFF);
+        // ...coloured ink-on-black (matches the prelude's by-value colour path).
+        assert_eq!(f.attrs[4 * 32 + 3], Attr::ink(Colour::BrightGreen).0);
+        // clear_cell blanks the pixels again.
+        f.clear_cell(3, 4);
+        assert_eq!(f.pixels[byte_index(3 * 8, 4 * 8)], 0x00);
+        assert_eq!(f.pixels[byte_index(3 * 8, 4 * 8 + 7)], 0x00);
+    }
+
+    #[test]
     fn input_edges() {
         let down = Input {
             cur: Button::Fire as u8,
@@ -683,6 +738,19 @@ mod tests {
         for _ in 0..100 {
             assert!(d.below(6) < 6, "below(n) stays in range");
         }
+    }
+
+    #[test]
+    fn below_mask_is_subset_clean_and_bounded() {
+        // The pure-path ranged draw: `next_u32() & mask`, so a `2^k-1` mask bounds it.
+        let mut r = Rng::seed(99);
+        for _ in 0..200 {
+            assert!(r.below_mask(31) < 32, "below_mask(31) stays in [0, 32)");
+        }
+        // It is exactly `next_u32() & mask` (the form the dialect compiles).
+        let mut a = Rng::seed(1);
+        let mut b = Rng::seed(1);
+        assert_eq!(a.below_mask(0x0F), b.next_u32() & 0x0F);
     }
 
     #[test]

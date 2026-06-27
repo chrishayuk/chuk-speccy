@@ -12,6 +12,10 @@ const MOVE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/samples/move.rs"
 ));
+const SNAKE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/samples/snake_game.rs"
+));
 
 /// Host side: the same sample texts, compiled here by `rustc` against `speccy-sdk`.
 /// If they type-check as `Game`s, this passes (a compile-time assertion).
@@ -43,16 +47,31 @@ fn host_games_are_valid_rust() {
             is_game::<Mover>();
         }
     }
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod snake {
+        use speccy_sdk::*;
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/samples/snake_game.rs"
+        ));
+        pub fn check() {
+            fn is_game<T: Game + Default>() {}
+            is_game::<Snake>();
+        }
+    }
     bounce::check();
     mover::check();
+    snake::check();
 }
 
 /// Pure side: the same texts compile through `rustz80` to `.tap`s.
 #[test]
 fn games_compile_pure() {
     assert!(speccy_sdk::compile::has_game(BOUNCE) && speccy_sdk::compile::has_game(MOVE));
+    assert!(speccy_sdk::compile::has_game(SNAKE));
     speccy_sdk::compile::compile_game(BOUNCE, "BOUNCE").expect("bounce compiles");
     speccy_sdk::compile::compile_game(MOVE, "MOVE").expect("move compiles");
+    speccy_sdk::compile::compile_game(SNAKE, "SNAKE").expect("snake compiles");
 }
 
 fn boot(rom: &[u8], tap: &[u8]) -> spectrum::Spectrum {
@@ -153,4 +172,54 @@ fn move_responds_to_keys() {
         x_left < x_right,
         "holding Left should shrink x: {x_right} -> {x_left}"
     );
+}
+
+/// Pure, end to end: the `impl Game` Snake boots from tape, **draws + animates** on
+/// the real ROM, and its **typed state reads back off the tape** via the emitted
+/// symbol map (`len`, `food_x`) — the seam, on a real game.
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn snake_game_boots_animates_and_reads_back() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let (tap, sym) =
+        speccy_sdk::compile::compile_game_with_symbols(SNAKE, "SNAKE").expect("compile");
+    let mut spec = boot(&rom, &tap);
+
+    // Hash the 32×24 grid of filled cells to detect animation.
+    let cell_hash = |s: &spectrum::Spectrum| -> u64 {
+        let mut h = 0u64;
+        for cy in 0..24u16 {
+            for cx in 0..32u16 {
+                let py = cy * 8;
+                let a = 0x4000 + ((py & 0xC0) << 5) + ((py & 0x38) << 2) + cx;
+                let lit = (s.read_memory(a, 1)[0] == 0xFF) as u64;
+                h = h.wrapping_mul(0x100000001B3).wrapping_add(lit + 1);
+            }
+        }
+        h
+    };
+
+    for _ in 0..200 {
+        spec.run_frame();
+    }
+    let lit = (0x4000u16..0x5800)
+        .filter(|&p| spec.read_memory(p, 1)[0] == 0xFF)
+        .count();
+    let a = cell_hash(&spec);
+    for _ in 0..600 {
+        spec.run_frame();
+    }
+    let b = cell_hash(&spec);
+
+    assert!(lit > 0, "the snake should draw filled cells");
+    assert_ne!(a, b, "the snake should be animating, not frozen");
+
+    // The seam: read the game's typed fields straight off the tape's RAM.
+    let read_u16 = |s: &spectrum::Spectrum, field: &str| -> u16 {
+        let addr = sym.addr_of(field).expect("field in the symbol map");
+        let m = s.read_memory(addr, 2);
+        u16::from_le_bytes([m[0], m[1]])
+    };
+    assert_eq!(read_u16(&spec, "len"), 3, "initial body length read off the tape");
+    assert_eq!(read_u16(&spec, "food_x"), 16, "initial food x read off the tape");
 }
