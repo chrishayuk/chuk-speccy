@@ -200,8 +200,10 @@ dial is never multiplied before it's watched close:
   primitives: the `fill_cell`/`clear_cell` by-value cell draw and a `u16` xorshift RNG
   (the body is parallel `[u16; 32]` arrays since struct fields are 16-bit slots). It's a
   **real game** — wall + self-collision game over, restart on Fire (auto-restart keeps a
-  no-input run animating), and **constant-speed incremental drawing** (each move redraws
-  only the head + vacated tail, never the whole body). What it omits is gated on **cell80**
+  no-input run animating), a **numeric score** (3×5 pixel-font digits via `frame.pixel`,
+  since font-by-address is gated), food that re-rolls off the body, and **constant-speed
+  incremental drawing** (each move
+  redraws only the head + vacated tail, never the whole body). What it omits is gated on **cell80**
   compiler features, not this repo: a text HUD (font/string-by-address needs a
   `&CONST → addr` data section) and `Entities<Cell>`/`u32` state (16-bit slots only); the
   richer `chuk-speccy-games` Snake keeps those host-side. *Original note retained below for

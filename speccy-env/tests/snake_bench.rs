@@ -13,24 +13,24 @@ use speccy_env::{FromState, SpectrumEnv, StateView, SymbolMap};
 /// the Z80; the host side only evaluates the env surface.
 #[derive(Default)]
 struct SnakeBot {
-    len: u16,
+    score: u16,
     dead: u16,
 }
 
 impl speccy_sdk::Game for SnakeBot {
     fn update(&mut self, _i: &speccy_sdk::Input, _f: &mut speccy_sdk::Frame) {}
     fn reward(&self, prev: &Self) -> i16 {
-        self.len as i16 - prev.len as i16 // grew = ate
+        self.score as i16 - prev.score as i16 // +1 per food eaten
     }
     fn done(&self) -> bool {
-        self.dead != 0 // crashed into itself → episode over
+        self.dead != 0 // crashed (wall or self) → episode over
     }
 }
 
 impl FromState for SnakeBot {
     fn from_state(s: &StateView) -> Self {
         SnakeBot {
-            len: s.u16("len"),
+            score: s.u16("score"),
             dead: s.u16("dead"),
         }
     }
@@ -49,7 +49,8 @@ impl SnakeHomingAgent {
         (d + 2) % 4 == dir
     }
     fn into_wall(d: u16, hx: u16, hy: u16) -> bool {
-        (d == 0 && hx >= 31) || (d == 2 && hx == 0) || (d == 1 && hy >= 23) || (d == 3 && hy == 0)
+        // Playfield is cols 0..32, rows 1..24 (row 0 is the score bar).
+        (d == 0 && hx >= 31) || (d == 2 && hx == 0) || (d == 1 && hy >= 23) || (d == 3 && hy <= 1)
     }
     fn key(d: u16) -> char {
         ['p', 'a', 'o', 'q'][d as usize] // right, down, left, up
@@ -106,12 +107,12 @@ fn snake_compiles_and_reconstructs() {
     let (_tap, rz_map) =
         speccy_sdk::compile::compile_game_with_symbols(&snake_source(), "SNAKE").expect("compile");
     let map = SymbolMap::from_toml(&rz_map.to_toml()).expect("parse");
-    assert!(map.addr_of("len").is_some() && map.addr_of("food_x").is_some());
+    assert!(map.addr_of("score").is_some() && map.addr_of("food_x").is_some());
     assert!(map.addr_of("bx").is_some(), "the body array is mapped");
 
     // The twin reconstructs its reward + done fields off the typed state.
-    let bot = SnakeBot::from_state(&StateView::from_pairs(&[("len", 5), ("dead", 0)]));
-    assert_eq!((bot.len, bot.dead), (5, 0));
+    let bot = SnakeBot::from_state(&StateView::from_pairs(&[("score", 5), ("dead", 0)]));
+    assert_eq!((bot.score, bot.dead), (5, 0));
 }
 
 /// The homing agent never reverses and aims the larger gap first.
