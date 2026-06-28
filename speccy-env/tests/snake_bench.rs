@@ -14,6 +14,7 @@ use speccy_env::{FromState, SpectrumEnv, StateView, SymbolMap};
 #[derive(Default)]
 struct SnakeBot {
     len: u16,
+    dead: u16,
 }
 
 impl speccy_sdk::Game for SnakeBot {
@@ -21,48 +22,69 @@ impl speccy_sdk::Game for SnakeBot {
     fn reward(&self, prev: &Self) -> i16 {
         self.len as i16 - prev.len as i16 // grew = ate
     }
+    fn done(&self) -> bool {
+        self.dead != 0 // crashed into itself → episode over
+    }
 }
 
 impl FromState for SnakeBot {
     fn from_state(s: &StateView) -> Self {
-        SnakeBot { len: s.u16("len") }
+        SnakeBot {
+            len: s.u16("len"),
+            dead: s.u16("dead"),
+        }
     }
 }
 
-/// Steers the head toward the food one axis at a time (the larger gap first), reading
-/// `dir` so it never commands a reverse (which `snake_game` ignores). Typed probes
-/// only — no pixels.
+/// Steers the head toward the food while staying alive: it prefers the larger-gap axis
+/// toward the food, but skips any move that would **reverse** onto the neck (ignored by
+/// the game) or run **into a wall** — falling back to going straight, then any safe
+/// direction. Reads only typed probes (`bx[0]`/`by[0]`/`food_x`/`dir`), no pixels.
 #[derive(Default)]
 struct SnakeHomingAgent;
 
+impl SnakeHomingAgent {
+    // dir codes: 0 right, 1 down, 2 left, 3 up.
+    fn is_reverse(d: u16, dir: u16) -> bool {
+        (d + 2) % 4 == dir
+    }
+    fn into_wall(d: u16, hx: u16, hy: u16) -> bool {
+        (d == 0 && hx >= 31) || (d == 2 && hx == 0) || (d == 1 && hy >= 23) || (d == 3 && hy == 0)
+    }
+    fn key(d: u16) -> char {
+        ['p', 'a', 'o', 'q'][d as usize] // right, down, left, up
+    }
+}
+
 impl Agent for SnakeHomingAgent {
     fn act(&mut self, v: &StateView) -> Vec<char> {
-        let hx = v.array("bx").first().copied().unwrap_or(0) as i32;
-        let hy = v.array("by").first().copied().unwrap_or(0) as i32;
-        let (fx, fy) = (v.u16("food_x") as i32, v.u16("food_y") as i32);
-        let dir = v.u16("dir"); // 0 right, 1 down, 2 left, 3 up
-        let (dx, dy) = (fx - hx, fy - hy);
+        let hx = v.array("bx").first().copied().unwrap_or(0);
+        let hy = v.array("by").first().copied().unwrap_or(0);
+        let (fx, fy) = (v.u16("food_x"), v.u16("food_y"));
+        let dir = v.u16("dir");
+        let (dx, dy) = (fx as i32 - hx as i32, fy as i32 - hy as i32);
 
-        // (key, the dir it would be reversing — pressing it is ignored if dir == that).
-        let horiz = match dx.cmp(&0) {
-            std::cmp::Ordering::Greater => Some(('p', 2u16)), // right, blocked if going left
-            std::cmp::Ordering::Less => Some(('o', 0u16)),    // left, blocked if going right
+        let want_h = match dx.cmp(&0) {
+            std::cmp::Ordering::Greater => Some(0u16), // right
+            std::cmp::Ordering::Less => Some(2u16),    // left
             std::cmp::Ordering::Equal => None,
         };
-        let vert = match dy.cmp(&0) {
-            std::cmp::Ordering::Greater => Some(('a', 3u16)), // down, blocked if going up
-            std::cmp::Ordering::Less => Some(('q', 1u16)),    // up, blocked if going down
+        let want_v = match dy.cmp(&0) {
+            std::cmp::Ordering::Greater => Some(1u16), // down
+            std::cmp::Ordering::Less => Some(3u16),    // up
             std::cmp::Ordering::Equal => None,
         };
-        // Try the larger-gap axis first; fall back to the other if it'd be a reverse.
-        let (first, second) = if dx.abs() >= dy.abs() {
-            (horiz, vert)
+        // Toward-food axes (larger gap first), then survival fallbacks: keep going
+        // straight, then any direction. First that isn't a reverse or into a wall wins.
+        let (a, b) = if dx.abs() >= dy.abs() {
+            (want_h, want_v)
         } else {
-            (vert, horiz)
+            (want_v, want_h)
         };
-        for cand in [first, second].into_iter().flatten() {
-            if dir != cand.1 {
-                return vec![cand.0];
+        let order = [a, b, Some(dir), Some(0), Some(1), Some(2), Some(3)];
+        for d in order.into_iter().flatten() {
+            if !Self::is_reverse(d, dir) && !Self::into_wall(d, hx, hy) {
+                return vec![Self::key(d)];
             }
         }
         Vec::new()
@@ -87,9 +109,9 @@ fn snake_compiles_and_reconstructs() {
     assert!(map.addr_of("len").is_some() && map.addr_of("food_x").is_some());
     assert!(map.addr_of("bx").is_some(), "the body array is mapped");
 
-    // The twin reconstructs its reward field off the typed state.
-    let bot = SnakeBot::from_state(&StateView::from_pairs(&[("len", 5)]));
-    assert_eq!(bot.len, 5);
+    // The twin reconstructs its reward + done fields off the typed state.
+    let bot = SnakeBot::from_state(&StateView::from_pairs(&[("len", 5), ("dead", 0)]));
+    assert_eq!((bot.len, bot.dead), (5, 0));
 }
 
 /// The homing agent never reverses and aims the larger gap first.
@@ -116,7 +138,7 @@ fn homing_beats_random_on_snake() {
     let mut env = SpectrumEnv::new(&rom, &tap, map, 500);
 
     let steps = 200;
-    let fps = 8; // ~2 snake moves per step (it steps every 4 frames)
+    let fps = 4; // one snake move per step (it steps every 4 frames) — fine control
     let noop = run_episode::<SnakeBot, _>(&mut env, &mut NoOpAgent, steps, fps);
     let random = run_episode::<SnakeBot, _>(&mut env, &mut RandomAgent::new(1), steps, fps);
     let homing = run_episode::<SnakeBot, _>(&mut env, &mut SnakeHomingAgent, steps, fps);
@@ -144,7 +166,7 @@ fn replay_reproduces_the_homing_episode() {
     let map = SymbolMap::from_toml(&rz_map.to_toml()).expect("parse");
     let mut env = SpectrumEnv::new(&rom, &tap, map, 500);
 
-    let (steps, fps) = (120, 8);
+    let (steps, fps) = (120, 4);
     let mut rec = RecordingAgent::new(SnakeHomingAgent);
     let recorded = run_episode::<SnakeBot, _>(&mut env, &mut rec, steps, fps);
     let tape_log = rec.log.clone();

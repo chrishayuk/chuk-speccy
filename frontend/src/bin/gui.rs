@@ -702,6 +702,12 @@ fn keycode_char(code: KeyCode) -> Option<char> {
         Digit7 => '7',
         Digit8 => '8',
         Digit9 => '9',
+        // Arrow keys → the Spectrum cursor keys (5/6/7/8), so they "just work" for
+        // cursor-key games (Snake et al.) instead of doing nothing.
+        ArrowLeft => '5',
+        ArrowDown => '6',
+        ArrowUp => '7',
+        ArrowRight => '8',
         _ => return None,
     })
 }

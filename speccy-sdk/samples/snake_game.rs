@@ -1,24 +1,23 @@
-// Snake as an `impl Game` — the "prove the seam" sample: ONE source, two compilers.
+// Snake as an `impl Game` — the "prove the seam" sample, and a real little game: ONE
+// source, two compilers.
 //
-//   rustc  (host):  an ordinary `speccy-sdk` Game — see tests/dial.rs, which
-//                   `include!`s this file with `use speccy_sdk::*;`.
-//   rustz80 (pure): compile it straight to a bootable tape + a `.sym.toml` —
-//      cargo run -p chuk-speccy-sdk --features compile --bin speccy-compile -- speccy-sdk/samples/snake_game.rs
-//      cargo run --release --bin speccy-gui -- testroms/48.rom snake_game.tap
+//   host:  an ordinary `speccy-sdk` Game (see tests/dial.rs).
+//   pure:  speccy-compile speccy-sdk/samples/snake_game.rs  ->  a bootable .tap
+//          speccy-gui testroms/48.rom snake_game.tap
 //
-// A grid snake: steer with the keys, eat the red food to grow, wrap at the edges.
-// Drawn entirely with the data-free `fill_cell`/`clear_cell` primitives (colour by
-// value), so nothing needs a `&Tile` relocated; food placement uses a `u16`
-// xorshift RNG (constant shifts + `^`, all subset-clean). The typed state — `len`,
-// `food_x`, `bx[32]`, … — is exactly what the emitted `.sym.toml` exposes, so an env
-// reads the live game off the tape's RAM.
+// Steer with the cursor keys (or QAOP); eat the red food to grow. Hitting a **wall**
+// or your own **body** is game over — the head flashes yellow, then it restarts (press
+// Fire = 0 / Space to restart at once, or it auto-restarts after a short pause, which
+// also keeps a no-input run animating for the demo/tests).
 //
-// Deliberately within the dialect's envelope (vs the richer `chuk-speccy-games`
-// Snake): no text HUD (font/string-by-address is a cell80 compiler feature), no
-// `Entities<Cell>`/`u32` (struct fields are 16-bit slots) — the body is parallel
-// `[u16; 32]` arrays — and no self-collision death (it wraps), keeping it an
-// always-animating seam proof. No `use`/`fn main`, long-form ops, so it compiles
-// both ways.
+// Drawing is **incremental** — each move erases the vacated tail cell and draws the
+// new head cell (O(1)), never the whole body — so speed stays constant as you grow.
+// The typed state — `len`, `dead`, `food_x`, `bx[32]`, … — is what the emitted
+// `.sym.toml` exposes, so an env reads (and scores) the live game off the tape's RAM.
+//
+// Within the dialect envelope: no text HUD (font-by-address is a cell80 feature), no
+// `Entities<Cell>`/`u32` (struct fields are 16-bit slots — the body is parallel
+// `[u16; 32]` arrays, the RNG a `u16` xorshift). No `use`/`fn main`, long-form ops.
 
 #[derive(Default)]
 struct Snake {
@@ -29,17 +28,22 @@ struct Snake {
     rng: u16,
     food_x: u16,
     food_y: u16,
+    dead: u16, // 0 = alive; otherwise a countdown to auto-restart after a crash
     bx: [u16; 32],
     by: [u16; 32],
 }
 
 impl Game for Snake {
     fn update(&mut self, input: &Input, frame: &mut Frame) {
+        // (Re)start: clear, seed the body/food, draw the opening frame. Setting
+        // `started = 0` (on Fire, or when the crash countdown ends) routes back here.
         if self.started == 0u16 {
             frame.clear(Colour::Black);
-            self.rng = 1u16;
             self.len = 3u16;
             self.dir = 0u16;
+            self.tick = 0u16;
+            self.dead = 0u16;
+            self.rng = 1u16;
             self.bx[0] = 8u16;
             self.by[0] = 12u16;
             self.bx[1] = 7u16;
@@ -48,99 +52,148 @@ impl Game for Snake {
             self.by[2] = 12u16;
             self.food_x = 16u16;
             self.food_y = 10u16;
+            frame.fill_cell(self.bx[0] as u8, self.by[0] as u8, Colour::BrightGreen);
+            frame.fill_cell(self.bx[1] as u8, self.by[1] as u8, Colour::BrightGreen);
+            frame.fill_cell(self.bx[2] as u8, self.by[2] as u8, Colour::BrightGreen);
+            frame.fill_cell(self.food_x as u8, self.food_y as u8, Colour::BrightRed);
             self.started = 1u16;
         }
 
-        // Steer (no reversing straight back onto the neck).
-        if input.held(Button::Up) {
-            if self.dir != 1u16 {
-                self.dir = 3u16;
+        if self.dead != 0u16 {
+            // Crashed: Fire restarts at once, otherwise count down to an auto-restart.
+            if input.held(Button::Fire) {
+                self.started = 0u16;
+            } else {
+                self.dead = self.dead - 1u16;
+                if self.dead == 0u16 {
+                    self.started = 0u16;
+                }
             }
-        }
-        if input.held(Button::Down) {
-            if self.dir != 3u16 {
-                self.dir = 1u16;
+        } else {
+            // Steer (no reversing straight back onto the neck).
+            if input.held(Button::Up) {
+                if self.dir != 1u16 {
+                    self.dir = 3u16;
+                }
             }
-        }
-        if input.held(Button::Left) {
-            if self.dir != 0u16 {
-                self.dir = 2u16;
+            if input.held(Button::Down) {
+                if self.dir != 3u16 {
+                    self.dir = 1u16;
+                }
             }
-        }
-        if input.held(Button::Right) {
-            if self.dir != 2u16 {
-                self.dir = 0u16;
+            if input.held(Button::Left) {
+                if self.dir != 0u16 {
+                    self.dir = 2u16;
+                }
             }
-        }
-
-        self.tick = self.tick + 1u16;
-        if self.tick >= 4u16 {
-            self.tick = 0u16;
-
-            // Next head cell, wrapping at the playfield edges.
-            let mut nx = self.bx[0];
-            let mut ny = self.by[0];
-            if self.dir == 0u16 {
-                nx = (nx + 1u16) % 32u16;
-            }
-            if self.dir == 1u16 {
-                ny = (ny + 1u16) % 24u16;
-            }
-            if self.dir == 2u16 {
-                nx = (nx + 31u16) % 32u16;
-            }
-            if self.dir == 3u16 {
-                ny = (ny + 23u16) % 24u16;
-            }
-
-            let mut ate = 0u16;
-            if nx == self.food_x {
-                if ny == self.food_y {
-                    ate = 1u16;
+            if input.held(Button::Right) {
+                if self.dir != 2u16 {
+                    self.dir = 0u16;
                 }
             }
 
-            // On eating: respawn food (u16 xorshift) and grow up to the array bound.
-            let mut grew = 0u16;
-            if ate == 1u16 {
-                self.rng = self.rng ^ (self.rng << 7u16);
-                self.rng = self.rng ^ (self.rng >> 9u16);
-                self.rng = self.rng ^ (self.rng << 8u16);
-                self.food_x = self.rng % 32u16;
-                self.food_y = (self.rng / 32u16) % 24u16;
-                if self.len < 32u16 {
-                    self.len = self.len + 1u16;
-                    grew = 1u16;
+            self.tick = self.tick + 1u16;
+            if self.tick >= 4u16 {
+                self.tick = 0u16;
+
+                // Next head cell. A move into a wall sets `wall` (= game over) instead
+                // of advancing past the 32×24 playfield edge.
+                let mut nx = self.bx[0];
+                let mut ny = self.by[0];
+                let mut wall = 0u16;
+                if self.dir == 0u16 {
+                    if nx >= 31u16 {
+                        wall = 1u16;
+                    } else {
+                        nx = nx + 1u16;
+                    }
+                }
+                if self.dir == 1u16 {
+                    if ny >= 23u16 {
+                        wall = 1u16;
+                    } else {
+                        ny = ny + 1u16;
+                    }
+                }
+                if self.dir == 2u16 {
+                    if nx == 0u16 {
+                        wall = 1u16;
+                    } else {
+                        nx = nx - 1u16;
+                    }
+                }
+                if self.dir == 3u16 {
+                    if ny == 0u16 {
+                        wall = 1u16;
+                    } else {
+                        ny = ny - 1u16;
+                    }
+                }
+
+                // Self-collision: does the new head hit a body segment? Skip segment 0
+                // (the current head) and the last (the tail, which vacates this move).
+                let mut hit = wall;
+                if wall == 0u16 {
+                    let mut k = 1u16;
+                    while k < self.len - 1u16 {
+                        if self.bx[k as usize] == nx {
+                            if self.by[k as usize] == ny {
+                                hit = 1u16;
+                            }
+                        }
+                        k = k + 1u16;
+                    }
+                }
+
+                if hit != 0u16 {
+                    // Crash: flash the head and start the restart countdown (~1s).
+                    self.dead = 50u16;
+                    frame.fill_cell(self.bx[0] as u8, self.by[0] as u8, Colour::BrightYellow);
+                } else {
+                    let mut ate = 0u16;
+                    if nx == self.food_x {
+                        if ny == self.food_y {
+                            ate = 1u16;
+                        }
+                    }
+
+                    // On eating: respawn food (u16 xorshift) and grow up to the array bound.
+                    let mut grew = 0u16;
+                    if ate == 1u16 {
+                        self.rng = self.rng ^ (self.rng << 7u16);
+                        self.rng = self.rng ^ (self.rng >> 9u16);
+                        self.rng = self.rng ^ (self.rng << 8u16);
+                        self.food_x = self.rng % 32u16;
+                        self.food_y = (self.rng / 32u16) % 24u16;
+                        if self.len < 32u16 {
+                            self.len = self.len + 1u16;
+                            grew = 1u16;
+                        }
+                    }
+
+                    // Erase the vacated tail cell unless the body grew this tick.
+                    if grew == 0u16 {
+                        let t = self.len - 1u16;
+                        frame.clear_cell(self.bx[t as usize] as u8, self.by[t as usize] as u8);
+                    }
+
+                    // Shift the body toward the head, then place the new head.
+                    let mut j = self.len - 1u16;
+                    while j > 0u16 {
+                        self.bx[j as usize] = self.bx[(j - 1u16) as usize];
+                        self.by[j as usize] = self.by[(j - 1u16) as usize];
+                        j = j - 1u16;
+                    }
+                    self.bx[0] = nx;
+                    self.by[0] = ny;
+
+                    // Draw only what changed: the new head (and the new food if eaten).
+                    frame.fill_cell(nx as u8, ny as u8, Colour::BrightGreen);
+                    if ate == 1u16 {
+                        frame.fill_cell(self.food_x as u8, self.food_y as u8, Colour::BrightRed);
+                    }
                 }
             }
-
-            // Erase the vacated tail cell whenever the body didn't grow this tick.
-            if grew == 0u16 {
-                let t = self.len - 1u16;
-                frame.clear_cell(self.bx[t as usize] as u8, self.by[t as usize] as u8);
-            }
-
-            // Shift the body toward the head, then place the new head.
-            let mut j = self.len - 1u16;
-            while j > 0u16 {
-                self.bx[j as usize] = self.bx[(j - 1u16) as usize];
-                self.by[j as usize] = self.by[(j - 1u16) as usize];
-                j = j - 1u16;
-            }
-            self.bx[0] = nx;
-            self.by[0] = ny;
-        }
-
-        // Draw the food and every body segment as solid cells.
-        frame.fill_cell(self.food_x as u8, self.food_y as u8, Colour::BrightRed);
-        let mut i = 0u16;
-        while i < self.len {
-            frame.fill_cell(
-                self.bx[i as usize] as u8,
-                self.by[i as usize] as u8,
-                Colour::BrightGreen,
-            );
-            i = i + 1u16;
         }
     }
 }

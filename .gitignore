@@ -15,5 +15,8 @@ __pycache__/
 .DS_Store
 /testroms
 
-# generated dialect tapes (speccy-compile output)
+# generated dialect-compiler / asset output (speccy-compile / -run / -asset)
 /*.tap
+/*.sym.toml
+/*.scr
+/*.gif

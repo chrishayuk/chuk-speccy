@@ -223,14 +223,22 @@ fn snake_game_boots_animates_and_reads_back() {
     let lit = (0x4000u16..0x5800)
         .filter(|&p| spec.read_memory(p, 1)[0] == 0xFF)
         .count();
-    let a = cell_hash(&spec);
-    for _ in 0..600 {
-        spec.run_frame();
-    }
-    let b = cell_hash(&spec);
-
     assert!(lit > 0, "the snake should draw filled cells");
-    assert_ne!(a, b, "the snake should be animating, not frozen");
+
+    // Sample across a long window: with no input the snake crawls into the wall, dies,
+    // and auto-restarts — so it visits many distinct frames (robust to the freeze).
+    let mut frames = std::collections::HashSet::new();
+    for _ in 0..30 {
+        for _ in 0..25 {
+            spec.run_frame();
+        }
+        frames.insert(cell_hash(&spec));
+    }
+    assert!(
+        frames.len() > 3,
+        "the snake should animate (move + restart), distinct frames = {}",
+        frames.len()
+    );
 
     // The seam: read the game's typed fields straight off the tape's RAM.
     let read_u16 = |s: &spectrum::Spectrum, field: &str| -> u16 {
