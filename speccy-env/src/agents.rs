@@ -84,6 +84,62 @@ impl Agent for ScriptedAgent {
     }
 }
 
+/// Wraps an agent and records the keys it chooses each step, so an episode can be
+/// replayed. `reset` clears the log (and resets the inner agent), so after an episode
+/// the log holds exactly that episode's actions.
+pub struct RecordingAgent<A> {
+    inner: A,
+    /// The keys chosen each step of the most recent episode.
+    pub log: Vec<Vec<char>>,
+}
+
+impl<A> RecordingAgent<A> {
+    pub fn new(inner: A) -> Self {
+        RecordingAgent {
+            inner,
+            log: Vec::new(),
+        }
+    }
+}
+
+impl<A: Agent> Agent for RecordingAgent<A> {
+    fn act(&mut self, view: &StateView) -> Vec<char> {
+        let keys = self.inner.act(view);
+        self.log.push(keys.clone());
+        keys
+    }
+    fn reset(&mut self) {
+        self.inner.reset();
+        self.log.clear();
+    }
+}
+
+/// Replays a recorded key sequence step by step (then presses nothing once it runs
+/// out). Paired with the env's bit-exact `reset`, replaying the same tape reproduces
+/// an episode *exactly* — the determinism the agent lab rests on (deterministic
+/// rollouts, replayable bug repros, an RL-safe `reset`).
+pub struct ReplayAgent {
+    tape: Vec<Vec<char>>,
+    pos: usize,
+}
+
+impl ReplayAgent {
+    pub fn new(tape: Vec<Vec<char>>) -> Self {
+        ReplayAgent { tape, pos: 0 }
+    }
+}
+
+impl Agent for ReplayAgent {
+    fn act(&mut self, _view: &StateView) -> Vec<char> {
+        let keys = self.tape.get(self.pos).cloned().unwrap_or_default();
+        self.pos += 1;
+        keys
+    }
+    fn reset(&mut self) {
+        self.pos = 0;
+    }
+}
+
 /// Run one episode: `reset` the env (bit-exact) and the agent, then for up to
 /// `steps` steps let the agent act and accumulate the host game's reward. Returns
 /// total reward. Reproducible — same env + same agent ⇒ same number.
@@ -128,6 +184,29 @@ mod tests {
         // On the target → no keys.
         let v = StateView::from_pairs(&[("px", 7), ("py", 7), ("tx", 7), ("ty", 7)]);
         assert!(ScriptedAgent.act(&v).is_empty());
+    }
+
+    #[test]
+    fn replay_reproduces_recorded_keys() {
+        let v = StateView::from_pairs(&[]);
+        let mut rec = RecordingAgent::new(RandomAgent::new(7));
+        let chosen: Vec<Vec<char>> = (0..6).map(|_| rec.act(&v)).collect();
+
+        let mut replay = ReplayAgent::new(rec.log.clone());
+        let replayed: Vec<Vec<char>> = (0..6).map(|_| replay.act(&v)).collect();
+        assert_eq!(chosen, replayed, "replay yields exactly the recorded choices");
+        assert!(replay.act(&v).is_empty(), "past the end it presses nothing");
+    }
+
+    #[test]
+    fn recording_reset_clears_the_log() {
+        let v = StateView::from_pairs(&[]);
+        let mut rec = RecordingAgent::new(NoOpAgent);
+        rec.act(&v);
+        rec.act(&v);
+        assert_eq!(rec.log.len(), 2);
+        rec.reset();
+        assert!(rec.log.is_empty(), "reset starts a fresh recording");
     }
 
     #[test]

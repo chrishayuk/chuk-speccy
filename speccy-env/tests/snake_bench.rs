@@ -3,7 +3,9 @@
 //! the typed state off RAM and scores `len` growth, and a reverse-aware homing agent
 //! (head → food, read purely from the symbol map) beats random beats no-op.
 
-use speccy_env::agents::{run_episode, Agent, NoOpAgent, RandomAgent};
+use speccy_env::agents::{
+    run_episode, Agent, NoOpAgent, RandomAgent, RecordingAgent, ReplayAgent,
+};
 use speccy_env::{FromState, SpectrumEnv, StateView, SymbolMap};
 
 /// Host twin of `snake_game`: reconstructs the typed fields and scores via
@@ -127,4 +129,31 @@ fn homing_beats_random_on_snake() {
     assert_eq!(noop, 0, "a no-op snake crawls straight and never eats");
     assert!(homing > 0, "the homing agent eats at least once ({homing})");
     assert!(homing > random, "homing should out-grow random ({homing} vs {random})");
+}
+
+/// The agent-lab cornerstone: record the homing agent's actions, then **replay** them
+/// — bit-exact `reset` + the same key sequence must reproduce the episode's reward
+/// exactly (deterministic rollouts / replayable repros).
+///   SPECTRUM_ROM="$PWD/testroms/48.rom" cargo test -p chuk-speccy-env --test snake_bench -- --ignored replay
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn replay_reproduces_the_homing_episode() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let (tap, rz_map) =
+        speccy_sdk::compile::compile_game_with_symbols(&snake_source(), "SNAKE").expect("compile");
+    let map = SymbolMap::from_toml(&rz_map.to_toml()).expect("parse");
+    let mut env = SpectrumEnv::new(&rom, &tap, map, 500);
+
+    let (steps, fps) = (120, 8);
+    let mut rec = RecordingAgent::new(SnakeHomingAgent);
+    let recorded = run_episode::<SnakeBot, _>(&mut env, &mut rec, steps, fps);
+    let tape_log = rec.log.clone();
+
+    let replayed = run_episode::<SnakeBot, _>(&mut env, &mut ReplayAgent::new(tape_log), steps, fps);
+
+    assert!(recorded > 0, "the recorded episode actually scored ({recorded})");
+    assert_eq!(
+        recorded, replayed,
+        "replaying the same actions reproduces the episode ({recorded} vs {replayed})"
+    );
 }

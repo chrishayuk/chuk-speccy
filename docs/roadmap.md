@@ -247,7 +247,7 @@ dial is never multiplied before it's watched close:
   `SpectrumEnv`: bit-exact `reset` (`serialize_full`/`deserialize_full`), `step_game`
   (hold keys + `run_frames`), `frame_indexed` (pixel obs), `view`/`reconstruct` (typed
   obs via the symbol map), `Transition { obs, reward, done }`. `agents`: `Agent` trait
-  + `NoOp`/`Random`/`Scripted` + `run_episode`. The `reach` sample (a reward-bearing
+  + `NoOp`/`Random`/`Scripted` + `Recording`/`Replay` + `run_episode`. The `reach` sample (a reward-bearing
   input game) gives a working **agentability benchmark** — `speccy-env/tests/benchmark.rs`
   shows `no-op 0 < random 0 < scripted 17` on real hardware. *(Found + fixed a real
   bug doing this: the dialect Down/`A` key read a bad port — QAOP `A` never worked.)*
@@ -256,7 +256,10 @@ dial is never multiplied before it's watched close:
   agent (head → food, read *only* off the symbol map: `bx[0]`/`food_x`/`dir`) grows the snake
   while random/no-op never eat (`no-op 0 = random 0 < homing 9` on real hardware). Two games,
   same `SpectrumEnv` + agent loop — the agentability story generalises past the toy task.
-  *Remaining:* memory-probe / vision-LLM / replay agents + more games on the table.
+  **Deterministic replay proven:** `Recording`/`Replay` agents + `replay_reproduces_the_homing_episode`
+  record the homing episode and replay the keys — bit-exact `reset` + the same actions reproduce the
+  reward exactly (the RL-safe `reset` / replayable-repro cornerstone, end to end through an agent).
+  *Remaining:* memory-probe / vision-LLM agents + more games on the table.
   `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
 - [~] **Input as one source of truth + demo ROMs** (the build→extract loop, spec 08 §4).
   `Controls` (remappable `Button`↔keys) extracted into the SDK; the demo games moved
