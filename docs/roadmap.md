@@ -132,10 +132,12 @@ over one shared `Supervisor`.
   Composes with every head/MCP/recording for free. This is the **host-composite**
   backend of the fidelity dial; the **pure-`.tap`** backend is the `rustz80`
   compiler (**B2**), and a z80-native blitter backend is a later option.
-- [~] **L0** toolchain — *mostly built.* `speccy-compile` (source → `.tap` + `.sym.toml`),
-  `speccy-new` (scaffold a dual-compile game from a template), and `speccy-asset`
-  (PNG → Spectrum `.scr` + colour-clash report) all ship; *remaining:* a one-command
-  source → `.tap` → run-in-emulator wrapper.
+- [x] **L0** toolchain — **built.** `speccy-new` (scaffold a dual-compile game from a
+  template) → `speccy-compile` (source → `.tap` + `.sym.toml`) → `speccy-run` (source/`.tap`
+  → boot on the real ROM → an animated **GIF** of it running, headless, in one command) →
+  `speccy-asset` (PNG → Spectrum `.scr` + colour-clash report). `speccy-run` reuses the
+  headless `spectrum` machine + `display::gif` from the SDK behind the `compile` feature, so
+  the windowed frontend stays `rustz80`-free; `speccy-gui` still runs a `.tap` in a window.
 - [ ] **L1** framework over z88dk (sprites clash-aware + mono, tilemap, input, beeper SFX, fixed-point, RNG).
 - [x] **L2** trap ABI — `ED FE` (`HOSTCALL`, id in `A`) → defaulted `Bus::host_trap`
   → `spectrum::host` registry (`HostCalls`/`HostCtx`/`FnTable`) → PyO3 bridge

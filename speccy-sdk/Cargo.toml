@@ -25,13 +25,24 @@ required-features = ["compile"]
 name = "speccy-new"
 path = "src/bin/speccy-new.rs"
 
+# `speccy-run`: compile a dialect game and render it running to a GIF (one command,
+# headless). Needs `compile` (it invokes the compiler + boots the emulator).
+[[bin]]
+name = "speccy-run"
+path = "src/bin/speccy-run.rs"
+required-features = ["compile"]
+
 [features]
-# The host game-compile flow (`compile` module + the CLI). Off by default so the
+# The host game-compile flow (`compile` module + the CLIs). Off by default so the
 # runtime API (Game/Frame/Controls/Rng/Entities) doesn't drag in the compiler.
-compile = ["dep:rustz80", "dep:syn"]
+# Also pulls in `display` for `speccy-run`'s headless GIF render.
+compile = ["dep:rustz80", "dep:syn", "dep:display"]
 
 [dependencies]
 spectrum = { package = "chuk-speccy-spectrum", version = "0.2.0", path = "../spectrum" }
 # Only for the `compile` feature (the game-compile flow). From the standalone cell80 repo.
 rustz80 = { version = "0.2.0", optional = true }
 syn = { version = "2", features = ["full"], optional = true }
+# Only for `speccy-run` (the `compile` feature): render a game running to a GIF.
+# Standalone (no emulator deps), so this never reaches back into the runtime API.
+display = { package = "chuk-speccy-display", version = "0.2.0", path = "../display", optional = true }

@@ -28,6 +28,11 @@ pub mod templates;
 #[cfg(feature = "compile")]
 pub mod compile;
 
+/// `speccy run` — compile a dialect game and render it running to a GIF (headless).
+/// Behind the `compile` feature (it invokes the compiler).
+#[cfg(feature = "compile")]
+pub mod run;
+
 /// The per-frame host syscall id (`docs/03` id map, `0x60` = game).
 pub const GAME_TICK: u8 = 0x60;
 
