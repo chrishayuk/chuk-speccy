@@ -251,7 +251,12 @@ dial is never multiplied before it's watched close:
   input game) gives a working **agentability benchmark** — `speccy-env/tests/benchmark.rs`
   shows `no-op 0 < random 0 < scripted 17` on real hardware. *(Found + fixed a real
   bug doing this: the dialect Down/`A` key read a bad port — QAOP `A` never worked.)*
-  *Remaining:* memory-probe / vision-LLM / replay agents + a multi-game score table.
+  **The multi-game table has its second game:** `speccy-env/tests/snake_bench.rs` makes the
+  pure `snake_game` agentable — a host twin scores `len` growth and a reverse-aware homing
+  agent (head → food, read *only* off the symbol map: `bx[0]`/`food_x`/`dir`) grows the snake
+  while random/no-op never eat (`no-op 0 = random 0 < homing 9` on real hardware). Two games,
+  same `SpectrumEnv` + agent loop — the agentability story generalises past the toy task.
+  *Remaining:* memory-probe / vision-LLM / replay agents + more games on the table.
   `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
 - [~] **Input as one source of truth + demo ROMs** (the build→extract loop, spec 08 §4).
   `Controls` (remappable `Button`↔keys) extracted into the SDK; the demo games moved
