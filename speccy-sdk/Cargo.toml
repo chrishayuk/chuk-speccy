@@ -35,14 +35,14 @@ required-features = ["compile"]
 [features]
 # The host game-compile flow (`compile` module + the CLIs). Off by default so the
 # runtime API (Game/Frame/Controls/Rng/Entities) doesn't drag in the compiler.
-# Also pulls in `display` for `speccy-run`'s headless GIF render.
-compile = ["dep:rustz80", "dep:syn", "dep:display"]
+compile = ["dep:rustz80", "dep:syn"]
 
 [dependencies]
 spectrum = { package = "chuk-speccy-spectrum", version = "0.2.0", path = "../spectrum" }
+# The standalone presentation crate: the authentic palette + the canonical screen byte
+# layout (`Frame` builds screen RAM through it), and `display::gif` for `speccy-run`.
+# Already in the graph via `spectrum`, so depending on it directly adds nothing.
+display = { package = "chuk-speccy-display", version = "0.2.0", path = "../display" }
 # Only for the `compile` feature (the game-compile flow). From the standalone cell80 repo.
 rustz80 = { version = "0.2.0", optional = true }
 syn = { version = "2", features = ["full"], optional = true }
-# Only for `speccy-run` (the `compile` feature): render a game running to a GIF.
-# Standalone (no emulator deps), so this never reaches back into the runtime API.
-display = { package = "chuk-speccy-display", version = "0.2.0", path = "../display", optional = true }

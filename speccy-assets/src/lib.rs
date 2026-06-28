@@ -16,11 +16,11 @@
 //! println!("{} attribute clashes", img.clashes.len());
 //! ```
 
-use display::AUTHENTIC;
+use display::{screen_byte_index, AUTHENTIC};
 
-/// The native Spectrum screen, in pixels.
-pub const SCREEN_W: usize = 256;
-pub const SCREEN_H: usize = 192;
+/// The native Spectrum screen, in pixels (re-exported from `display` — one source).
+pub const SCREEN_W: usize = display::SCREEN_W;
+pub const SCREEN_H: usize = display::SCREEN_H;
 /// …and in 8×8 character cells.
 pub const COLS: usize = SCREEN_W / 8; // 32
 pub const ROWS: usize = SCREEN_H / 8; // 24
@@ -111,7 +111,7 @@ pub fn convert(rgb: &[[u8; 3]], w: usize, h: usize) -> Result<SpectrumImage, Str
                         byte |= 0x80 >> c;
                     }
                 }
-                pixels[byte_index(cx * 8, cy * 8 + r)] = byte;
+                pixels[screen_byte_index(cx * 8, cy * 8 + r)] = byte;
             }
             attrs[cy * COLS + cx] = ((bright as u8) << 6) | ((paper as u8) << 3) | ink as u8;
         }
@@ -173,12 +173,6 @@ fn dist2(a: [u8; 3], b: [u8; 3]) -> u32 {
     (dr * dr + dg * dg + db * db) as u32
 }
 
-/// Byte index into the 6144-byte pixel area for pixel `(x, y)` — the ZX interleaved
-/// layout (third of screen, then pixel-row, then char-row).
-fn byte_index(x: usize, y: usize) -> usize {
-    (y / 64) * 2048 + (y % 8) * 256 + ((y % 64) / 8) * 32 + x / 8
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,7 +219,7 @@ mod tests {
         let img = convert(&buf, SCREEN_W, SCREEN_H).unwrap();
         assert!(img.clashes.is_empty(), "two colours fit a cell with no clash");
         // The left 4 pixels and right 4 pixels split into the two colours → 0xF0.
-        assert_eq!(img.pixels[byte_index(0, 0)], 0xF0);
+        assert_eq!(img.pixels[screen_byte_index(0, 0)], 0xF0);
     }
 
     #[test]

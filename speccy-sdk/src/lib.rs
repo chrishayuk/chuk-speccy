@@ -539,10 +539,10 @@ fn pixel_at(x: usize, y: usize) -> (usize, u8) {
     (byte_index(x, y), 0x80 >> (x & 7))
 }
 
-/// Byte index into the 6144-byte pixel area for the byte containing pixel `(x,y)`.
-/// The ZX layout interleaves: third of screen, then pixel-row, then char-row.
+/// Byte index into the 6144-byte pixel area for the byte containing pixel `(x,y)` —
+/// the canonical ZX interleave, from [`display::screen_byte_index`] (one source).
 fn byte_index(x: usize, y: usize) -> usize {
-    (y / 64) * 2048 + (y % 8) * 256 + ((y % 64) / 8) * 32 + x / 8
+    display::screen_byte_index(x, y)
 }
 
 // --- controls: the one place key bindings live -----------------------------

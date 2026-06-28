@@ -111,13 +111,10 @@ impl SpectrumEnv {
     /// the game loop, then snapshot that point as the reset state.
     pub fn new(rom: &[u8], tap: &[u8], map: SymbolMap, warmup: usize) -> Self {
         let mut spec = Spectrum::new_48k(rom);
-        for _ in 0..250 {
-            spec.run_frame(); // boot to the K cursor
-        }
-        let _ = spec.load_tap(tap);
-        spec.autoload_tape();
+        // Boot the ROM + trap-load + auto-run the tape (the core's BOOT_FRAMES + LOAD "").
+        let _ = spec.load_media(spectrum::format::TAP, tap);
         for _ in 0..warmup {
-            spec.run_frame(); // load + auto-run into the frame loop
+            spec.run_frame(); // settle into the frame loop
         }
         let snapshot = spec.serialize_full();
         SpectrumEnv {

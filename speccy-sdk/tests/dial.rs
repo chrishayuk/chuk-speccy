@@ -241,3 +241,38 @@ fn snake_game_boots_animates_and_reads_back() {
     assert_eq!(read_u16(&spec, "len"), 3, "initial body length read off the tape");
     assert_eq!(read_u16(&spec, "food_x"), 16, "initial food x read off the tape");
 }
+
+/// `Frame::fill_cell` (host Rust) and `__frame_fill_cell` (the dialect prelude) are two
+/// implementations of the same draw — guard them against drift on real hardware: a
+/// pure tape that fills one cell must produce the **same attribute byte** the host
+/// `Frame` would (the bright/ink encoding is where a divergence would hide).
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn fill_cell_host_and_pure_agree() {
+    use speccy_sdk::{Attr, Colour};
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let src = r#"
+#[derive(Default)]
+struct Dot { started: u16 }
+impl Game for Dot {
+    fn update(&mut self, _i: &Input, frame: &mut Frame) {
+        if self.started == 0u16 { frame.clear(Colour::Black); self.started = 1u16; }
+        frame.fill_cell(5u8, 6u8, Colour::BrightRed);
+    }
+}
+"#;
+    let tap = speccy_sdk::compile::compile_game(src, "DOT").expect("compile");
+    let mut spec = boot(&rom, &tap);
+    for _ in 0..50 {
+        spec.run_frame();
+    }
+
+    // Attribute area is linear (0x5800 + cy*32 + cx) — no interleave needed.
+    let attr_pure = spec.read_memory(0x5800 + 6 * 32 + 5, 1)[0];
+    let attr_host = Attr::ink(Colour::BrightRed).0;
+    assert_eq!(attr_host, 0x42, "bright red ink on black = bright<<6 | ink(2)");
+    assert_eq!(
+        attr_pure, attr_host,
+        "host & pure fill_cell must encode the same attribute"
+    );
+}

@@ -5,8 +5,15 @@
 use crate::{FromState, SpectrumEnv, StateView};
 
 /// An agent: choose which keys to hold for the next step, given the observed state.
+///
+/// **Keys are physical characters that must match what the running tape reads.** A
+/// pure SDK tape reads input through the prelude's `__frame`/`__input_held` (in
+/// `speccy-sdk`'s compile prelude), which is wired to the **cursor keys + QAOP** ports
+/// — *not* the host `Controls` map (that only governs the host-composite backend). So
+/// the direction agents press `o`/`p`/`q`/`a`; if that prelude mapping ever changes,
+/// these keys must change with it.
 pub trait Agent {
-    /// Keys to hold (by character, e.g. `'o'`/`'p'`/`'q'`/`'a'`).
+    /// Keys to hold this step (cursor/QAOP characters — see the trait note).
     fn act(&mut self, view: &StateView) -> Vec<char>;
     /// Reset any per-episode internal state (e.g. the agent's own RNG).
     fn reset(&mut self) {}

@@ -32,13 +32,11 @@ pub fn capture_indexed(
     boot: usize,
 ) -> Result<Vec<Vec<u8>>, String> {
     let mut spec = spectrum::Spectrum::new_48k(rom);
-    for _ in 0..250 {
-        spec.run_frame(); // bring up the ROM to the K cursor
-    }
-    spec.load_tap(tap).map_err(|e| format!("load tape: {e:?}"))?;
-    spec.autoload_tape(); // types LOAD ""
+    // Boot the ROM + trap-load + auto-run the tape (the core's BOOT_FRAMES + LOAD "").
+    spec.load_media(spectrum::format::TAP, tap)
+        .map_err(|e| format!("load tape: {e:?}"))?;
     for _ in 0..boot {
-        spec.run_frame(); // trap-load + autorun + settle
+        spec.run_frame(); // settle into the frame loop
     }
 
     let every = every.max(1);

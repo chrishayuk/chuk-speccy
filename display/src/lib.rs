@@ -31,6 +31,16 @@ pub const AUTHENTIC: [[u8; 3]; 16] = [
 pub const SCREEN_W: usize = 256;
 pub const SCREEN_H: usize = 192;
 
+/// Byte offset into the 6144-byte pixel area for the byte containing pixel `(x, y)` —
+/// the **one** source of truth for the ZX interleaved-thirds screen layout (third of
+/// screen, then pixel-row-within-char, then char-row). Lives here (the standalone
+/// presentation crate) so every screen-RAM builder — the SDK `Frame`, the asset
+/// converter, anything writing a `.scr` — shares it instead of re-deriving the math.
+/// (`spectrum`'s ULA keeps its own bitwise inline form on the per-frame render path.)
+pub fn screen_byte_index(x: usize, y: usize) -> usize {
+    (y / 64) * 2048 + (y % 8) * 256 + ((y % 64) / 8) * 32 + x / 8
+}
+
 /// How a theme turns a logical colour index into RGB.
 #[derive(Clone, Debug)]
 pub enum Theme {

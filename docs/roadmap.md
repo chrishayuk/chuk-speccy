@@ -393,6 +393,12 @@ The leak was deeper than `lib.rs` — also in `codegen.rs` and `lower.rs`. All l
   core; all 4 bins now call it (the copy-pasted dispatch deleted, the `.tzx` gap in
   `main.rs`/`gui` fixed). Format strings are now `spectrum::format::{TAP,TZX,SNA,Z80}`
   constants, not magic strings.
+- [x] **De-dup sweep over the Stage-2 work** (a self-review): the ZX interleave formula
+  is now `display::screen_byte_index` (one source — the SDK `Frame` and `speccy-assets`
+  share it, no copies); `speccy-env`/`speccy-run` boot via `load_media(TAP)` + warmup
+  instead of re-rolling `BOOT_FRAMES`/`load_tap`/`autoload`; and a ROM test
+  (`dial::fill_cell_host_and_pure_agree`) pins the host `Frame::fill_cell` and the dialect
+  prelude `__frame_fill_cell` to the same attribute encoding (the host↔pure drift guard).
 - [ ] Block-glyph renderer (`main.rs`) untested + belongs in `display`; `keycode_char`
   drops symbol keys (GUI/TUI input asymmetry); test-card / z80-header knowledge in heads
   belongs near `spectrum`. *(Deferred.)*
