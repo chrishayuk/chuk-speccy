@@ -2,7 +2,7 @@
 # Dependency arrow is strictly: frontend -> spectrum -> z80. The Z80 CPU core and the
 # rustz80 compiler now live in the standalone `cell80` repo
 # (https://github.com/chrishayuk/cell80); `spectrum`/`wos`/`zxspec_py` depend on its `z80`
-# and `speccy-sdk` on its `rustz80` (git deps, pending crates.io publish).
+# and `speccy-sdk` on its `rustz80` — both from crates.io.
 # `wos` is a standalone host utility (no emulator deps) used by the frontend CLI.
 [workspace]
 resolver = "2"
