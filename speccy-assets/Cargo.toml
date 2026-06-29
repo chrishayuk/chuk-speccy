@@ -20,6 +20,6 @@ path = "src/bin/speccy-asset.rs"
 
 [dependencies]
 # The single source of truth for the 16 authentic Spectrum colours (no duplicate palette).
-display = { package = "chuk-speccy-display", version = "0.2.0", path = "../display" }
+display = { package = "chuk-speccy-display", version = "0.3.0", path = "../display" }
 # Pure-Rust PNG decode for the CLI loader (no system deps).
 png = "0.17"
