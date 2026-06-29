@@ -298,6 +298,11 @@ dial is never multiplied before it's watched close:
   module exposes the proven `samples/blank.rs` / `snake_game.rs` as templates, renamed to the
   game's state struct; **`tests/dial.rs` holds every template's host+pure guarantee** (a
   scaffolded game is dual-compilable by construction).
+  *Capability backlog:* [`09 — what the SDK needs, learned from classic games`](./09-sdk-capabilities-from-classic-games.md)
+  works backwards from real titles (Manic Miner, Dizzy, Gauntlet, Renegade, Chaos, Daley
+  Thompson's, Chase HQ/OutRun, …) to the SDK capabilities to build, each placed on the dial
+  (host now / `cell80`-gated pure) with its agentability dividend — sprites · tilemaps/rooms ·
+  physics · SFX · scene-flow · actors/AI · inventory · scrolling · pseudo-3D · asset baking.
 - [ ] **3 · Vertical slice** — `speccy new maze --template agent_maze`: splash ·
   tilemap · sprites · beeper SFX · HUD · RNG · typed probes · reward · env · random +
   scripted agents · host run · `.tap` · MP4.

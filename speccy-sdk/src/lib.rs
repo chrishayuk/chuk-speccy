@@ -33,6 +33,10 @@ pub mod compile;
 #[cfg(feature = "compile")]
 pub mod run;
 
+/// Render a *host* [`Game`] running to a GIF, headless — the host-composite
+/// counterpart of [`run`] (which renders a pure `.tap`). Feature-free: no compiler.
+pub mod render;
+
 /// The per-frame host syscall id (`docs/03` id map, `0x60` = game).
 pub const GAME_TICK: u8 = 0x60;
 

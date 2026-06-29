@@ -29,6 +29,18 @@ pub const TEMPLATES: &[Template] = &[
         struct_name: "Snake",
         src: include_str!("../samples/snake_game.rs"),
     },
+    Template {
+        name: "platform",
+        about: "a platformer (gravity, jump, tile collision, coins)",
+        struct_name: "Platform",
+        src: include_str!("../samples/platform.rs"),
+    },
+    Template {
+        name: "chase",
+        about: "a top-down dungeon with enemies that chase you (actor AI)",
+        struct_name: "Chase",
+        src: include_str!("../samples/chase.rs"),
+    },
 ];
 
 /// The template named `name`, if any.

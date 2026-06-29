@@ -43,6 +43,8 @@ spectrum = { package = "chuk-speccy-spectrum", version = "0.2.0", path = "../spe
 # layout (`Frame` builds screen RAM through it), and `display::gif` for `speccy-run`.
 # Already in the graph via `spectrum`, so depending on it directly adds nothing.
 display = { package = "chuk-speccy-display", version = "0.2.0", path = "../display" }
-# Only for the `compile` feature (the game-compile flow). From the standalone cell80 repo.
-rustz80 = { version = "0.2.0", optional = true }
+# Only for the `compile` feature (the game-compile flow). From the standalone cell80 repo
+# (0.6 brings Spectrum-target DCE — unused prelude fns are pruned from each game's tape).
+# Path dep until crates.io 0.6.0 propagates; drop `path` once it's on the index.
+rustz80 = { version = "0.6", path = "../../cell80/rustz80", optional = true }
 syn = { version = "2", features = ["full"], optional = true }

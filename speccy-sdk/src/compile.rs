@@ -70,6 +70,39 @@ fn __frame_clear_cell(cx: u16, cy: u16) {
         r = r + 1u16;
     }
 }
+fn __glyph(cx: u16, cy: u16, code: u16) {
+    // Blit one ROM-font glyph (8x8) into cell (cx, cy). The 48K font is at 0x3D00,
+    // 8 bytes per char from code 32 — read it with `peek` (no const-data needed).
+    let base = 15616u16 + (code - 32u16) * 8u16;
+    let x = cx * 8u16;
+    let y = cy * 8u16;
+    let mut r = 0u16;
+    while r < 8u16 {
+        poke(__px_addr(x, y + r), peek(base + r) as u8);
+        r = r + 1u16;
+    }
+    poke(22528u16 + cy * 32u16 + cx, 7u8); // white ink on black paper
+}
+fn __frame_number(cx: u16, cy: u16, n: u16) {
+    // `Frame::text_u16` on the pure tape: draw `n` as decimal via the ROM font, most-
+    // significant digit first. A shared routine — DCE (rustz80 0.6+) prunes it from
+    // games that never call `text_u16`, so it costs only games that use it.
+    let mut div = 1u16;
+    while (n / div) >= 10u16 {
+        div = div * 10u16;
+    }
+    let mut v = n;
+    let mut i = 0u16;
+    loop {
+        __glyph(cx + i, cy, (v / div) % 10u16 + 48u16);
+        v = v % div;
+        div = div / 10u16;
+        i = i + 1u16;
+        if div == 0u16 {
+            break;
+        }
+    }
+}
 fn __key(port: u16, bit: u16) -> u16 {
     let mut r = 0u16;
     if (inport(port) & bit) == 0u16 { r = 1u16; }
@@ -94,6 +127,7 @@ fn prelude_config() -> rustz80::PreludeConfig {
         .route("Frame", "clear", "__frame_clear")
         .route("Frame", "fill_cell", "__frame_fill_cell")
         .route("Frame", "clear_cell", "__frame_clear_cell")
+        .route("Frame", "text_u16", "__frame_number")
         .route("Input", "held", "__input_held")
         .route("Input", "pressed", "__input_held")
 }

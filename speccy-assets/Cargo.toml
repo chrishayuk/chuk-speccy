@@ -4,7 +4,7 @@
 # (docs/roadmap.md E.2 — the "colour-clash report is the cheap demo-magnet".)
 [package]
 name = "chuk-speccy-assets"
-description = "Convert RGB images to ZX Spectrum screen data with an attribute-clash report."
+description = "Convert images to ZX Spectrum screen data or const Tile sprites, with an attribute-clash report."
 edition.workspace = true
 version.workspace = true
 license.workspace = true

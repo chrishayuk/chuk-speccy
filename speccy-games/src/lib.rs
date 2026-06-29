@@ -12,6 +12,7 @@ pub const SNAKE: &str = "snake";
 pub const KEYTEST: &str = "keytest";
 pub const TYPING: &str = "typing";
 pub const MOVER: &str = "mover";
+pub const SPRITES: &str = "sprites";
 
 const W: u8 = 32; // playfield is the full 32×24 grid; row 0 shows the score
 const TOP: u8 = 1;
@@ -21,6 +22,37 @@ const DEFAULT_SEED: u32 = 0x1234_5678;
 
 /// An empty 8×8 tile — clears a cell (used to erase a sprite's old position).
 const ERASE: Tile = Tile { rows: [0; 8] };
+
+// --- baked art (the asset pipeline, end to end) ----------------------------
+// `SHOWCASE` was *baked from a PNG* by `chuk-speccy-assets`, not hand-typed:
+//   speccy-asset bake sprites.png --name SHOWCASE -o sprites.rs
+// A 24×8 source image → three 8×8 `Tile`s (face · heart · star). This is the
+// authoring loop's payoff: art → `const Tile` → drawn with `frame.tile(..)`.
+// (`Frame::tile` is host-only — const bitmap relocation is a cell80 feature — so
+// baked tiles live in these host demos, not the pure dual-compile `samples/`.)
+const SHOWCASE: [Tile; 3] = [
+    // (0,0) ink BrightCyan — a smiley
+    Tile {
+        rows: [
+            0b00111100, 0b01000010, 0b10100101, 0b10000001, 0b10100101, 0b10011001, 0b01000010,
+            0b00111100,
+        ],
+    },
+    // (1,0) ink BrightRed — a heart
+    Tile {
+        rows: [
+            0b00000000, 0b01100110, 0b11111111, 0b11111111, 0b11111111, 0b01111110, 0b00111100,
+            0b00011000,
+        ],
+    },
+    // (2,0) ink BrightYellow — a star
+    Tile {
+        rows: [
+            0b00011000, 0b00011000, 0b11111111, 0b01111110, 0b00111100, 0b01100110, 0b11000011,
+            0b00000000,
+        ],
+    },
+];
 
 /// A grid Snake (`speccy-gui <rom> snake`). State is fully deterministic (RNG seeded
 /// from state, frames counted) so it rewinds/replays/RLs correctly — the substrate
@@ -305,6 +337,75 @@ impl Game for Mover {
     }
 }
 
+/// **Sprites** (`speccy-gui <rom> sprites`): a showcase for the **asset pipeline** —
+/// every sprite here was baked from a PNG into a [`SHOWCASE`] `const Tile` by
+/// `chuk-speccy-assets`. A row of the three baked tiles cycles colour (so the GIF is
+/// lively with no input), and a movable face cursor (the first baked tile) responds to
+/// the controls. Pure host-composite: `frame.tile` draws baked bitmaps.
+pub struct Sprites {
+    tick: u16,
+    x: u8,
+    y: u8,
+}
+
+impl Default for Sprites {
+    fn default() -> Self {
+        Sprites {
+            tick: 0,
+            x: 16,
+            y: 14,
+        }
+    }
+}
+
+impl Game for Sprites {
+    fn update(&mut self, input: &Input, frame: &mut Frame) {
+        frame.clear(Colour::Black); // full redraw each tick — simplest, demo-clear
+
+        // The three baked tiles, side by side, cycling through the bright palette so
+        // the showcase shimmers without any input driving it.
+        const CYCLE: [Colour; 6] = [
+            Colour::BrightCyan,
+            Colour::BrightGreen,
+            Colour::BrightYellow,
+            Colour::BrightMagenta,
+            Colour::BrightRed,
+            Colour::BrightWhite,
+        ];
+        let phase = (self.tick / 8) as usize;
+        for (i, tile) in SHOWCASE.iter().enumerate() {
+            frame
+                .ink(CYCLE[(phase + i) % CYCLE.len()])
+                .tile(tile, 13 + i as u8 * 2, 6);
+        }
+
+        // A movable face cursor (the first baked tile), nudged by the controls.
+        if input.held(Button::Left) && self.x > 0 {
+            self.x -= 1;
+        }
+        if input.held(Button::Right) && self.x < 31 {
+            self.x += 1;
+        }
+        if input.held(Button::Up) && self.y > 3 {
+            self.y -= 1;
+        }
+        if input.held(Button::Down) && self.y < 23 {
+            self.y += 1;
+        }
+        frame
+            .ink(Colour::BrightWhite)
+            .tile(&SHOWCASE[0], self.x, self.y);
+
+        // HUD — names the trick.
+        frame.ink(Colour::BrightCyan);
+        frame.text(1, 0, "BAKED SPRITES");
+        frame.ink(Colour::White);
+        frame.text(1, 1, "PNG -> const Tile");
+
+        self.tick = self.tick.wrapping_add(1);
+    }
+}
+
 // --- the registry: name → installer (heads stay game-agnostic) -------------
 
 /// One installable demo: its name, a one-line description, and how to install it on
@@ -333,6 +434,9 @@ fn install_mover(s: &mut Spectrum) {
         .set(Button::Right, &['d']);
     speccy_sdk::install_with_controls(s, Mover::default(), c);
 }
+fn install_sprites(s: &mut Spectrum) {
+    speccy_sdk::install(s, Sprites::default());
+}
 
 /// Every installable demo — the registry. Add a game here and every head picks it up.
 pub const DEMOS: &[Demo] = &[
@@ -355,6 +459,11 @@ pub const DEMOS: &[Demo] = &[
         name: MOVER,
         about: "move a blob (WASD — remapped controls)",
         install: install_mover,
+    },
+    Demo {
+        name: SPRITES,
+        about: "baked-art showcase (PNG -> const Tile)",
+        install: install_sprites,
     },
 ];
 

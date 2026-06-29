@@ -201,7 +201,10 @@ mod tests {
 
         let mut replay = ReplayAgent::new(rec.log.clone());
         let replayed: Vec<Vec<char>> = (0..6).map(|_| replay.act(&v)).collect();
-        assert_eq!(chosen, replayed, "replay yields exactly the recorded choices");
+        assert_eq!(
+            chosen, replayed,
+            "replay yields exactly the recorded choices"
+        );
         assert!(replay.act(&v).is_empty(), "past the end it presses nothing");
     }
 

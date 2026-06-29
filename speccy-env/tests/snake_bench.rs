@@ -3,9 +3,7 @@
 //! the typed state off RAM and scores `len` growth, and a reverse-aware homing agent
 //! (head → food, read purely from the symbol map) beats random beats no-op.
 
-use speccy_env::agents::{
-    run_episode, Agent, NoOpAgent, RandomAgent, RecordingAgent, ReplayAgent,
-};
+use speccy_env::agents::{run_episode, Agent, NoOpAgent, RandomAgent, RecordingAgent, ReplayAgent};
 use speccy_env::{FromState, SpectrumEnv, StateView, SymbolMap};
 
 /// Host twin of `snake_game`: reconstructs the typed fields and scores via
@@ -119,10 +117,22 @@ fn snake_compiles_and_reconstructs() {
 #[test]
 fn homing_agent_steers_toward_food_without_reversing() {
     // Food down-right, moving right (dir 0): bigger gap is horizontal → keep right.
-    let v = StateView::from_pairs(&[("bx", 5), ("by", 5), ("food_x", 12), ("food_y", 8), ("dir", 0)]);
+    let v = StateView::from_pairs(&[
+        ("bx", 5),
+        ("by", 5),
+        ("food_x", 12),
+        ("food_y", 8),
+        ("dir", 0),
+    ]);
     assert_eq!(SnakeHomingAgent.act(&v), vec!['p']);
     // Food is left while moving right (dir 0) — a reverse — so take the vertical axis.
-    let v = StateView::from_pairs(&[("bx", 20), ("by", 5), ("food_x", 3), ("food_y", 9), ("dir", 0)]);
+    let v = StateView::from_pairs(&[
+        ("bx", 20),
+        ("by", 5),
+        ("food_x", 3),
+        ("food_y", 9),
+        ("dir", 0),
+    ]);
     assert_eq!(SnakeHomingAgent.act(&v), vec!['a']);
 }
 
@@ -151,7 +161,10 @@ fn homing_beats_random_on_snake() {
 
     assert_eq!(noop, 0, "a no-op snake crawls straight and never eats");
     assert!(homing > 0, "the homing agent eats at least once ({homing})");
-    assert!(homing > random, "homing should out-grow random ({homing} vs {random})");
+    assert!(
+        homing > random,
+        "homing should out-grow random ({homing} vs {random})"
+    );
 }
 
 /// The agent-lab cornerstone: record the homing agent's actions, then **replay** them
@@ -172,9 +185,13 @@ fn replay_reproduces_the_homing_episode() {
     let recorded = run_episode::<SnakeBot, _>(&mut env, &mut rec, steps, fps);
     let tape_log = rec.log.clone();
 
-    let replayed = run_episode::<SnakeBot, _>(&mut env, &mut ReplayAgent::new(tape_log), steps, fps);
+    let replayed =
+        run_episode::<SnakeBot, _>(&mut env, &mut ReplayAgent::new(tape_log), steps, fps);
 
-    assert!(recorded > 0, "the recorded episode actually scored ({recorded})");
+    assert!(
+        recorded > 0,
+        "the recorded episode actually scored ({recorded})"
+    );
     assert_eq!(
         recorded, replayed,
         "replaying the same actions reproduces the episode ({recorded} vs {replayed})"

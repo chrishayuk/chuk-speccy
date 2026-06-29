@@ -18,6 +18,12 @@
 
 use display::{screen_byte_index, AUTHENTIC};
 
+/// Bake art into subset-clean `const Tile` data for the SDK's `Frame::tile` — the
+/// other half of the pipeline (this crate's [`convert`] makes a full-screen `.scr`
+/// blob; `bake` makes authored game data). See [`bake::bake`].
+pub mod bake;
+pub use bake::{TileArt, TileSheet};
+
 /// The native Spectrum screen, in pixels (re-exported from `display` — one source).
 pub const SCREEN_W: usize = display::SCREEN_W;
 pub const SCREEN_H: usize = display::SCREEN_H;
@@ -67,7 +73,11 @@ pub fn convert(rgb: &[[u8; 3]], w: usize, h: usize) -> Result<SpectrumImage, Str
         return Err(format!("expected {SCREEN_W}x{SCREEN_H}, got {w}x{h}"));
     }
     if rgb.len() != w * h {
-        return Err(format!("buffer has {} pixels, expected {}", rgb.len(), w * h));
+        return Err(format!(
+            "buffer has {} pixels, expected {}",
+            rgb.len(),
+            w * h
+        ));
     }
 
     let mut pixels = [0u8; PIXELS];
@@ -76,44 +86,21 @@ pub fn convert(rgb: &[[u8; 3]], w: usize, h: usize) -> Result<SpectrumImage, Str
 
     for cy in 0..ROWS {
         for cx in 0..COLS {
-            // Snapshot the cell's 64 source pixels once.
-            let mut cell = [[0u8; 3]; 64];
-            for r in 0..8 {
-                for c in 0..8 {
-                    cell[r * 8 + c] = rgb[(cy * 8 + r) * w + (cx * 8 + c)];
-                }
-            }
-
-            // Report a clash if the source wanted more than two colours here.
-            let mut present = [false; 16];
-            for &p in &cell {
-                present[nearest(p) as usize] = true;
-            }
-            let distinct = present.iter().filter(|&&b| b).count();
-            if distinct > 2 {
+            // The same two-colour reducer the tile baker uses, so the same art on a
+            // `.scr` and in a baked tile is bit-identical.
+            let art = reduce_cell(&cell_at(rgb, w, cx, cy));
+            if art.distinct > 2 {
                 clashes.push(Clash {
                     cx: cx as u8,
                     cy: cy as u8,
-                    colours: distinct as u8,
+                    colours: art.distinct as u8,
                 });
             }
-
-            // Pick the best two-colour pair, then set the bitmap + attribute.
-            let (ink, paper, bright) = choose_attr(&cell);
-            let ink_rgb = AUTHENTIC[bright * 8 + ink];
-            let paper_rgb = AUTHENTIC[bright * 8 + paper];
             for r in 0..8 {
-                let mut byte = 0u8;
-                for c in 0..8 {
-                    let p = cell[r * 8 + c];
-                    // Ink bit set when the pixel is nearer the ink colour.
-                    if dist2(p, ink_rgb) <= dist2(p, paper_rgb) {
-                        byte |= 0x80 >> c;
-                    }
-                }
-                pixels[screen_byte_index(cx * 8, cy * 8 + r)] = byte;
+                pixels[screen_byte_index(cx * 8, cy * 8 + r)] = art.rows[r];
             }
-            attrs[cy * COLS + cx] = ((bright as u8) << 6) | ((paper as u8) << 3) | ink as u8;
+            attrs[cy * COLS + cx] =
+                ((art.bright as u8) << 6) | ((art.paper as u8) << 3) | art.ink as u8;
         }
     }
 
@@ -122,6 +109,65 @@ pub fn convert(rgb: &[[u8; 3]], w: usize, h: usize) -> Result<SpectrumImage, Str
         attrs,
         clashes,
     })
+}
+
+/// Snapshot a cell's 64 source pixels — cell `(cx, cy)`, 8×8, row-major — from a
+/// `w`-wide RGB buffer. Shared by [`convert`] and the tile [`bake`]r.
+pub(crate) fn cell_at(rgb: &[[u8; 3]], w: usize, cx: usize, cy: usize) -> [[u8; 3]; 64] {
+    let mut cell = [[0u8; 3]; 64];
+    for r in 0..8 {
+        for c in 0..8 {
+            cell[r * 8 + c] = rgb[(cy * 8 + r) * w + (cx * 8 + c)];
+        }
+    }
+    cell
+}
+
+/// One 8×8 cell reduced to the Spectrum's two-colours-per-cell model: the 8 bitmap
+/// `rows` (bit 7 = leftmost; a set bit is an `ink` pixel — the convention
+/// [`Frame::tile`](../speccy_sdk/struct.Frame.html) draws), the chosen `ink`/`paper`
+/// hue (`0..8`) with shared `bright`, and the count of `distinct` logical colours the
+/// source wanted (`> 2` ⇒ an unavoidable attribute clash). One reducer feeds both the
+/// screen converter and the tile baker.
+pub(crate) struct CellArt {
+    pub rows: [u8; 8],
+    pub ink: usize,
+    pub paper: usize,
+    pub bright: usize,
+    pub distinct: usize,
+}
+
+pub(crate) fn reduce_cell(cell: &[[u8; 3]; 64]) -> CellArt {
+    // How many of the 16 logical colours the source wanted here.
+    let mut present = [false; 16];
+    for &p in cell {
+        present[nearest(p) as usize] = true;
+    }
+    let distinct = present.iter().filter(|&&b| b).count();
+
+    // The best two-colour pair, then the 1-bit rows (ink bit set when the pixel is
+    // nearer the ink colour).
+    let (ink, paper, bright) = choose_attr(cell);
+    let ink_rgb = AUTHENTIC[bright * 8 + ink];
+    let paper_rgb = AUTHENTIC[bright * 8 + paper];
+    let mut rows = [0u8; 8];
+    for (r, row) in rows.iter_mut().enumerate() {
+        let mut byte = 0u8;
+        for c in 0..8 {
+            let p = cell[r * 8 + c];
+            if dist2(p, ink_rgb) <= dist2(p, paper_rgb) {
+                byte |= 0x80 >> c;
+            }
+        }
+        *row = byte;
+    }
+    CellArt {
+        rows,
+        ink,
+        paper,
+        bright,
+        distinct,
+    }
 }
 
 /// The (ink hue, paper hue, bright) that minimises the cell's total colour error — the
@@ -198,9 +244,15 @@ mod tests {
         // render identically.)
         let attr = img.attrs[0];
         let (ink, paper) = (attr & 0x07, (attr >> 3) & 0x07);
-        assert!(ink == 4 || paper == 4, "green is one of the two cell colours");
+        assert!(
+            ink == 4 || paper == 4,
+            "green is one of the two cell colours"
+        );
         assert_eq!(attr & 0x40, 0x40, "bright bit set");
-        assert!(img.attrs.iter().all(|&a| a == attr), "uniform image, uniform attrs");
+        assert!(
+            img.attrs.iter().all(|&a| a == attr),
+            "uniform image, uniform attrs"
+        );
     }
 
     #[test]
@@ -217,7 +269,10 @@ mod tests {
             }
         }
         let img = convert(&buf, SCREEN_W, SCREEN_H).unwrap();
-        assert!(img.clashes.is_empty(), "two colours fit a cell with no clash");
+        assert!(
+            img.clashes.is_empty(),
+            "two colours fit a cell with no clash"
+        );
         // The left 4 pixels and right 4 pixels split into the two colours → 0xF0.
         assert_eq!(img.pixels[screen_byte_index(0, 0)], 0xF0);
     }
@@ -255,7 +310,11 @@ mod tests {
             if i == 8 {
                 continue;
             }
-            assert_eq!(nearest(AUTHENTIC[i as usize]), i, "palette[{i}] round-trips");
+            assert_eq!(
+                nearest(AUTHENTIC[i as usize]),
+                i,
+                "palette[{i}] round-trips"
+            );
         }
     }
 }

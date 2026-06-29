@@ -55,8 +55,7 @@ fn boots_on_real_rom() {
 fn snake_sample_animates() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
     let src =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/snake.rs"))
-            .unwrap();
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/snake.rs")).unwrap();
     let tap = rustz80::compile_to_tap(&src, "main", "SNAKE").expect("compile");
 
     let mut spec = spectrum::Spectrum::new_48k(&rom);
