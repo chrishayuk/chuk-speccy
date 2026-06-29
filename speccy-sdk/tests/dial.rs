@@ -13,6 +13,7 @@ const SNAKE: &str = include_str!(concat!(
 const BLANK: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/blank.rs"));
 const PLATFORM: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/platform.rs"));
 const CHASE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/chase.rs"));
+const MAZE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/maze.rs"));
 
 /// Host side: the same sample texts, compiled here by `rustc` against `speccy-sdk`.
 /// If they type-check as `Game`s, this passes (a compile-time assertion).
@@ -77,12 +78,22 @@ fn host_games_are_valid_rust() {
             is_game::<Chase>();
         }
     }
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod maze {
+        use speccy_sdk::*;
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/maze.rs"));
+        pub fn check() {
+            fn is_game<T: Game + Default>() {}
+            is_game::<Maze>();
+        }
+    }
     bounce::check();
     mover::check();
     snake::check();
     blank::check();
     platform::check();
     chase::check();
+    maze::check();
 }
 
 /// Host side, behaviour: the `chase` enemies actually move toward the player when the
@@ -117,12 +128,42 @@ fn games_compile_pure() {
     assert!(speccy_sdk::compile::has_game(BOUNCE) && speccy_sdk::compile::has_game(MOVE));
     assert!(speccy_sdk::compile::has_game(SNAKE) && speccy_sdk::compile::has_game(BLANK));
     assert!(speccy_sdk::compile::has_game(PLATFORM) && speccy_sdk::compile::has_game(CHASE));
+    assert!(speccy_sdk::compile::has_game(MAZE));
     speccy_sdk::compile::compile_game(BOUNCE, "BOUNCE").expect("bounce compiles");
     speccy_sdk::compile::compile_game(MOVE, "MOVE").expect("move compiles");
     speccy_sdk::compile::compile_game(SNAKE, "SNAKE").expect("snake compiles");
     speccy_sdk::compile::compile_game(BLANK, "BLANK").expect("blank compiles");
     speccy_sdk::compile::compile_game(PLATFORM, "PLATFORM").expect("platform compiles");
     speccy_sdk::compile::compile_game(CHASE, "CHASE").expect("chase compiles");
+    speccy_sdk::compile::compile_game(MAZE, "MAZE").expect("maze compiles");
+}
+
+/// Host side, behaviour: the `maze` player walks on a held direction and is blocked by
+/// walls (isolates the move/collision logic from codegen — no ROM needed). Holding Right
+/// from the start cell advances along the open top band, then stops at the border wall.
+#[test]
+fn maze_player_moves_on_host() {
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod m {
+        use speccy_sdk::*;
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/maze.rs"));
+        pub fn run() -> (u16, u16) {
+            let mut g = Maze::default();
+            let mut f = Frame::new();
+            g.update(&Input::none(), &mut f); // init: places the player at the start
+            let start_x = g.x;
+            let right = Input::held_now(&[Button::Right]);
+            for _ in 0..120 {
+                g.update(&right, &mut f);
+            }
+            (start_x, g.x) // moved right, then stopped at the wall (never past 30)
+        }
+    }
+    let (start_x, end_x) = m::run();
+    assert!(
+        end_x > start_x && end_x <= 30,
+        "player should walk right into free cells and stop at the wall (start {start_x}, end {end_x})"
+    );
 }
 
 /// Minimal repro of the chase inliner regression on the *real game path* (codegen_loop +
@@ -259,6 +300,24 @@ fn chase_renders_running_game() {
         black > screen.len() / 2,
         "the running game (black paper) should render via the player path — got {}% black \
          (a low value means the tape never ran)",
+        black * 100 / screen.len()
+    );
+}
+
+/// The `maze` tape boots and runs on the real ROM — same black-paper signal as chase (a
+/// running game clears to black; the grey BASIC boot screen is mostly white). Guards the
+/// decomposed sample (draw_maze/enter_room/move_player inlined) against a codegen regression.
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn maze_renders_running_game() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let tap = speccy_sdk::compile::compile_game(MAZE, "MAZE").expect("compile");
+    let screen = &speccy_sdk::run::capture_indexed(&tap, &rom, 1, 1, speccy_sdk::run::DEFAULT_BOOT)
+        .expect("capture")[0];
+    let black = screen.iter().filter(|&&px| px == 0).count();
+    assert!(
+        black > screen.len() / 2,
+        "the running maze (black paper) should render — got {}% black (low ⇒ tape never ran)",
         black * 100 / screen.len()
     );
 }

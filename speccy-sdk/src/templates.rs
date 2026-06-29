@@ -41,6 +41,12 @@ pub const TEMPLATES: &[Template] = &[
         struct_name: "Chase",
         src: include_str!("../samples/chase.rs"),
     },
+    Template {
+        name: "maze",
+        about: "a walled maze with room-to-room scene-flow (reach the exit)",
+        struct_name: "Maze",
+        src: include_str!("../samples/maze.rs"),
+    },
 ];
 
 /// The template named `name`, if any.
