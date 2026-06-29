@@ -26,10 +26,12 @@ jobs:
           set -uo pipefail
           # `cell80-z80` and `rustz80` publish from the cell80 repo
           # (https://github.com/chrishayuk/cell80); spectrum/sdk depend on those crates.io
-          # releases (version deps), so publish cell80 first. `speccy` (the frontend bins)
-          # depends on chuk-speccy-games, so games publishes before it.
-          for p in chuk-speccy-display chuk-speccy-wos chuk-speccy-spectrum \
-                   chuk-speccy-sdk chuk-speccy-games speccy; do
+          # releases (version deps), so publish cell80 first. Order is dependency-first:
+          # `assets` needs `display`; `env` needs `spectrum`+`sdk`; `games` needs `sdk`;
+          # `speccy` (the frontend bins) needs `games`.
+          for p in chuk-speccy-display chuk-speccy-wos chuk-speccy-assets \
+                   chuk-speccy-spectrum chuk-speccy-sdk chuk-speccy-env \
+                   chuk-speccy-games speccy; do
             echo "::group::publish $p"
             if ! cargo publish -p "$p" 2>publish.err; then
               cat publish.err
