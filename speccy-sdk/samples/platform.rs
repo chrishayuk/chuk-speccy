@@ -15,44 +15,45 @@
 // free function — shared by the one-time level draw and the per-step physics. The level
 // is drawn once; each step only erases/redraws the moving player (O(1), so it stays fast
 // on a real Z80). Typed state (`x`, `y`, `score`, `won`, `dead`, …) is what the emitted
-// `.sym.toml` exposes, so an env reads and scores the live game off RAM.
+// `.sym.toml` exposes, so an env reads and scores the live game off RAM. Flags are `bool`s
+// (`won`, `started`, `onground`); `jump`/`dead` are u16 counters; coins stay `[u16; 3]`.
 
 // Is level cell (cx, cy) solid? Walls (cols 0 / 31), a floor (rows 22+) with a pit at
 // cols 14..16, and three platforms. One map for drawing *and* physics — no drift.
-fn solid(cx: u16, cy: u16) -> u16 {
-    let mut s = 0u16;
+fn solid(cx: u16, cy: u16) -> bool {
+    let mut s = false;
     if cx == 0u16 {
-        s = 1u16;
+        s = true;
     }
     if cx >= 31u16 {
-        s = 1u16;
+        s = true;
     }
     if cy >= 22u16 {
-        s = 1u16;
+        s = true;
         if cx >= 14u16 {
             if cx <= 15u16 {
-                s = 0u16; // the pit (a gap in the floor)
+                s = false; // the pit (a gap in the floor)
             }
         }
     }
     if cy == 18u16 {
         if cx >= 6u16 {
             if cx <= 11u16 {
-                s = 1u16; // low platform
+                s = true; // low platform
             }
         }
     }
     if cy == 14u16 {
         if cx >= 16u16 {
             if cx <= 23u16 {
-                s = 1u16; // mid platform
+                s = true; // mid platform
             }
         }
     }
     if cy == 10u16 {
         if cx >= 24u16 {
             if cx <= 29u16 {
-                s = 1u16; // high platform (the exit sits here)
+                s = true; // high platform (the exit sits here)
             }
         }
     }
@@ -61,17 +62,17 @@ fn solid(cx: u16, cy: u16) -> u16 {
 
 #[derive(Default)]
 struct Platform {
-    started: u16,
+    started: bool,
     x: u16,
     y: u16,
     jump: u16, // up-moves left in the current jump (0 = falling / grounded)
     tick: u16,
     score: u16, // coins collected
-    won: u16,
+    won: bool,
     dead: u16, // 0 = alive; otherwise a restart countdown
     cgx: [u16; 3],
     cgy: [u16; 3],
-    got: [u16; 3],
+    got: [u16; 3], // coin collected? (no `bool` arrays in the dialect yet)
 }
 
 impl Platform {
@@ -81,7 +82,7 @@ impl Platform {
         while cy < 24u16 {
             let mut cx = 0u16;
             while cx < 32u16 {
-                if solid(cx, cy) != 0u16 {
+                if solid(cx, cy) {
                     frame.fill_cell(cx as u8, cy as u8, Colour::White);
                 }
                 cx = cx + 1u16;
@@ -106,7 +107,7 @@ impl Platform {
 
 impl Game for Platform {
     fn update(&mut self, input: &Input, frame: &mut Frame) {
-        if self.started == 0u16 {
+        if !self.started {
             frame.clear(Colour::Black);
             self.draw_level(frame);
             self.x = 2u16;
@@ -114,26 +115,26 @@ impl Game for Platform {
             self.jump = 0u16;
             self.tick = 0u16;
             self.score = 0u16;
-            self.won = 0u16;
+            self.won = false;
             self.dead = 0u16;
             frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightCyan);
             frame.text_u16(0u8, 0u8, self.score); // numeric score (ROM-font, shared routine)
-            self.started = 1u16;
+            self.started = true;
         }
 
         if self.dead != 0u16 {
             if input.held(Button::Fire) {
-                self.started = 0u16;
+                self.started = false;
             } else {
                 self.dead = self.dead - 1u16;
                 if self.dead == 0u16 {
-                    self.started = 0u16;
+                    self.started = false;
                 }
             }
         } else {
-            if self.won != 0u16 {
+            if self.won {
                 if input.held(Button::Fire) {
-                    self.started = 0u16;
+                    self.started = false;
                 }
             } else {
                 self.tick = self.tick + 1u16;
@@ -146,31 +147,31 @@ impl Game for Platform {
                     // Walk left / right when the target cell is free.
                     if input.held(Button::Left) {
                         if self.x > 0u16 {
-                            if solid(self.x - 1u16, self.y) == 0u16 {
+                            if !solid(self.x - 1u16, self.y) {
                                 self.x = self.x - 1u16;
                             }
                         }
                     }
                     if input.held(Button::Right) {
                         if self.x < 31u16 {
-                            if solid(self.x + 1u16, self.y) == 0u16 {
+                            if !solid(self.x + 1u16, self.y) {
                                 self.x = self.x + 1u16;
                             }
                         }
                     }
 
                     // On the ground if the cell below is solid (or we're at the bottom).
-                    let mut onground = 0u16;
+                    let mut onground = false;
                     if self.y >= 23u16 {
-                        onground = 1u16;
+                        onground = true;
                     }
-                    if solid(self.x, self.y + 1u16) != 0u16 {
-                        onground = 1u16;
+                    if solid(self.x, self.y + 1u16) {
+                        onground = true;
                     }
 
                     // Start a jump (rise 5 cells) from the ground.
                     if self.jump == 0u16 {
-                        if onground == 1u16 {
+                        if onground {
                             if input.held(Button::Up) {
                                 self.jump = 5u16;
                             }
@@ -183,7 +184,7 @@ impl Game for Platform {
                     // Rise while jumping (until a ceiling), else fall under gravity.
                     if self.jump > 0u16 {
                         if self.y > 1u16 {
-                            if solid(self.x, self.y - 1u16) == 0u16 {
+                            if !solid(self.x, self.y - 1u16) {
                                 self.y = self.y - 1u16;
                                 self.jump = self.jump - 1u16;
                             } else {
@@ -193,7 +194,7 @@ impl Game for Platform {
                             self.jump = 0u16;
                         }
                     } else {
-                        if solid(self.x, self.y + 1u16) == 0u16 {
+                        if !solid(self.x, self.y + 1u16) {
                             if self.y >= 23u16 {
                                 self.dead = 40u16; // fell off the bottom (the pit)
                             } else {
@@ -220,7 +221,7 @@ impl Game for Platform {
                     // Reach the exit cell → win.
                     if self.x == 28u16 {
                         if self.y == 9u16 {
-                            self.won = 1u16;
+                            self.won = true;
                         }
                     }
 

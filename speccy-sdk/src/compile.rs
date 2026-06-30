@@ -154,7 +154,9 @@ pub fn compile_game_with_symbols(src: &str, name: &str) -> Result<(Vec<u8>, Symb
     if !funcs.iter().any(|(n, _)| *n == update) {
         return Err(format!("`{ty}` has no `update` method"));
     }
-    let code = rustz80::codegen_loop(&funcs, rustz80::ORG, &update, GAME_STATE, state_bytes);
+    // 0.8: `codegen_loop` returns `Err` if the game's code + locals won't fit (over budget)
+    // instead of silently emitting a broken tape — surface it as a compile error.
+    let code = rustz80::codegen_loop(&funcs, rustz80::ORG, &update, GAME_STATE, state_bytes)?;
     Ok((
         rustz80::to_tap(&code, rustz80::ORG, rustz80::ORG, name),
         symbols,

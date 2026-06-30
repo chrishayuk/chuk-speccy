@@ -16,56 +16,57 @@
 //
 // This is the SDK's first **decomposed** sample: `draw_maze`/`enter_room`/`move_player`
 // are clean `&self`/`&mut self` methods. Each has a single call site, so rustz80's inliner
-// folds them — the tape is as compact as if it were hand-inlined into `update`.
+// folds them — the tape is as compact as if it were hand-inlined into `update`. Flags are
+// real `bool`s (`if !self.started { self.started = true; }`), so the flow reads naturally.
 
 // The wall map for `room`: a bordered grid plus a serpentine of corridors. Room 0 uses
 // horizontal walls with alternating right/left gaps; room 1 uses vertical walls with
 // alternating bottom/top gaps. Both keep the start (2,2) and exit (29,21) cells open and
-// connected. One map for the draw *and* the player collision.
-fn wall(cx: u16, cy: u16, room: u16) -> u16 {
-    let mut s = 0u16;
+// connected. One map for the draw *and* the player collision — returns `true` for a wall.
+fn wall(cx: u16, cy: u16, room: u16) -> bool {
+    let mut s = false;
     if cx == 0u16 {
-        s = 1u16;
+        s = true;
     }
     if cx >= 31u16 {
-        s = 1u16;
+        s = true;
     }
     if cy == 0u16 {
-        s = 1u16;
+        s = true;
     }
     if cy >= 23u16 {
-        s = 1u16;
+        s = true;
     }
     if room == 0u16 {
         if cy == 6u16 {
             if cx <= 27u16 {
-                s = 1u16; // wall across, gap at cx 28..30
+                s = true; // wall across, gap at cx 28..30
             }
         }
         if cy == 12u16 {
             if cx >= 4u16 {
-                s = 1u16; // wall across, gap at cx 1..3
+                s = true; // wall across, gap at cx 1..3
             }
         }
         if cy == 18u16 {
             if cx <= 27u16 {
-                s = 1u16; // wall across, gap at cx 28..30
+                s = true; // wall across, gap at cx 28..30
             }
         }
     } else {
         if cx == 8u16 {
             if cy <= 18u16 {
-                s = 1u16; // wall down, gap at cy 19..22
+                s = true; // wall down, gap at cy 19..22
             }
         }
         if cx == 16u16 {
             if cy >= 5u16 {
-                s = 1u16; // wall down, gap at cy 1..4
+                s = true; // wall down, gap at cy 1..4
             }
         }
         if cx == 24u16 {
             if cy <= 18u16 {
-                s = 1u16; // wall down, gap at cy 19..22
+                s = true; // wall down, gap at cy 19..22
             }
         }
     }
@@ -74,12 +75,12 @@ fn wall(cx: u16, cy: u16, room: u16) -> u16 {
 
 #[derive(Default)]
 struct Maze {
-    started: u16,
+    started: bool,
     x: u16,
     y: u16,
     room: u16,
     tick: u16,
-    won: u16,
+    won: bool,
 }
 
 impl Maze {
@@ -89,7 +90,7 @@ impl Maze {
         while cy < 24u16 {
             let mut cx = 0u16;
             while cx < 32u16 {
-                if wall(cx, cy, self.room) != 0u16 {
+                if wall(cx, cy, self.room) {
                     frame.fill_cell(cx as u8, cy as u8, Colour::White);
                 }
                 cx = cx + 1u16;
@@ -112,25 +113,25 @@ impl Maze {
     fn move_player(&mut self, input: &Input) {
         if input.held(Button::Left) {
             if self.x > 0u16 {
-                if wall(self.x - 1u16, self.y, self.room) == 0u16 {
+                if !wall(self.x - 1u16, self.y, self.room) {
                     self.x = self.x - 1u16;
                 }
             }
         }
         if input.held(Button::Right) {
-            if wall(self.x + 1u16, self.y, self.room) == 0u16 {
+            if !wall(self.x + 1u16, self.y, self.room) {
                 self.x = self.x + 1u16;
             }
         }
         if input.held(Button::Up) {
             if self.y > 0u16 {
-                if wall(self.x, self.y - 1u16, self.room) == 0u16 {
+                if !wall(self.x, self.y - 1u16, self.room) {
                     self.y = self.y - 1u16;
                 }
             }
         }
         if input.held(Button::Down) {
-            if wall(self.x, self.y + 1u16, self.room) == 0u16 {
+            if !wall(self.x, self.y + 1u16, self.room) {
                 self.y = self.y + 1u16;
             }
         }
@@ -139,15 +140,15 @@ impl Maze {
 
 impl Game for Maze {
     fn update(&mut self, input: &Input, frame: &mut Frame) {
-        if self.started == 0u16 {
+        if !self.started {
             self.room = 0u16;
-            self.won = 0u16;
+            self.won = false;
             self.tick = 0u16;
             self.enter_room(frame);
-            self.started = 1u16;
+            self.started = true;
         }
 
-        if self.won == 0u16 {
+        if !self.won {
             // Constant speed: step once every few frames regardless of the host's rate.
             self.tick = self.tick + 1u16;
             if self.tick >= 3u16 {
@@ -164,7 +165,7 @@ impl Game for Maze {
                             self.room = 1u16;
                             self.enter_room(frame);
                         } else {
-                            self.won = 1u16;
+                            self.won = true;
                         }
                     }
                 }
@@ -182,7 +183,7 @@ impl Game for Maze {
                 wx = wx + 1u16;
             }
             if input.held(Button::Fire) {
-                self.started = 0u16;
+                self.started = false;
             }
         }
     }

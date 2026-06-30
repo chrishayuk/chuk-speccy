@@ -44,7 +44,8 @@ spectrum = { package = "chuk-speccy-spectrum", version = "0.3.0", path = "../spe
 # Already in the graph via `spectrum`, so depending on it directly adds nothing.
 display = { package = "chuk-speccy-display", version = "0.3.0", path = "../display" }
 # Only for the `compile` feature (the game-compile flow). From the standalone cell80 repo:
-# 0.7 brings the single-call inliner + code-relative scratch placement (clean decomposed
-# samples like `chase` compile as compactly as hand-inlined), on top of 0.6's Spectrum DCE.
-rustz80 = { version = "0.7", optional = true }
+# 0.8 brings `bool` flags + unary `!` (samples read with `if !self.started`) and a
+# `Result`-returning `codegen_loop` (errors on over-budget instead of silently miscompiling),
+# on top of 0.7's inliner + code-relative scratch and 0.6's Spectrum DCE.
+rustz80 = { version = "0.8", optional = true }
 syn = { version = "2", features = ["full"], optional = true }

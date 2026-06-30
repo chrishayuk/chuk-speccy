@@ -15,42 +15,43 @@
 // rewinds/replays/RLs. Drawing is incremental: the room is drawn once, then each tick
 // erases the old actor cells and redraws coins/enemies/player. Typed state
 // (`x`,`y`,`score`,`won`,`dead`,`ex[]`,`ey[]`) is what the `.sym.toml` exposes, so an env
-// reads + scores it off RAM (avoid-the-enemies is a clean reward).
+// reads + scores it off RAM (avoid-the-enemies is a clean reward). Flags are `bool`s; the
+// coin-collected flags stay `[u16; 4]` (the dialect has no `bool` arrays yet).
 
 // Is level cell (cx, cy) a wall? A bordered room (row 0 is the score bar) with three
 // pillars. One map for the draw *and* both the player and enemy movement.
-fn solid(cx: u16, cy: u16) -> u16 {
-    let mut s = 0u16;
+fn solid(cx: u16, cy: u16) -> bool {
+    let mut s = false;
     if cx == 0u16 {
-        s = 1u16;
+        s = true;
     }
     if cx >= 31u16 {
-        s = 1u16;
+        s = true;
     }
     if cy <= 1u16 {
-        s = 1u16; // top wall (row 0 is the score bar, row 1 the wall)
+        s = true; // top wall (row 0 is the score bar, row 1 the wall)
     }
     if cy >= 23u16 {
-        s = 1u16; // bottom wall
+        s = true; // bottom wall
     }
     if cy == 8u16 {
         if cx >= 8u16 {
             if cx <= 12u16 {
-                s = 1u16; // pillar
+                s = true; // pillar
             }
         }
     }
     if cy == 15u16 {
         if cx >= 18u16 {
             if cx <= 24u16 {
-                s = 1u16; // pillar
+                s = true; // pillar
             }
         }
     }
     if cx == 16u16 {
         if cy >= 10u16 {
             if cy <= 14u16 {
-                s = 1u16; // pillar
+                s = true; // pillar
             }
         }
     }
@@ -59,18 +60,18 @@ fn solid(cx: u16, cy: u16) -> u16 {
 
 #[derive(Default)]
 struct Chase {
-    started: u16,
+    started: bool,
     x: u16,
     y: u16,
     tick: u16,
     score: u16, // coins collected
-    won: u16,
+    won: bool,
     dead: u16, // 0 = alive; otherwise a restart countdown
     cgx: [u16; 4],
     cgy: [u16; 4],
-    got: [u16; 4],
-    ex: [u16; 3], // enemy x's (parallel arrays = the actor pool)
-    ey: [u16; 3], // enemy y's
+    got: [u16; 4], // coin collected? (no `bool` arrays in the dialect yet)
+    ex: [u16; 3],  // enemy x's (parallel arrays = the actor pool)
+    ey: [u16; 3],  // enemy y's
 }
 
 impl Chase {
@@ -80,7 +81,7 @@ impl Chase {
         while cy < 24u16 {
             let mut cx = 0u16;
             while cx < 32u16 {
-                if solid(cx, cy) != 0u16 {
+                if solid(cx, cy) {
                     frame.fill_cell(cx as u8, cy as u8, Colour::White);
                 }
                 cx = cx + 1u16;
@@ -117,32 +118,32 @@ impl Chase {
     // as hand-inlining — no per-call cost.
     fn step_enemy(&mut self, e: u16) {
         let i = e as usize;
-        let mut moved = 0u16;
+        let mut moved = false;
         if self.ex[i] < self.x {
-            if solid(self.ex[i] + 1u16, self.ey[i]) == 0u16 {
+            if !solid(self.ex[i] + 1u16, self.ey[i]) {
                 self.ex[i] = self.ex[i] + 1u16;
-                moved = 1u16;
+                moved = true;
             }
         }
-        if moved == 0u16 {
+        if !moved {
             if self.ex[i] > self.x {
-                if solid(self.ex[i] - 1u16, self.ey[i]) == 0u16 {
+                if !solid(self.ex[i] - 1u16, self.ey[i]) {
                     self.ex[i] = self.ex[i] - 1u16;
-                    moved = 1u16;
+                    moved = true;
                 }
             }
         }
-        if moved == 0u16 {
+        if !moved {
             if self.ey[i] < self.y {
-                if solid(self.ex[i], self.ey[i] + 1u16) == 0u16 {
+                if !solid(self.ex[i], self.ey[i] + 1u16) {
                     self.ey[i] = self.ey[i] + 1u16;
-                    moved = 1u16;
+                    moved = true;
                 }
             }
         }
-        if moved == 0u16 {
+        if !moved {
             if self.ey[i] > self.y {
-                if solid(self.ex[i], self.ey[i] - 1u16) == 0u16 {
+                if !solid(self.ex[i], self.ey[i] - 1u16) {
                     self.ey[i] = self.ey[i] - 1u16;
                 }
             }
@@ -151,13 +152,13 @@ impl Chase {
 
     // Did any enemy land on the player? A value-returning `&self` method (its result binds to
     // a local at the call site, so it inlines too).
-    fn caught(&self) -> u16 {
-        let mut hit = 0u16;
+    fn caught(&self) -> bool {
+        let mut hit = false;
         let mut e = 0u16;
         while e < 3u16 {
             if self.ex[e as usize] == self.x {
                 if self.ey[e as usize] == self.y {
-                    hit = 1u16;
+                    hit = true;
                 }
             }
             e = e + 1u16;
@@ -168,14 +169,14 @@ impl Chase {
 
 impl Game for Chase {
     fn update(&mut self, input: &Input, frame: &mut Frame) {
-        if self.started == 0u16 {
+        if !self.started {
             frame.clear(Colour::Black);
             self.draw_room(frame);
             self.x = 15u16;
             self.y = 12u16;
             self.tick = 0u16;
             self.score = 0u16;
-            self.won = 0u16;
+            self.won = false;
             self.dead = 0u16;
             self.cgx[0] = 5u16;
             self.cgy[0] = 5u16;
@@ -196,7 +197,7 @@ impl Game for Chase {
             self.ex[2] = 15u16;
             self.ey[2] = 22u16;
             self.draw_actors(frame);
-            self.started = 1u16;
+            self.started = true;
         }
 
         if self.dead != 0u16 {
@@ -208,15 +209,15 @@ impl Game for Chase {
                 bx = bx + 1u16;
             }
             if input.held(Button::Fire) {
-                self.started = 0u16;
+                self.started = false;
             } else {
                 self.dead = self.dead - 1u16;
                 if self.dead == 0u16 {
-                    self.started = 0u16;
+                    self.started = false;
                 }
             }
         } else {
-            if self.won != 0u16 {
+            if self.won {
                 // YOU WIN — a green band.
                 let mut wx = 6u16;
                 while wx < 26u16 {
@@ -225,7 +226,7 @@ impl Game for Chase {
                     wx = wx + 1u16;
                 }
                 if input.held(Button::Fire) {
-                    self.started = 0u16;
+                    self.started = false;
                 }
             } else {
                 self.tick = self.tick + 1u16;
@@ -242,22 +243,22 @@ impl Game for Chase {
 
                     // Move the player on a held direction (into free cells only).
                     if input.held(Button::Left) {
-                        if solid(self.x - 1u16, self.y) == 0u16 {
+                        if !solid(self.x - 1u16, self.y) {
                             self.x = self.x - 1u16;
                         }
                     }
                     if input.held(Button::Right) {
-                        if solid(self.x + 1u16, self.y) == 0u16 {
+                        if !solid(self.x + 1u16, self.y) {
                             self.x = self.x + 1u16;
                         }
                     }
                     if input.held(Button::Up) {
-                        if solid(self.x, self.y - 1u16) == 0u16 {
+                        if !solid(self.x, self.y - 1u16) {
                             self.y = self.y - 1u16;
                         }
                     }
                     if input.held(Button::Down) {
-                        if solid(self.x, self.y + 1u16) == 0u16 {
+                        if !solid(self.x, self.y + 1u16) {
                             self.y = self.y + 1u16;
                         }
                     }
@@ -278,7 +279,7 @@ impl Game for Chase {
                         k = k + 1u16;
                     }
                     if self.score >= 4u16 {
-                        self.won = 1u16;
+                        self.won = true;
                     }
 
                     // Step every enemy toward the player (clean method per enemy; the single
@@ -291,8 +292,7 @@ impl Game for Chase {
                     }
 
                     // A touch is fatal — flash the player cell yellow (like snake).
-                    let hit = self.caught();
-                    if hit != 0u16 {
+                    if self.caught() {
                         self.dead = 40u16;
                         frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightYellow);
                     }
