@@ -15,55 +15,55 @@ struct Mover {
 
 impl Game for Mover {
     fn update(&mut self, input: &Input, frame: &mut Frame) {
-        if self.started == 0u8 {
+        if self.started == 0 {
             frame.clear(Colour::Blue);
-            self.x = 120u8;
-            self.y = 88u8;
-            self.started = 1u8;
+            self.x = 120;
+            self.y = 88;
+            self.started = 1;
         }
 
         // Erase the old blob.
-        let mut r = 0u8;
-        while r < 8u8 {
-            let mut c = 0u8;
-            while c < 8u8 {
+        let mut r = 0;
+        while r < 8 {
+            let mut c = 0;
+            while c < 8 {
                 frame.pixel(self.x + c, self.y + r, false);
-                c = c + 1u8;
+                c = c + 1;
             }
-            r = r + 1u8;
+            r = r + 1;
         }
 
         // Move on held keys, clamped to the screen.
         if input.held(Button::Left) {
-            if self.x > 2u8 {
-                self.x = self.x - 2u8;
+            if self.x > 2 {
+                self.x = self.x - 2;
             }
         }
         if input.held(Button::Right) {
-            if self.x < 246u8 {
-                self.x = self.x + 2u8;
+            if self.x < 246 {
+                self.x = self.x + 2;
             }
         }
         if input.held(Button::Up) {
-            if self.y > 2u8 {
-                self.y = self.y - 2u8;
+            if self.y > 2 {
+                self.y = self.y - 2;
             }
         }
         if input.held(Button::Down) {
-            if self.y < 182u8 {
-                self.y = self.y + 2u8;
+            if self.y < 182 {
+                self.y = self.y + 2;
             }
         }
 
         // Draw the blob at the new position.
-        let mut r2 = 0u8;
-        while r2 < 8u8 {
-            let mut c2 = 0u8;
-            while c2 < 8u8 {
+        let mut r2 = 0;
+        while r2 < 8 {
+            let mut c2 = 0;
+            while c2 < 8 {
                 frame.pixel(self.x + c2, self.y + r2, true);
-                c2 = c2 + 1u8;
+                c2 = c2 + 1;
             }
-            r2 = r2 + 1u8;
+            r2 = r2 + 1;
         }
     }
 }

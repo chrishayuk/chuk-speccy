@@ -22,37 +22,37 @@
 // cols 14..16, and three platforms. One map for drawing *and* physics — no drift.
 fn solid(cx: u16, cy: u16) -> bool {
     let mut s = false;
-    if cx == 0u16 {
+    if cx == 0 {
         s = true;
     }
-    if cx >= 31u16 {
+    if cx >= 31 {
         s = true;
     }
-    if cy >= 22u16 {
+    if cy >= 22 {
         s = true;
-        if cx >= 14u16 {
-            if cx <= 15u16 {
+        if cx >= 14 {
+            if cx <= 15 {
                 s = false; // the pit (a gap in the floor)
             }
         }
     }
-    if cy == 18u16 {
-        if cx >= 6u16 {
-            if cx <= 11u16 {
+    if cy == 18 {
+        if cx >= 6 {
+            if cx <= 11 {
                 s = true; // low platform
             }
         }
     }
-    if cy == 14u16 {
-        if cx >= 16u16 {
-            if cx <= 23u16 {
+    if cy == 14 {
+        if cx >= 16 {
+            if cx <= 23 {
                 s = true; // mid platform
             }
         }
     }
-    if cy == 10u16 {
-        if cx >= 24u16 {
-            if cx <= 29u16 {
+    if cy == 10 {
+        if cx >= 24 {
+            if cx <= 29 {
                 s = true; // high platform (the exit sits here)
             }
         }
@@ -78,30 +78,30 @@ struct Platform {
 impl Platform {
     // Draw the static world once: platforms (white), coins (yellow), exit (green).
     fn draw_level(&mut self, frame: &mut Frame) {
-        let mut cy = 1u16;
-        while cy < 24u16 {
-            let mut cx = 0u16;
-            while cx < 32u16 {
+        let mut cy = 1;
+        while cy < 24 {
+            let mut cx = 0;
+            while cx < 32 {
                 if solid(cx, cy) {
                     frame.fill_cell(cx as u8, cy as u8, Colour::White);
                 }
-                cx = cx + 1u16;
+                cx = cx + 1;
             }
-            cy = cy + 1u16;
+            cy = cy + 1;
         }
-        self.cgx[0] = 8u16;
-        self.cgy[0] = 17u16;
-        self.cgx[1] = 20u16;
-        self.cgy[1] = 13u16;
-        self.cgx[2] = 27u16;
-        self.cgy[2] = 9u16;
-        let mut k = 0u16;
-        while k < 3u16 {
-            self.got[k as usize] = 0u16;
+        self.cgx[0] = 8;
+        self.cgy[0] = 17;
+        self.cgx[1] = 20;
+        self.cgy[1] = 13;
+        self.cgx[2] = 27;
+        self.cgy[2] = 9;
+        let mut k = 0;
+        while k < 3 {
+            self.got[k as usize] = 0;
             frame.fill_cell(self.cgx[k as usize] as u8, self.cgy[k as usize] as u8, Colour::BrightYellow);
-            k = k + 1u16;
+            k = k + 1;
         }
-        frame.fill_cell(28u8, 9u8, Colour::BrightGreen); // the exit
+        frame.fill_cell(28, 9, Colour::BrightGreen); // the exit
     }
 }
 
@@ -110,24 +110,24 @@ impl Game for Platform {
         if !self.started {
             frame.clear(Colour::Black);
             self.draw_level(frame);
-            self.x = 2u16;
-            self.y = 21u16;
-            self.jump = 0u16;
-            self.tick = 0u16;
-            self.score = 0u16;
+            self.x = 2;
+            self.y = 21;
+            self.jump = 0;
+            self.tick = 0;
+            self.score = 0;
             self.won = false;
-            self.dead = 0u16;
+            self.dead = 0;
             frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightCyan);
-            frame.text_u16(0u8, 0u8, self.score); // numeric score (ROM-font, shared routine)
+            frame.text_u16(0, 0, self.score); // numeric score (ROM-font, shared routine)
             self.started = true;
         }
 
-        if self.dead != 0u16 {
+        if self.dead != 0 {
             if input.held(Button::Fire) {
                 self.started = false;
             } else {
-                self.dead = self.dead - 1u16;
-                if self.dead == 0u16 {
+                self.dead = self.dead - 1;
+                if self.dead == 0 {
                     self.started = false;
                 }
             }
@@ -137,96 +137,96 @@ impl Game for Platform {
                     self.started = false;
                 }
             } else {
-                self.tick = self.tick + 1u16;
-                if self.tick >= 3u16 {
-                    self.tick = 0u16;
+                self.tick = self.tick + 1;
+                if self.tick >= 3 {
+                    self.tick = 0;
 
                     // Erase the player at the old (empty) cell.
                     frame.clear_cell(self.x as u8, self.y as u8);
 
                     // Walk left / right when the target cell is free.
                     if input.held(Button::Left) {
-                        if self.x > 0u16 {
-                            if !solid(self.x - 1u16, self.y) {
-                                self.x = self.x - 1u16;
+                        if self.x > 0 {
+                            if !solid(self.x - 1, self.y) {
+                                self.x = self.x - 1;
                             }
                         }
                     }
                     if input.held(Button::Right) {
-                        if self.x < 31u16 {
-                            if !solid(self.x + 1u16, self.y) {
-                                self.x = self.x + 1u16;
+                        if self.x < 31 {
+                            if !solid(self.x + 1, self.y) {
+                                self.x = self.x + 1;
                             }
                         }
                     }
 
                     // On the ground if the cell below is solid (or we're at the bottom).
                     let mut onground = false;
-                    if self.y >= 23u16 {
+                    if self.y >= 23 {
                         onground = true;
                     }
-                    if solid(self.x, self.y + 1u16) {
+                    if solid(self.x, self.y + 1) {
                         onground = true;
                     }
 
                     // Start a jump (rise 5 cells) from the ground.
-                    if self.jump == 0u16 {
+                    if self.jump == 0 {
                         if onground {
                             if input.held(Button::Up) {
-                                self.jump = 5u16;
+                                self.jump = 5;
                             }
                             if input.held(Button::Fire) {
-                                self.jump = 5u16;
+                                self.jump = 5;
                             }
                         }
                     }
 
                     // Rise while jumping (until a ceiling), else fall under gravity.
-                    if self.jump > 0u16 {
-                        if self.y > 1u16 {
-                            if !solid(self.x, self.y - 1u16) {
-                                self.y = self.y - 1u16;
-                                self.jump = self.jump - 1u16;
+                    if self.jump > 0 {
+                        if self.y > 1 {
+                            if !solid(self.x, self.y - 1) {
+                                self.y = self.y - 1;
+                                self.jump = self.jump - 1;
                             } else {
-                                self.jump = 0u16;
+                                self.jump = 0;
                             }
                         } else {
-                            self.jump = 0u16;
+                            self.jump = 0;
                         }
                     } else {
-                        if !solid(self.x, self.y + 1u16) {
-                            if self.y >= 23u16 {
-                                self.dead = 40u16; // fell off the bottom (the pit)
+                        if !solid(self.x, self.y + 1) {
+                            if self.y >= 23 {
+                                self.dead = 40; // fell off the bottom (the pit)
                             } else {
-                                self.y = self.y + 1u16;
+                                self.y = self.y + 1;
                             }
                         }
                     }
 
                     // Collect a coin at the new cell.
-                    let mut k = 0u16;
-                    while k < 3u16 {
-                        if self.got[k as usize] == 0u16 {
+                    let mut k = 0;
+                    while k < 3 {
+                        if self.got[k as usize] == 0 {
                             if self.cgx[k as usize] == self.x {
                                 if self.cgy[k as usize] == self.y {
-                                    self.got[k as usize] = 1u16;
-                                    self.score = self.score + 1u16;
-                                    frame.text_u16(0u8, 0u8, self.score); // numeric score
+                                    self.got[k as usize] = 1;
+                                    self.score = self.score + 1;
+                                    frame.text_u16(0, 0, self.score); // numeric score
                                 }
                             }
                         }
-                        k = k + 1u16;
+                        k = k + 1;
                     }
 
                     // Reach the exit cell → win.
-                    if self.x == 28u16 {
-                        if self.y == 9u16 {
+                    if self.x == 28 {
+                        if self.y == 9 {
                             self.won = true;
                         }
                     }
 
                     // Redraw the player (unless this step killed it).
-                    if self.dead == 0u16 {
+                    if self.dead == 0 {
                         frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightCyan);
                     }
                 }

@@ -18,11 +18,11 @@ struct Starter {
 
 impl Game for Starter {
     fn update(&mut self, input: &Input, frame: &mut Frame) {
-        if self.started == 0u16 {
+        if self.started == 0 {
             frame.clear(Colour::Black);
-            self.x = 16u16;
-            self.y = 12u16;
-            self.started = 1u16;
+            self.x = 16;
+            self.y = 12;
+            self.started = 1;
         }
 
         // Erase the blob at its current cell (so it leaves no trail).
@@ -30,23 +30,23 @@ impl Game for Starter {
 
         // Move on held keys, clamped to the grid.
         if input.held(Button::Left) {
-            if self.x > 0u16 {
-                self.x = self.x - 1u16;
+            if self.x > 0 {
+                self.x = self.x - 1;
             }
         }
         if input.held(Button::Right) {
-            if self.x < 31u16 {
-                self.x = self.x + 1u16;
+            if self.x < 31 {
+                self.x = self.x + 1;
             }
         }
         if input.held(Button::Up) {
-            if self.y > 0u16 {
-                self.y = self.y - 1u16;
+            if self.y > 0 {
+                self.y = self.y - 1;
             }
         }
         if input.held(Button::Down) {
-            if self.y < 23u16 {
-                self.y = self.y + 1u16;
+            if self.y < 23 {
+                self.y = self.y + 1;
             }
         }
 

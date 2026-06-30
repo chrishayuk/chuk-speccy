@@ -22,35 +22,35 @@
 // pillars. One map for the draw *and* both the player and enemy movement.
 fn solid(cx: u16, cy: u16) -> bool {
     let mut s = false;
-    if cx == 0u16 {
+    if cx == 0 {
         s = true;
     }
-    if cx >= 31u16 {
+    if cx >= 31 {
         s = true;
     }
-    if cy <= 1u16 {
+    if cy <= 1 {
         s = true; // top wall (row 0 is the score bar, row 1 the wall)
     }
-    if cy >= 23u16 {
+    if cy >= 23 {
         s = true; // bottom wall
     }
-    if cy == 8u16 {
-        if cx >= 8u16 {
-            if cx <= 12u16 {
+    if cy == 8 {
+        if cx >= 8 {
+            if cx <= 12 {
                 s = true; // pillar
             }
         }
     }
-    if cy == 15u16 {
-        if cx >= 18u16 {
-            if cx <= 24u16 {
+    if cy == 15 {
+        if cx >= 18 {
+            if cx <= 24 {
                 s = true; // pillar
             }
         }
     }
-    if cx == 16u16 {
-        if cy >= 10u16 {
-            if cy <= 14u16 {
+    if cx == 16 {
+        if cy >= 10 {
+            if cy <= 14 {
                 s = true; // pillar
             }
         }
@@ -77,37 +77,37 @@ struct Chase {
 impl Chase {
     // Draw the static room once (white walls).
     fn draw_room(&self, frame: &mut Frame) {
-        let mut cy = 1u16;
-        while cy < 24u16 {
-            let mut cx = 0u16;
-            while cx < 32u16 {
+        let mut cy = 1;
+        while cy < 24 {
+            let mut cx = 0;
+            while cx < 32 {
                 if solid(cx, cy) {
                     frame.fill_cell(cx as u8, cy as u8, Colour::White);
                 }
-                cx = cx + 1u16;
+                cx = cx + 1;
             }
-            cy = cy + 1u16;
+            cy = cy + 1;
         }
     }
 
     // Redraw the dynamic layer: uncollected coins (yellow), enemies (magenta), player
     // (cyan). Cheap (a handful of cells), so it runs every tick on a real Z80.
     fn draw_actors(&self, frame: &mut Frame) {
-        let mut k = 0u16;
-        while k < 4u16 {
-            if self.got[k as usize] == 0u16 {
+        let mut k = 0;
+        while k < 4 {
+            if self.got[k as usize] == 0 {
                 frame.fill_cell(
                     self.cgx[k as usize] as u8,
                     self.cgy[k as usize] as u8,
                     Colour::BrightYellow,
                 );
             }
-            k = k + 1u16;
+            k = k + 1;
         }
-        let mut e = 0u16;
-        while e < 3u16 {
+        let mut e = 0;
+        while e < 3 {
             frame.fill_cell(self.ex[e as usize] as u8, self.ey[e as usize] as u8, Colour::BrightMagenta);
-            e = e + 1u16;
+            e = e + 1;
         }
         frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightCyan);
     }
@@ -120,31 +120,31 @@ impl Chase {
         let i = e as usize;
         let mut moved = false;
         if self.ex[i] < self.x {
-            if !solid(self.ex[i] + 1u16, self.ey[i]) {
-                self.ex[i] = self.ex[i] + 1u16;
+            if !solid(self.ex[i] + 1, self.ey[i]) {
+                self.ex[i] = self.ex[i] + 1;
                 moved = true;
             }
         }
         if !moved {
             if self.ex[i] > self.x {
-                if !solid(self.ex[i] - 1u16, self.ey[i]) {
-                    self.ex[i] = self.ex[i] - 1u16;
+                if !solid(self.ex[i] - 1, self.ey[i]) {
+                    self.ex[i] = self.ex[i] - 1;
                     moved = true;
                 }
             }
         }
         if !moved {
             if self.ey[i] < self.y {
-                if !solid(self.ex[i], self.ey[i] + 1u16) {
-                    self.ey[i] = self.ey[i] + 1u16;
+                if !solid(self.ex[i], self.ey[i] + 1) {
+                    self.ey[i] = self.ey[i] + 1;
                     moved = true;
                 }
             }
         }
         if !moved {
             if self.ey[i] > self.y {
-                if !solid(self.ex[i], self.ey[i] - 1u16) {
-                    self.ey[i] = self.ey[i] - 1u16;
+                if !solid(self.ex[i], self.ey[i] - 1) {
+                    self.ey[i] = self.ey[i] - 1;
                 }
             }
         }
@@ -154,14 +154,14 @@ impl Chase {
     // a local at the call site, so it inlines too).
     fn caught(&self) -> bool {
         let mut hit = false;
-        let mut e = 0u16;
-        while e < 3u16 {
+        let mut e = 0;
+        while e < 3 {
             if self.ex[e as usize] == self.x {
                 if self.ey[e as usize] == self.y {
                     hit = true;
                 }
             }
-            e = e + 1u16;
+            e = e + 1;
         }
         hit
     }
@@ -172,128 +172,128 @@ impl Game for Chase {
         if !self.started {
             frame.clear(Colour::Black);
             self.draw_room(frame);
-            self.x = 15u16;
-            self.y = 12u16;
-            self.tick = 0u16;
-            self.score = 0u16;
+            self.x = 15;
+            self.y = 12;
+            self.tick = 0;
+            self.score = 0;
             self.won = false;
-            self.dead = 0u16;
-            self.cgx[0] = 5u16;
-            self.cgy[0] = 5u16;
-            self.cgx[1] = 26u16;
-            self.cgy[1] = 5u16;
-            self.cgx[2] = 5u16;
-            self.cgy[2] = 20u16;
-            self.cgx[3] = 26u16;
-            self.cgy[3] = 20u16;
-            self.got[0] = 0u16;
-            self.got[1] = 0u16;
-            self.got[2] = 0u16;
-            self.got[3] = 0u16;
-            self.ex[0] = 2u16;
-            self.ey[0] = 2u16;
-            self.ex[1] = 29u16;
-            self.ey[1] = 2u16;
-            self.ex[2] = 15u16;
-            self.ey[2] = 22u16;
+            self.dead = 0;
+            self.cgx[0] = 5;
+            self.cgy[0] = 5;
+            self.cgx[1] = 26;
+            self.cgy[1] = 5;
+            self.cgx[2] = 5;
+            self.cgy[2] = 20;
+            self.cgx[3] = 26;
+            self.cgy[3] = 20;
+            self.got[0] = 0;
+            self.got[1] = 0;
+            self.got[2] = 0;
+            self.got[3] = 0;
+            self.ex[0] = 2;
+            self.ey[0] = 2;
+            self.ex[1] = 29;
+            self.ey[1] = 2;
+            self.ex[2] = 15;
+            self.ey[2] = 22;
             self.draw_actors(frame);
             self.started = true;
         }
 
-        if self.dead != 0u16 {
+        if self.dead != 0 {
             // GAME OVER — a red band across the middle (no text in the pure envelope).
-            let mut bx = 6u16;
-            while bx < 26u16 {
-                frame.fill_cell(bx as u8, 11u8, Colour::BrightRed);
-                frame.fill_cell(bx as u8, 12u8, Colour::BrightRed);
-                bx = bx + 1u16;
+            let mut bx = 6;
+            while bx < 26 {
+                frame.fill_cell(bx as u8, 11, Colour::BrightRed);
+                frame.fill_cell(bx as u8, 12, Colour::BrightRed);
+                bx = bx + 1;
             }
             if input.held(Button::Fire) {
                 self.started = false;
             } else {
-                self.dead = self.dead - 1u16;
-                if self.dead == 0u16 {
+                self.dead = self.dead - 1;
+                if self.dead == 0 {
                     self.started = false;
                 }
             }
         } else {
             if self.won {
                 // YOU WIN — a green band.
-                let mut wx = 6u16;
-                while wx < 26u16 {
-                    frame.fill_cell(wx as u8, 11u8, Colour::BrightGreen);
-                    frame.fill_cell(wx as u8, 12u8, Colour::BrightGreen);
-                    wx = wx + 1u16;
+                let mut wx = 6;
+                while wx < 26 {
+                    frame.fill_cell(wx as u8, 11, Colour::BrightGreen);
+                    frame.fill_cell(wx as u8, 12, Colour::BrightGreen);
+                    wx = wx + 1;
                 }
                 if input.held(Button::Fire) {
                     self.started = false;
                 }
             } else {
-                self.tick = self.tick + 1u16;
-                if self.tick >= 4u16 {
-                    self.tick = 0u16;
+                self.tick = self.tick + 1;
+                if self.tick >= 4 {
+                    self.tick = 0;
 
                     // Erase the player and enemies at their old cells.
                     frame.clear_cell(self.x as u8, self.y as u8);
-                    let mut e0 = 0u16;
-                    while e0 < 3u16 {
+                    let mut e0 = 0;
+                    while e0 < 3 {
                         frame.clear_cell(self.ex[e0 as usize] as u8, self.ey[e0 as usize] as u8);
-                        e0 = e0 + 1u16;
+                        e0 = e0 + 1;
                     }
 
                     // Move the player on a held direction (into free cells only).
                     if input.held(Button::Left) {
-                        if !solid(self.x - 1u16, self.y) {
-                            self.x = self.x - 1u16;
+                        if !solid(self.x - 1, self.y) {
+                            self.x = self.x - 1;
                         }
                     }
                     if input.held(Button::Right) {
-                        if !solid(self.x + 1u16, self.y) {
-                            self.x = self.x + 1u16;
+                        if !solid(self.x + 1, self.y) {
+                            self.x = self.x + 1;
                         }
                     }
                     if input.held(Button::Up) {
-                        if !solid(self.x, self.y - 1u16) {
-                            self.y = self.y - 1u16;
+                        if !solid(self.x, self.y - 1) {
+                            self.y = self.y - 1;
                         }
                     }
                     if input.held(Button::Down) {
-                        if !solid(self.x, self.y + 1u16) {
-                            self.y = self.y + 1u16;
+                        if !solid(self.x, self.y + 1) {
+                            self.y = self.y + 1;
                         }
                     }
 
                     // Collect a coin under the player.
-                    let mut k = 0u16;
-                    while k < 4u16 {
-                        if self.got[k as usize] == 0u16 {
+                    let mut k = 0;
+                    while k < 4 {
+                        if self.got[k as usize] == 0 {
                             if self.cgx[k as usize] == self.x {
                                 if self.cgy[k as usize] == self.y {
-                                    self.got[k as usize] = 1u16;
-                                    self.score = self.score + 1u16;
+                                    self.got[k as usize] = 1;
+                                    self.score = self.score + 1;
                                     // Score bar: one cyan cell per coin along row 0.
-                                    frame.fill_cell((self.score - 1u16) as u8, 0u8, Colour::BrightCyan);
+                                    frame.fill_cell((self.score - 1) as u8, 0, Colour::BrightCyan);
                                 }
                             }
                         }
-                        k = k + 1u16;
+                        k = k + 1;
                     }
-                    if self.score >= 4u16 {
+                    if self.score >= 4 {
                         self.won = true;
                     }
 
                     // Step every enemy toward the player (clean method per enemy; the single
                     // call site inlines with arg substitution + slot reuse, so the tape is as
                     // compact as hand-inlining).
-                    let mut e = 0u16;
-                    while e < 3u16 {
+                    let mut e = 0;
+                    while e < 3 {
                         self.step_enemy(e);
-                        e = e + 1u16;
+                        e = e + 1;
                     }
 
                     // A touch is fatal — flash the player cell yellow (like snake).
                     if self.caught() {
-                        self.dead = 40u16;
+                        self.dead = 40;
                         frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightYellow);
                     }
 

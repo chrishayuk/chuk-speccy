@@ -23,110 +23,110 @@ struct Reach {
 
 impl Game for Reach {
     fn update(&mut self, input: &Input, frame: &mut Frame) {
-        if self.started == 0u16 {
+        if self.started == 0 {
             frame.clear(Colour::Black); // one-time
-            self.px = 16u16;
-            self.py = 12u16;
-            self.tx = 5u16;
-            self.ty = 5u16;
-            self.seed = 1u16;
-            self.started = 1u16;
+            self.px = 16;
+            self.py = 12;
+            self.tx = 5;
+            self.ty = 5;
+            self.seed = 1;
+            self.started = 1;
         }
 
         // Erase the player blob at its current (last-drawn) cell.
-        let ex = self.px * 8u16;
-        let ey = self.py * 8u16;
-        let mut r = 0u16;
-        while r < 6u16 {
-            let mut c = 0u16;
-            while c < 6u16 {
+        let ex = self.px * 8;
+        let ey = self.py * 8;
+        let mut r = 0;
+        while r < 6 {
+            let mut c = 0;
+            while c < 6 {
                 frame.pixel(ex + c, ey + r, false);
-                c = c + 1u16;
+                c = c + 1;
             }
-            r = r + 1u16;
+            r = r + 1;
         }
 
         // One cell per frame per held direction.
         if input.held(Button::Left) {
-            if self.px > 0u16 {
-                self.px = self.px - 1u16;
+            if self.px > 0 {
+                self.px = self.px - 1;
             }
         }
         if input.held(Button::Right) {
-            if self.px < 31u16 {
-                self.px = self.px + 1u16;
+            if self.px < 31 {
+                self.px = self.px + 1;
             }
         }
         if input.held(Button::Up) {
-            if self.py > 0u16 {
-                self.py = self.py - 1u16;
+            if self.py > 0 {
+                self.py = self.py - 1;
             }
         }
         if input.held(Button::Down) {
-            if self.py < 23u16 {
-                self.py = self.py + 1u16;
+            if self.py < 23 {
+                self.py = self.py + 1;
             }
         }
 
         // Within one cell of the target? Score, erase it, then jump it via a small
         // LCG. A ±1 range (not exact equality) keeps scoring robust to the coarse,
         // multi-frame update cadence (no overshoot-and-miss).
-        let mut dx = 0u16;
+        let mut dx = 0;
         if self.px > self.tx {
             dx = self.px - self.tx;
         } else {
             dx = self.tx - self.px;
         }
-        let mut dy = 0u16;
+        let mut dy = 0;
         if self.py > self.ty {
             dy = self.py - self.ty;
         } else {
             dy = self.ty - self.py;
         }
-        if dx < 2u16 {
-            if dy < 2u16 {
-                let ox = self.tx * 8u16;
-                let oy = self.ty * 8u16;
-                let mut er = 0u16;
-                while er < 6u16 {
-                    let mut ec = 0u16;
-                    while ec < 6u16 {
+        if dx < 2 {
+            if dy < 2 {
+                let ox = self.tx * 8;
+                let oy = self.ty * 8;
+                let mut er = 0;
+                while er < 6 {
+                    let mut ec = 0;
+                    while ec < 6 {
                         frame.pixel(ox + ec, oy + er, false);
-                        ec = ec + 1u16;
+                        ec = ec + 1;
                     }
-                    er = er + 1u16;
+                    er = er + 1;
                 }
-                self.score = self.score + 1u16;
-                self.seed = self.seed * 75u16 + 74u16;
-                self.tx = self.seed % 30u16 + 1u16;
-                self.ty = self.seed % 20u16 + 1u16;
+                self.score = self.score + 1;
+                self.seed = self.seed * 75 + 74;
+                self.tx = self.seed % 30 + 1;
+                self.ty = self.seed % 20 + 1;
             }
         }
 
         // Draw the target blob.
-        let tpx = self.tx * 8u16;
-        let tpy = self.ty * 8u16;
-        let mut tr = 0u16;
-        while tr < 6u16 {
-            let mut tc = 0u16;
-            while tc < 6u16 {
+        let tpx = self.tx * 8;
+        let tpy = self.ty * 8;
+        let mut tr = 0;
+        while tr < 6 {
+            let mut tc = 0;
+            while tc < 6 {
                 frame.pixel(tpx + tc, tpy + tr, true);
-                tc = tc + 1u16;
+                tc = tc + 1;
             }
-            tr = tr + 1u16;
+            tr = tr + 1;
         }
 
         // Draw the player blob at its new cell.
-        let ppx = self.px * 8u16;
-        let ppy = self.py * 8u16;
-        let mut pr = 0u16;
-        while pr < 6u16 {
-            let mut pc = 0u16;
-            while pc < 6u16 {
+        let ppx = self.px * 8;
+        let ppy = self.py * 8;
+        let mut pr = 0;
+        while pr < 6 {
+            let mut pc = 0;
+            while pc < 6 {
                 frame.pixel(ppx + pc, ppy + pr, true);
-                pc = pc + 1u16;
+                pc = pc + 1;
             }
-            pr = pr + 1u16;
+            pr = pr + 1;
         }
     }
 }

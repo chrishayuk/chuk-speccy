@@ -21,56 +21,56 @@ struct Bounce {
 
 impl Game for Bounce {
     fn update(&mut self, _input: &Input, frame: &mut Frame) {
-        if self.started == 0u8 {
+        if self.started == 0 {
             frame.clear(Colour::Black);
-            self.x = 120u8;
-            self.y = 88u8;
-            self.started = 1u8;
+            self.x = 120;
+            self.y = 88;
+            self.started = 1;
         }
 
         // Erase the 6x6 blob at the old position.
-        let mut r = 0u8;
-        while r < 6u8 {
-            let mut c = 0u8;
-            while c < 6u8 {
+        let mut r = 0;
+        while r < 6 {
+            let mut c = 0;
+            while c < 6 {
                 frame.pixel(self.x + c, self.y + r, false);
-                c = c + 1u8;
+                c = c + 1;
             }
-            r = r + 1u8;
+            r = r + 1;
         }
 
-        if self.dx == 0u8 {
-            self.x = self.x + 1u8;
-            if self.x >= 240u8 {
-                self.dx = 1u8;
+        if self.dx == 0 {
+            self.x = self.x + 1;
+            if self.x >= 240 {
+                self.dx = 1;
             }
         } else {
-            self.x = self.x - 1u8;
-            if self.x <= 4u8 {
-                self.dx = 0u8;
+            self.x = self.x - 1;
+            if self.x <= 4 {
+                self.dx = 0;
             }
         }
-        if self.dy == 0u8 {
-            self.y = self.y + 1u8;
-            if self.y >= 178u8 {
-                self.dy = 1u8;
+        if self.dy == 0 {
+            self.y = self.y + 1;
+            if self.y >= 178 {
+                self.dy = 1;
             }
         } else {
-            self.y = self.y - 1u8;
-            if self.y <= 4u8 {
-                self.dy = 0u8;
+            self.y = self.y - 1;
+            if self.y <= 4 {
+                self.dy = 0;
             }
         }
 
         // Draw the blob at the new position.
-        let mut r2 = 0u8;
-        while r2 < 6u8 {
-            let mut c2 = 0u8;
-            while c2 < 6u8 {
+        let mut r2 = 0;
+        while r2 < 6 {
+            let mut c2 = 0;
+            while c2 < 6 {
                 frame.pixel(self.x + c2, self.y + r2, true);
-                c2 = c2 + 1u8;
+                c2 = c2 + 1;
             }
-            r2 = r2 + 1u8;
+            r2 = r2 + 1;
         }
     }
 }
