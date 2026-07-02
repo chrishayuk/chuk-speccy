@@ -48,6 +48,17 @@ impl StateView {
         }
     }
 
+    /// Build a synthetic view with **array** fields (for tests over a hand-made state
+    /// that includes `[u16; N]` fields — [`StateView::from_pairs`] is scalar-only).
+    pub fn from_arrays(fields: &[(&str, &[u16])]) -> StateView {
+        StateView {
+            values: fields
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), v.to_vec()))
+                .collect(),
+        }
+    }
+
     fn elems(&self, name: &str) -> Option<&[u16]> {
         self.values
             .iter()
