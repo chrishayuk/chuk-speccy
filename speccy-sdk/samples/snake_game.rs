@@ -203,12 +203,11 @@ impl Game for Snake {
                         self.score = self.score + 1;
                         self.draw_score(frame);
 
-                        // Respawn food on a FREE cell (rows 1..24): re-roll the xorshift
-                        // until it lands off the body, so it can't spawn under the snake.
+                        // Respawn food on a FREE cell (rows 1..24): re-roll the shared
+                        // xorshift (`rng_next_u16`) until it lands off the body, so it
+                        // can't spawn under the snake.
                         loop {
-                            self.rng = self.rng ^ (self.rng << 7);
-                            self.rng = self.rng ^ (self.rng >> 9);
-                            self.rng = self.rng ^ (self.rng << 8);
+                            self.rng = rng_next_u16(self.rng);
                             let fx = self.rng % 32;
                             let fy = (self.rng / 32) % 23 + 1;
                             let mut on_body = 0;

@@ -17,6 +17,8 @@ pub const GAME_STATE: u16 = 0xB000;
 /// `impl Game`. `Frame`/`Input` method calls route to these functions; they draw
 /// straight into screen RAM via `poke`/`peek`. Mirrors this crate's runtime
 /// `Colour`/`Button`/`Frame`/`Input` — kept here, next to the types it mirrors.
+/// `rng_next_u16` needs no routing (a plain function call, not a method): it mirrors
+/// [`crate::rng_next_u16`] so a game calls it unchanged under `rustc` and `rustz80`.
 const PRELUDE: &str = r#"
 enum Colour {
     Black = 0, Blue = 1, Red = 2, Magenta = 3, Green = 4, Cyan = 5, Yellow = 6, White = 7,
@@ -116,6 +118,13 @@ fn __input_held(b: u16) -> u16 {
     if b == 8u16  { h = __key(61438u16, 4u16)  | __key(57342u16, 1u16); }
     if b == 16u16 { h = __key(61438u16, 1u16)  | __key(32766u16, 1u16); }
     h
+}
+fn rng_next_u16(state: u16) -> u16 {
+    let mut x = state;
+    x = x ^ (x << 7u16);
+    x = x ^ (x >> 9u16);
+    x = x ^ (x << 8u16);
+    x
 }
 "#;
 
@@ -315,5 +324,23 @@ impl Game for Walk {
 "#;
         assert!(has_game(src));
         compile_game(src, "WALK").expect("solid-cell game compiles pure");
+    }
+
+    #[test]
+    fn shared_rng_compiles_pure() {
+        // A game calling the shared `rng_next_u16` (no inline hand-rolled xorshift)
+        // compiles pure — the prelude's copy needs no `PreludeConfig` routing since
+        // it's a plain function call, not a method on a host type.
+        let src = r#"
+#[derive(Default)]
+struct Roll { seed: u16 }
+impl Game for Roll {
+    fn update(&mut self, _input: &Input, _frame: &mut Frame) {
+        self.seed = rng_next_u16(self.seed);
+    }
+}
+"#;
+        assert!(has_game(src));
+        compile_game(src, "ROLL").expect("shared-rng game compiles pure");
     }
 }
