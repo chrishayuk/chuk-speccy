@@ -133,11 +133,14 @@ over one shared `Supervisor`.
   backend of the fidelity dial; the **pure-`.tap`** backend is the `rustz80`
   compiler (**B2**), and a z80-native blitter backend is a later option.
 - [x] **L0** toolchain — **built.** `speccy-new` (scaffold a dual-compile game from a
-  template) → `speccy-compile` (source → `.tap` + `.sym.toml`) → `speccy-run` (source/`.tap`
-  → boot on the real ROM → an animated **GIF** of it running, headless, in one command) →
-  `speccy-asset` (PNG → Spectrum `.scr` + colour-clash report). `speccy-run` reuses the
-  headless `spectrum` machine + `display::gif` from the SDK behind the `compile` feature, so
-  the windowed frontend stays `rustz80`-free; `speccy-gui` still runs a `.tap` in a window.
+  template, now **5 templates**: `blank`/`snake`/`platform`/`chase`/`maze`) → `speccy-compile`
+  (source → `.tap` + `.sym.toml`) → `speccy-run` (source/`.tap` → boot on the real ROM → an
+  animated **GIF** of it running, headless, in one command) → `speccy-asset` (PNG → Spectrum
+  `.scr` + colour-clash report, plus a **`bake`** subcommand: PNG → `const Tile` sheets,
+  bit-identical to the `.scr` reducer). `speccy-run` reuses the headless `spectrum` machine +
+  `display::gif` from the SDK behind the `compile` feature, so the windowed frontend stays
+  `rustz80`-free; `speccy-gui` still runs a `.tap` in a window. `speccy_sdk::render` is the
+  feature-free host counterpart — a host `Game` straight to GIF, no compiler needed.
 - [ ] **L1** framework over z88dk (sprites clash-aware + mono, tilemap, input, beeper SFX, fixed-point, RNG).
 - [x] **L2** trap ABI — `ED FE` (`HOSTCALL`, id in `A`) → defaulted `Bus::host_trap`
   → `spectrum::host` registry (`HostCalls`/`HostCtx`/`FnTable`) → PyO3 bridge
@@ -226,11 +229,20 @@ dial is never multiplied before it's watched close:
   data-free solid-cell sprite with the colour passed **by value** (3 args, fits the 3-register
   convention), routed through `PreludeConfig` to `__frame_fill_cell`/`__frame_clear_cell` and
   proven to compile pure (`compile::tests::solid_cell_draw_compiles_pure`); the demo Snake's
-  body/food now draw through it ✓. *Remaining for a fully-pure Snake:* a dialect **`Rng`** in
-  the prelude (so a pure game can call the RNG methods, not just the host one), and real
-  **tile-bitmap / font-text by address** (`Frame::tile`/`text` of a `&Tile`/`&str`) — which
-  needs a `&CONST → addr` data section in the compiler, now **cell80's** roadmap, not this
-  repo's. `Fx8_8` lands with the kit, not here.
+  body/food now draw through it ✓. Done since: a shared **`rng_next_u16`** — one `u16` xorshift
+  step defined once in the dialect prelude and once as a plain host function of the same name, so
+  `rng_next_u16(self.rng)` compiles unchanged under `rustc` and `rustz80` (`compile::tests::
+  shared_rng_compiles_pure`); `snake_game.rs` now calls it instead of hand-rolling. *Remaining for
+  a fully-pure Snake:* real **tile-bitmap / font-text by address** (`Frame::tile`/`text` of a
+  `&Tile`/`&str`) — which needs a `&CONST → addr` data section in the compiler, now **cell80's**
+  roadmap, not this repo's. `Fx8_8` lands with the kit, not here.
+  *The seam has since been proven across more genres, all wired into `tests/dial.rs`:*
+  **`platform`** (gravity + tile collision, no signed ints, a ROM-font numeric score via
+  `Frame::text_u16`), **`chase`** (three homing enemies over a parallel-array actor pool,
+  decomposed into `step_enemy`/`caught` methods the inliner folds back down), and **`maze`**
+  (room-to-room scene-flow via one `wall(cx, cy, room)` function gating both drawing and
+  collision, decomposed into `draw_maze`/`enter_room`/`move_player`). All three boot/animate
+  on the real 48K ROM and ship as `speccy new` templates.
 - [x] **The symbol map — emitted + round-tripped** (the riskiest bit, *done*).
   `rustz80` emits a full-layout `.sym.toml` (every field a `u16` slot at
   `GAME_STATE + i*2`) via `compile_game_with_symbols`, sidecar'd by `speccy-compile`;
@@ -261,10 +273,31 @@ dial is never multiplied before it's watched close:
   agent (head → food, read *only* off the symbol map: `bx[0]`/`food_x`/`dir`) grows the snake
   while random/no-op never eat (`no-op 0 = random 0 < homing 9` on real hardware). Two games,
   same `SpectrumEnv` + agent loop — the agentability story generalises past the toy task.
+  **...and a third:** `speccy-env/tests/maze_bench.rs` makes the pure `maze` agentable — a
+  host twin scores room progress (`room`/`won`), and a **BFS pathfinding** agent (a planner,
+  not a heuristic) reads only `x`/`y`/`room` off the symbol map, shortest-paths to the exit
+  over a host mirror of the wall map, and clears both rooms (`no-op 0 < random < planner 2`
+  on real hardware). Three agent shapes now share one env/agent loop — scripted, greedy-homing,
+  and planning.
   **Deterministic replay proven:** `Recording`/`Replay` agents + `replay_reproduces_the_homing_episode`
   record the homing episode and replay the keys — bit-exact `reset` + the same actions reproduce the
   reward exactly (the RL-safe `reset` / replayable-repro cornerstone, end to end through an agent).
-  *Remaining:* memory-probe / vision-LLM agents + more games on the table.
+  **A fourth and fifth game, and a lesson about reward design:** `speccy-env/tests/chase_bench.rs`
+  and `platform_bench.rs` make `chase` (three homing enemies at the player's own speed) and
+  `platform` (gravity + tile collision) agentable — but coin-collection turned out to be the
+  wrong yardstick for either. `chase`'s enemies give a real player no speed edge, so outright
+  coin-grabbing is a genuinely hard multi-pursuer evasion problem; the honest, tractable measure
+  is **survival time** (a flee-then-forage agent reading the enemy/coin arrays outlives both
+  no-op and random). `platform`'s narrow platforms are a precision-jump problem (rise and drift
+  both advance one cell/tick, so a jump into a low platform's underside either bonks the ceiling
+  or clears it only by drifting past the landing zone first) — so the measure there is **net
+  rightward progress** (unclamped per-step deltas, which telescope to final − initial position,
+  so a random agent's jitter cancels out instead of "progressing" sideways). Both benches carry a
+  host mirror of the level's `solid(cx, cy)`, same pattern as `maze_bench`'s wall map. Five games
+  now share one env/agent loop, and reward shaping — not just the agent — is part of the
+  agentability story: what "better than random" means depends on what the game actually makes
+  hard.
+  *Remaining:* memory-probe / vision-LLM agents; landing precisely on `platform`'s coins.
   `DaleyThompsonEnv` is the **SOMA B1⊥B2 demonstrator**.
 - [~] **Input as one source of truth + demo ROMs** (the build→extract loop, spec 08 §4).
   `Controls` (remappable `Button`↔keys) extracted into the SDK; the demo games moved
@@ -291,11 +324,15 @@ dial is never multiplied before it's watched close:
   `display::AUTHENTIC` — no duplicate palette), emits a drop-in **6912-byte `.scr`**, and
   reports every **attribute clash** (a cell whose source wanted >2 colours). Surfaced as the
   **`speccy-asset`** CLI (`PNG → .scr` + printed clash report). The colour-clash report — the
-  cheap demo-magnet — is built; tile/tracker→`const` and the *pure* tile-draw payoff wait on
-  cell80's `&CONST → addr`.
-  *Also done — L0 scaffolding:* **`speccy new <name> [--template blank|snake]`** (the
-  `speccy-new` bin) emits a starter that already crosses the dial. A `speccy_sdk::templates`
-  module exposes the proven `samples/blank.rs` / `snake_game.rs` as templates, renamed to the
+  cheap demo-magnet — is built. *Also done since:* **`bake`** — PNG art → `const Tile` sheets
+  (`speccy-assets::bake` + `speccy-asset bake`), bit-identical to the `.scr` reducer, feeding a
+  host baked-sprites demo (`speccy-games`). What still waits on cell80's `&CONST → addr` is
+  narrower now: not the baking itself, just the *pure* tile-draw payoff (`Frame::tile`/`text`
+  of a `&Tile`/`&str` by address).
+  *Also done — L0 scaffolding:* **`speccy new <name> [--template blank|snake|platform|chase|maze]`**
+  (the `speccy-new` bin) emits a starter that already crosses the dial — now **5 templates**,
+  spanning grid movement, physics/tile-collision, actor AI, and scene-flow. A
+  `speccy_sdk::templates` module exposes each proven sample as a template, renamed to the
   game's state struct; **`tests/dial.rs` holds every template's host+pure guarantee** (a
   scaffolded game is dual-compilable by construction).
   *Capability backlog:* [`09 — what the SDK needs, learned from classic games`](./09-sdk-capabilities-from-classic-games.md)
@@ -303,9 +340,14 @@ dial is never multiplied before it's watched close:
   Thompson's, Chase HQ/OutRun, …) to the SDK capabilities to build, each placed on the dial
   (host now / `cell80`-gated pure) with its agentability dividend — sprites · tilemaps/rooms ·
   physics · SFX · scene-flow · actors/AI · inventory · scrolling · pseudo-3D · asset baking.
-- [ ] **3 · Vertical slice** — `speccy new maze --template agent_maze`: splash ·
-  tilemap · sprites · beeper SFX · HUD · RNG · typed probes · reward · env · random +
-  scripted agents · host run · `.tap` · MP4.
+- [ ] **3 · Vertical slice** — splash · **tilemap** · **sprites** (bitmap, not solid-cell) ·
+  **beeper SFX** · **HUD** (text) · RNG · typed probes · reward · env · random + scripted
+  agents · host run · `.tap` · MP4. *Not the same as the `maze` template above* — `maze`
+  proves scene-flow + typed probes + reward/env + a planning agent, but draws with
+  `fill_cell` (no bitmap tiles/sprites), has no SFX, no text HUD (the win screen is a
+  colour band, not text), and no RNG. Those four are still gated on cell80's
+  `&CONST → addr` data section (tile/font by address) — unchanged blocker. So: real
+  progress toward this stage, not the stage itself.
 - [ ] **The agentability report** — static analysis over typed reward + the symbol
   map + short rollouts; the **reward-hackability detector** is the research headline
   (possible only because reward is typed, not a DSL).
@@ -483,12 +525,26 @@ cell graphs, toward *"millions of tiny executable tools agents discover and run 
 schemas"* — lives **there**, not here. chuk-speccy depends on cell80 from crates.io but does **not**
 drive it.
 
-**This repo's focus is squarely E, the authoring plane — the SDK side of the house.** The immediate
-next move is SDK-side, not compiler-side: finish *prove-the-seam* with a **pure-compiling Snake**.
-Two gaps remain, both in `speccy-sdk`, neither in the (now-generic) compiler:
-1. a power-of-two `Rng::below` (mask `& (n-1)`, not `% n`) so RNG-driven placement is subset-clean on
-   the authentic `Spectrum48` target (which has no `/`/`%`);
-2. a by-address tile/text drawing path — `Frame::tile(&Tile)`/`text(&str)` take references; route
-   value/by-address variants through the generic `PreludeConfig`, exactly as `Frame::pixel` is wired.
-Then, in sequence: **2 · the kit (L1+L0)** → **3 · vertical slice** (`speccy new maze`) →
-**4 · authoring studio (LAST)**.
+**This repo's focus is squarely E, the authoring plane — the SDK side of the house.** *Prove-the-seam*
+is done and then some: five samples (`snake`, `platform`, `chase`, `maze`, plus the generic `reach`)
+all compile from one source under rustc (host) **and** rustz80 (pure), boot on the real 48K ROM, and
+ship as `speccy new` templates. All five are now agentable — on the benchmark table with a
+scripted, a greedy-homing, a BFS-planning, a flee-then-forage, and a ledge-jumping climber agent
+respectively (spec 08 §9). What's left is narrower than it was:
+1. [x] **A shared, subset-clean `rng_next_u16`** — one `u16` xorshift step, defined once in the
+   dialect prelude (`compile::PRELUDE`) and once as a plain host function (`speccy_sdk::rng_next_u16`,
+   same body), so a game calls `rng_next_u16(self.rng)` unchanged under `rustc` and `rustz80` — no
+   `PreludeConfig` routing needed, since it's an ordinary function call, not a method on a host type.
+   `snake_game.rs`'s hand-rolled inline xorshift now calls it instead (behaviour-identical, re-verified
+   on real hardware); `reach.rs` keeps its own LCG (a distinct generator, deliberately left alone).
+   *Also done, prompted by this:* **`speccy-sdk`'s 804-line `lib.rs` split into one file/folder per
+   concern** (`rng`, `game`, `cell`, `entities`, `input`, `controls`, `runtime`, `graphics/{colour,
+   tile,frame}`) — `lib.rs` is now 81 lines of crate docs + module wiring; every item is still
+   re-exported flat at the crate root (`speccy_sdk::Frame`/`speccy_sdk::*` unchanged), since this
+   crate is published and downstream code depends on the flat API.
+2. [x] `chase`/`platform` — done, above; every existing template is now on the agentability table.
+3. a by-address tile/text drawing path — `Frame::tile(&Tile)`/`text(&str)` take references, which
+   needs a `&CONST → addr` data section in the compiler — **cell80's** roadmap, not this repo's.
+Then, in sequence: **2 · the kit (L1+L0)** (L0 done; L1's composable pure `Sprite`/`TileMap`/`Hud`
+waits on #3) → **3 · vertical slice** (bitmap tiles/sprites/SFX/HUD/RNG — `maze` is a scene-flow
+dry-run, not this stage) → **4 · authoring studio (LAST)**.
