@@ -477,9 +477,22 @@ compiler lives there.
   reads them. (The TOML parser was unified into the SDK in H1.)
 
 ### H7. Python (`zxspec_py` / `chuk-mcp-spectrum`)
-- [ ] **Supervisor concurrency**: viewer + agent + admin share a non-thread-safe
-  `Machine` with unsynchronized mutation → per-session lock (the one real runtime-risk
-  finding).
+- [x] **Supervisor concurrency** — done. `serve.py` runs the agent/admin/viewer planes
+  each on their own OS thread, all sharing one `Supervisor` singleton, so — unlike a
+  single-event-loop async server — this was a genuine cross-thread hazard, not just an
+  `await`-interleaving one (a lone `Machine` call is GIL-atomic, but `Supervisor`'s
+  multi-call sequences, e.g. `advance_frames`'s run+count+cadence-check, weren't).
+  Added a per-`Session` `threading.RLock` (`Session.lock`) and a `Supervisor.locked()`
+  context manager; every tool body in `server.py`/`viewer.py` that touches a session's
+  `Machine` now goes through it, and `Supervisor`'s own multi-step methods
+  (`advance_frames`, `load_game`, `finalize_recording`, `take_snapshot`, `destroy`, …)
+  lock internally — composable via the RLock's reentrancy. Fixed a latent lock-order
+  deadlock in `reap_idle` in passing (it held the sessions-dict lock across each
+  `destroy()` call, which itself takes the session lock then the dict lock — the
+  reverse order from any other path racing to destroy the same session); it now
+  snapshots the idle-id list under the dict lock, then destroys outside it. Verified
+  with a 7-thread stress harness hammering one session's frames/reads/snapshots/restore/
+  info concurrently for several seconds — zero errors.
 - [ ] Fix `test_restore_snapshot_rewinds` (restores a `serialize_full` blob via
   `load_snapshot("sna")` — passes by luck); tighten `load_sna` to reject over-length blobs.
 - [ ] PyO3 error formatting `{e:?}` → Display; refresh MCP README tool counts; gitignore
@@ -545,6 +558,26 @@ respectively (spec 08 §9). What's left is narrower than it was:
 2. [x] `chase`/`platform` — done, above; every existing template is now on the agentability table.
 3. a by-address tile/text drawing path — `Frame::tile(&Tile)`/`text(&str)` take references, which
    needs a `&CONST → addr` data section in the compiler — **cell80's** roadmap, not this repo's.
+4. [x] **C8, inventory/pickup/use-on-obstacle (doc 09) — proven pure**, prompted directly by "what
+   would Treasure Island Dizzy need": `speccy-sdk/samples/island.rs`, a 6th `speccy new` template.
+   A single `held: u16` item slot (Dizzy's own one-at-a-time model) + per-obstacle `bool` flags —
+   walking onto an item auto-picks it up, bumping the matching obstacle consumes it and clears the
+   way, room-to-room via the same scene-flow pattern as `maze`. No `u32`/arrays needed for the core
+   mechanic (doc 09's C8 entry updated — only a real multi-slot backpack or a keyed-door *table*
+   still needs them). *Not yet done:* an `island_bench.rs` env test (a natural 6th agentability-table
+   entry — a milestone reward, axe/vine/key/door/win).
+   **Found and bisected, while proving it, a real `rustz80` codegen bug** (not fixed here — the
+   compiler lives in `cell80`): a `&mut self` method with more than one call site, whose body calls
+   a prelude routine that compiles to a `while` loop (`Frame::clear`/`fill_cell`; a non-looping call
+   like `Frame::pixel` is unaffected), stalls for **~20 extra emulated frames** on any call site
+   after the first before it finishes — not a correctness bug (every write lands, just late; field
+   order makes no difference, contrary to the first, wrong hypothesis while bisecting it) but a real
+   perf anomaly. Pinned by `dial.rs`'s `rustz80_stalls_on_a_second_call_to_a_looping_prelude_routine`
+   (`#[ignore]`d, ROM-ded). Confirmed still present against cell80's latest `main` (`f4d69d2`, its
+   just-landed "Phase 1: LLM-facing compiler" — if/match expressions, signed `i16` — didn't touch
+   this path) via a temporary local `[patch.crates-io]`, not committed. No fix attempted in `cell80`
+   itself — that's a separate, actively-developed repo; this repo's tests just accept a generous
+   frame budget on any repeat-call-site transition (`island`'s room switch costs ~20 extra frames).
 Then, in sequence: **2 · the kit (L1+L0)** (L0 done; L1's composable pure `Sprite`/`TileMap`/`Hud`
 waits on #3) → **3 · vertical slice** (bitmap tiles/sprites/SFX/HUD/RNG — `maze` is a scene-flow
 dry-run, not this stage) → **4 · authoring studio (LAST)**.
