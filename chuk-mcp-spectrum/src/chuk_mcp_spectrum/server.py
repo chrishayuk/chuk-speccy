@@ -42,49 +42,58 @@ def _png(rgba: bytes, scale: int = 2) -> ImageContent:
 
 
 def _screenshot(sid: str, scale: int = 2) -> ImageContent:
-    return _png(bytes(SUPERVISOR.machine(sid).screen_rgba()), scale)
+    with SUPERVISOR.locked(sid) as s:
+        return _png(bytes(s.machine.screen_rgba()), scale)
 
 
 def _registers(sid: str) -> dict:
-    return dict(SUPERVISOR.machine(sid).registers())
+    with SUPERVISOR.locked(sid) as s:
+        return dict(s.machine.registers())
 
 
 def _read_memory(sid: str, addr: int, length: int) -> dict:
-    data = bytes(SUPERVISOR.machine(sid).read_memory(addr, length))
+    with SUPERVISOR.locked(sid) as s:
+        data = bytes(s.machine.read_memory(addr, length))
     return {"addr": addr, "length": len(data), "hex": data.hex()}
 
 
 def _screen_text(sid: str) -> str:
-    return SUPERVISOR.machine(sid).screen_text()
+    with SUPERVISOR.locked(sid) as s:
+        return s.machine.screen_text()
 
 
 def _disassemble(sid: str, addr: int, count: int) -> dict:
-    lines = SUPERVISOR.machine(sid).disassemble(addr, count)
-    return {
-        "lines": [{"addr": ln["addr"], "bytes": bytes(ln["bytes"]).hex(), "text": ln["text"]} for ln in lines]
-    }
+    with SUPERVISOR.locked(sid) as s:
+        lines = s.machine.disassemble(addr, count)
+        return {
+            "lines": [{"addr": ln["addr"], "bytes": bytes(ln["bytes"]).hex(), "text": ln["text"]} for ln in lines]
+        }
 
 
 def _press(sid: str, keys: list[str], frames: int) -> dict:
-    SUPERVISOR.machine(sid).press(keys, frames)
-    SUPERVISOR.note_activity(sid)
+    with SUPERVISOR.locked(sid) as s:
+        s.machine.press(keys, frames)
+        SUPERVISOR.note_activity(sid)
     return {"ok": True, "keys": keys}
 
 
 def _type(sid: str, text: str) -> dict:
-    typed = SUPERVISOR.machine(sid).type_text(text)
-    SUPERVISOR.note_activity(sid)
+    with SUPERVISOR.locked(sid) as s:
+        typed = s.machine.type_text(text)
+        SUPERVISOR.note_activity(sid)
     return {"ok": True, "typed": typed}
 
 
 def _run_frames(sid: str, n: int) -> dict:
-    s = SUPERVISOR.advance_frames(sid, n)
-    return {"ok": True, "frames": n, "pc": s.machine.registers()["pc"], "total_frames": s.frames_run}
+    with SUPERVISOR.locked(sid) as s:
+        SUPERVISOR.advance_frames(sid, n)
+        return {"ok": True, "frames": n, "pc": s.machine.registers()["pc"], "total_frames": s.frames_run}
 
 
 def _run_until(sid: str, pc: int | None, max_steps: int) -> dict:
-    res = dict(SUPERVISOR.machine(sid).run_until(pc, max_steps))
-    SUPERVISOR.note_activity(sid)
+    with SUPERVISOR.locked(sid) as s:
+        res = dict(s.machine.run_until(pc, max_steps))
+        SUPERVISOR.note_activity(sid)
     return res
 
 
@@ -223,7 +232,8 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
 
     @mcp.tool(destructive_hint=True, description="Reset a session's machine to ROM boot.")
     def reset_session(session_id: str) -> dict:
-        SUPERVISOR.machine(session_id).reset()
+        with SUPERVISOR.locked(session_id) as s:
+            s.machine.reset()
         return {"ok": True}
 
     # Game library: search + download from World of Spectrum.
@@ -239,17 +249,21 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
     @mcp.tool(destructive_hint=True, description="Load a .sna/.z80 snapshot (base64 or path) into a session.")
     def load_snapshot(session_id: str, fmt: str = "z80", data_b64: str | None = None, path: str | None = None) -> dict:
         data = _decode(data_b64, path)
-        SUPERVISOR.machine(session_id).load_snapshot(fmt, data)
+        with SUPERVISOR.locked(session_id) as s:
+            s.machine.load_snapshot(fmt, data)
         return {"ok": True}
 
     @mcp.tool(destructive_hint=True, description="Insert a .tap and LOAD it into a session.")
     def load_tape(session_id: str, data_b64: str | None = None, path: str | None = None) -> dict:
-        SUPERVISOR.machine(session_id).autoload_tape(_decode(data_b64, path))
+        data = _decode(data_b64, path)
+        with SUPERVISOR.locked(session_id) as s:
+            s.machine.autoload_tape(data)
         return {"ok": True}
 
     @mcp.tool(description="Manual checkpoint: save a session's state as base64 .sna (portable, lossy).")
     def save_snapshot(session_id: str) -> dict:
-        data = bytes(SUPERVISOR.machine(session_id).save_snapshot("sna"))
+        with SUPERVISOR.locked(session_id) as s:
+            data = bytes(s.machine.save_snapshot("sna"))
         return {"data_b64": base64.b64encode(data).decode(), "bytes": len(data)}
 
     @mcp.tool(
@@ -258,30 +272,37 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
         "reproduces execution exactly — the deterministic reset / RL-rollout primitive.",
     )
     def checkpoint(session_id: str) -> dict:
-        data = bytes(SUPERVISOR.machine(session_id).serialize_full())
+        with SUPERVISOR.locked(session_id) as s:
+            data = bytes(s.machine.serialize_full())
         return {"data_b64": base64.b64encode(data).decode(), "bytes": len(data)}
 
     @mcp.tool(destructive_hint=True, description="Restore a bit-exact `checkpoint` (base64) into a session.")
     def restore_checkpoint(session_id: str, data_b64: str) -> dict:
-        SUPERVISOR.machine(session_id).deserialize_full(base64.b64decode(data_b64))
+        with SUPERVISOR.locked(session_id) as s:
+            s.machine.deserialize_full(base64.b64decode(data_b64))
         return {"ok": True}
 
     @mcp.tool(destructive_hint=True, description="Poke bytes (base64) into a session's memory.")
     def write_memory(session_id: str, addr: int, data_b64: str) -> dict:
         data = base64.b64decode(data_b64)
-        SUPERVISOR.machine(session_id).write_memory(addr, data)
+        with SUPERVISOR.locked(session_id) as s:
+            s.machine.write_memory(addr, data)
         return {"ok": True, "addr": addr, "bytes": len(data)}
 
     @mcp.tool(destructive_hint=True, description="Set a Z80 register on a session.")
     def set_register(session_id: str, name: str, value: int) -> dict:
-        SUPERVISOR.machine(session_id).set_register(name, value)
+        with SUPERVISOR.locked(session_id) as s:
+            s.machine.set_register(name, value)
         return {"ok": True}
 
     # Snapshot timeline (rewind).
     @mcp.tool(read_only_hint=True, description="List the auto-snapshot timeline of a session.")
     def list_snapshots(session_id: str) -> dict:
         s = SUPERVISOR.get(session_id)
-        return {"snapshots": [{"index": i, "at_frame": f} for i, (f, _) in enumerate(s.snapshots)] if s else []}
+        if s is None:
+            return {"snapshots": []}
+        with s.lock:
+            return {"snapshots": [{"index": i, "at_frame": f} for i, (f, _) in enumerate(s.snapshots)]}
 
     @mcp.tool(description="Take a manual snapshot into the session's timeline.")
     def snapshot_now(session_id: str) -> dict:
@@ -291,10 +312,13 @@ def register_admin_tools(mcp: ChukMCPServer) -> None:
     @mcp.tool(destructive_hint=True, description="Rewind a session to a timeline snapshot by index.")
     def restore_snapshot(session_id: str, index: int) -> dict:
         s = SUPERVISOR.get(session_id)
-        if not s or not (0 <= index < len(s.snapshots)):
+        if s is None:
             return {"ok": False, "error": "no such snapshot"}
-        _, blob = s.snapshots[index]
-        s.machine.deserialize_full(blob)  # bit-exact rewind
+        with s.lock:
+            if not (0 <= index < len(s.snapshots)):
+                return {"ok": False, "error": "no such snapshot"}
+            _, blob = s.snapshots[index]
+            s.machine.deserialize_full(blob)  # bit-exact rewind
         return {"ok": True, "restored_index": index}
 
     # Recording control + download.

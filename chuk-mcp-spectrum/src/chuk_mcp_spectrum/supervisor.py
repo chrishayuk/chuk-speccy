@@ -9,12 +9,13 @@ admin tools reach across all sessions. Both planes share this one singleton.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Iterator, Optional
 
 import zxspec_py
 
@@ -64,6 +65,13 @@ class Session:
     last_snapshot_frame: int = 0
     # Timeline: (frames_run_at_capture, sna_bytes). The newest-trimmed history.
     snapshots: list = field(default_factory=list)
+    # Serializes every access to this session's Machine/state. The agent, admin,
+    # and viewer planes each run their own server on an independent OS thread
+    # (`serve.py`), sharing one `Supervisor` — a lone Machine call is GIL-atomic,
+    # but a multi-call sequence (or two threads' calls for the same session) is
+    # not. `RLock` so a caller already holding it (e.g. `Supervisor.locked`) can
+    # call back into a locking method (e.g. `advance_frames`) without deadlocking.
+    lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
 
 class Supervisor:
@@ -142,18 +150,19 @@ class Supervisor:
         restart the session's recording/snapshot timeline so the capture is the
         new game only."""
         s = self.session(session_id)
-        m = s.machine
-        m.reset()
-        self._load_media_bytes(m, fmt, data)
-        s.frames_run = 0
-        s.last_snapshot_frame = 0
-        s.snapshots.clear()
-        if s.audio:
-            m.enable_audio(self.config.audio_rate)
-            m.drain_audio()
-        if s.recording:
-            m.start_recording(self.config.decimate)
-        s.last_active = time.time()
+        with s.lock:
+            m = s.machine
+            m.reset()
+            self._load_media_bytes(m, fmt, data)
+            s.frames_run = 0
+            s.last_snapshot_frame = 0
+            s.snapshots.clear()
+            if s.audio:
+                m.enable_audio(self.config.audio_rate)
+                m.drain_audio()
+            if s.recording:
+                m.start_recording(self.config.decimate)
+            s.last_active = time.time()
         return s
 
     def session(self, session_id: str) -> Session:
@@ -173,27 +182,38 @@ class Supervisor:
     def ids(self) -> list[str]:
         return list(self._sessions)
 
+    @contextlib.contextmanager
+    def locked(self, session_id: str) -> Iterator[Session]:
+        """Every tool call that touches a session's `Machine` should go through
+        this, not `machine()`/`get()` directly — see `Session.lock`."""
+        s = self.session(session_id)
+        with s.lock:
+            yield s
+
     # --- driving (agent advances funnel through here for cadence) ----------
 
     def advance_frames(self, session_id: str, n: int) -> Session:
         s = self.session(session_id)
-        s.machine.run_frames(n)
-        s.frames_run += n
-        self._maybe_snapshot(s)
-        s.last_active = time.time()
+        with s.lock:
+            s.machine.run_frames(n)
+            s.frames_run += n
+            self._maybe_snapshot(s)
+            s.last_active = time.time()
         return s
 
     def note_activity(self, session_id: str) -> Session:
         """For input/step tools that advance time inside the core; keeps the
         session warm and checks the snapshot cadence."""
         s = self.session(session_id)
-        # The core advanced frames during press/type; approximate the counter so
-        # cadence still fires roughly on time.
-        self._maybe_snapshot(s)
-        s.last_active = time.time()
+        with s.lock:
+            # The core advanced frames during press/type; approximate the counter
+            # so cadence still fires roughly on time.
+            self._maybe_snapshot(s)
+            s.last_active = time.time()
         return s
 
     def _maybe_snapshot(self, s: Session) -> None:
+        # Always called with `s.lock` already held (advance_frames/note_activity).
         every = self.config.snapshot_every_frames
         if every <= 0:
             return
@@ -201,14 +221,16 @@ class Supervisor:
             self.take_snapshot(s)
 
     def take_snapshot(self, s: Session) -> int:
-        # Bit-exact full state, so rewinding is a true timeline branch (not the
-        # lossy `.sna` approximation) — the precondition for snapshot-tree rollouts.
-        blob = bytes(s.machine.serialize_full())
-        s.snapshots.append((s.frames_run, blob))
-        s.last_snapshot_frame = s.frames_run
-        if len(s.snapshots) > self.config.max_snapshots:
-            s.snapshots.pop(0)
-        return len(s.snapshots)
+        with s.lock:
+            # Bit-exact full state, so rewinding is a true timeline branch (not
+            # the lossy `.sna` approximation) — the precondition for
+            # snapshot-tree rollouts.
+            blob = bytes(s.machine.serialize_full())
+            s.snapshots.append((s.frames_run, blob))
+            s.last_snapshot_frame = s.frames_run
+            if len(s.snapshots) > self.config.max_snapshots:
+                s.snapshots.pop(0)
+            return len(s.snapshots)
 
     # --- recording lifecycle ------------------------------------------------
 
@@ -216,13 +238,18 @@ class Supervisor:
         """Stop the session's recording and encode the MP4. Returns None if the
         session wasn't recording."""
         s = self.get(session_id)
-        if s is None or not s.recording:
+        if s is None:
             return None
-        count = s.machine.stop_recording()
-        decimate = s.machine.recording_decimate()
-        indexed = bytes(s.machine.take_recording())
-        audio = list(s.machine.drain_audio()) if s.audio else []
-        s.recording = False
+        with s.lock:
+            if not s.recording:
+                return None
+            count = s.machine.stop_recording()
+            decimate = s.machine.recording_decimate()
+            indexed = bytes(s.machine.take_recording())
+            audio = list(s.machine.drain_audio()) if s.audio else []
+            s.recording = False
+        # The (possibly slow) encode doesn't touch the session, so it runs after
+        # the lock is released — other threads aren't blocked on disk/ffmpeg.
         if count == 0:
             return None
         os.makedirs(self.config.recordings_dir, exist_ok=True)
@@ -232,42 +259,56 @@ class Supervisor:
 
     def restart_recording(self, session_id: str) -> None:
         s = self.session(session_id)
-        if s.audio:
-            s.machine.enable_audio(self.config.audio_rate)
-            s.machine.drain_audio()
-        s.machine.start_recording(self.config.decimate)
-        s.recording = True
+        with s.lock:
+            if s.audio:
+                s.machine.enable_audio(self.config.audio_rate)
+                s.machine.drain_audio()
+            s.machine.start_recording(self.config.decimate)
+            s.recording = True
 
     # --- lifecycle ----------------------------------------------------------
 
     def destroy(self, session_id: str, finalize: bool = True) -> Optional[dict]:
-        info = self.finalize_recording(session_id) if finalize else None
-        self._sessions.pop(session_id, None)
+        s = self.get(session_id)
+        if s is None:
+            return None
+        # Hold the session's own lock across finalize + the dict pop, so a
+        # thread already mid-call on this session (holding `s.lock` via
+        # `locked()`) finishes first, and no thread can start a new one on a
+        # session that's being torn down.
+        with s.lock:
+            info = self.finalize_recording(session_id) if finalize else None
+            with self._lock:
+                self._sessions.pop(session_id, None)
         return info
 
     def reap_idle(self) -> list[str]:
         now = time.time()
         timeout = self.config.idle_reap_seconds
-        reaped = []
         with self._lock:
-            for sid, s in list(self._sessions.items()):
-                if now - s.last_active > timeout:
-                    self.destroy(sid)
-                    reaped.append(sid)
-        return reaped
+            idle = [sid for sid, s in self._sessions.items() if now - s.last_active > timeout]
+        # `destroy` acquires `s.lock` then `self._lock` (in that order); doing it
+        # here, outside the `with self._lock` above, avoids the reverse ordering
+        # (another thread holding `s.lock` while waiting on `self._lock`, which
+        # this loop would be holding while waiting on `s.lock`) that would
+        # otherwise deadlock.
+        for sid in idle:
+            self.destroy(sid)
+        return idle
 
     def info(self, session_id: str) -> dict:
         s = self.get(session_id)
         if s is None:
             return {"exists": False}
-        return {
-            "exists": True,
-            "recording": s.recording,
-            "frames_run": s.frames_run,
-            "snapshots": len(s.snapshots),
-            "idle_s": round(time.time() - s.last_active, 1),
-            "pc": s.machine.registers()["pc"],
-        }
+        with s.lock:
+            return {
+                "exists": True,
+                "recording": s.recording,
+                "frames_run": s.frames_run,
+                "snapshots": len(s.snapshots),
+                "idle_s": round(time.time() - s.last_active, 1),
+                "pc": s.machine.registers()["pc"],
+            }
 
 
 # One supervisor per process — shared by the agent and admin tool planes.

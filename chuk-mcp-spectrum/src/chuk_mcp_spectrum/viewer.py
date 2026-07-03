@@ -28,7 +28,8 @@ def _jpeg(session_id: str) -> bytes | None:
     s = SUPERVISOR.get(session_id)
     if s is None:
         return None
-    rgba = bytes(s.machine.screen_rgba())
+    with s.lock:
+        rgba = bytes(s.machine.screen_rgba())
     img = Image.frombytes("RGBA", (W, H), rgba).convert("RGB")
     if SCALE > 1:
         img = img.resize((W * SCALE, H * SCALE), Image.NEAREST)
