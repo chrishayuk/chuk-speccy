@@ -118,10 +118,19 @@ single-player edges only. *Dial:* host now; pure form is straightforward (it's l
 **C8. Game state, inventory & progression** — **items/inventory** (carry, drop, use),
 **keyed doors/locks**, an **economy** (energy/score/lives), level progression, optional
 **save**. *Games:* Dizzy inventory + object puzzles, Booty keys, Gauntlet potions/keys.
-*Now:* ad-hoc struct fields. *Dial:* host now; pure form gated on richer persisted state
-(`u32`/arrays). *Env:* inventory + flags are typed state → the env can pose
-*subgoal* rewards; great for the `puzzle` axis. **This is the reward-hackability
-detector's richest input** (spec 08 §9): collectible loops, respawn farms.
+*Now:* **the one-item-at-a-time carry/drop/use core is proven pure today** —
+`speccy-sdk/samples/island.rs` (a `speccy new` template) is a single `held: u16` item
+slot (0/1/2, Dizzy's own one-at-a-time model) plus per-obstacle `bool` flags
+(`vine_cleared`, `door_open`); walking onto an item auto-picks it up, bumping the
+matching obstacle clears it and consumes the item — no `u32`/arrays needed, since the
+*state* is just scalars. What's still gated is a real multi-slot **backpack** (N
+simultaneous items) or a keyed-door *table* (vs. one hardcoded obstacle per room) —
+those need `[u16; N]` arrays/persisted `u32`, unchanged. *Dial:* pure now for the core
+mechanic; host now (unchanged) for richer economies. *Env:* inventory + flags are typed
+state → the env can pose *subgoal* rewards — a natural next agentability-table entry
+(milestone reward: axe/vine/key/door/win, +1 each), not yet built. Great for the
+`puzzle` axis. **This is the reward-hackability detector's richest input** (spec 08
+§9): collectible loops, respawn farms.
 
 **C9. HUD / fonts / menus** — custom fonts, status panels (score/lives/energy bars),
 title screens, **selectable menus** (key-redefine, options, Chaos's spell-pick screen).

@@ -47,6 +47,12 @@ pub const TEMPLATES: &[Template] = &[
         struct_name: "Maze",
         src: include_str!("../samples/maze.rs"),
     },
+    Template {
+        name: "island",
+        about: "an item-fetch adventure (pickup / use-on-obstacle, Dizzy-style)",
+        struct_name: "Island",
+        src: include_str!("../samples/island.rs"),
+    },
 ];
 
 /// The template named `name`, if any.

@@ -14,6 +14,7 @@ const BLANK: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/b
 const PLATFORM: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/platform.rs"));
 const CHASE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/chase.rs"));
 const MAZE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/maze.rs"));
+const ISLAND: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/island.rs"));
 
 /// Host side: the same sample texts, compiled here by `rustc` against `speccy-sdk`.
 /// If they type-check as `Game`s, this passes (a compile-time assertion).
@@ -87,6 +88,15 @@ fn host_games_are_valid_rust() {
             is_game::<Maze>();
         }
     }
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod island {
+        use speccy_sdk::*;
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/island.rs"));
+        pub fn check() {
+            fn is_game<T: Game + Default>() {}
+            is_game::<Island>();
+        }
+    }
     bounce::check();
     mover::check();
     snake::check();
@@ -94,6 +104,7 @@ fn host_games_are_valid_rust() {
     platform::check();
     chase::check();
     maze::check();
+    island::check();
 }
 
 /// Host side, behaviour: the `chase` enemies actually move toward the player when the
@@ -128,7 +139,7 @@ fn games_compile_pure() {
     assert!(speccy_sdk::compile::has_game(BOUNCE) && speccy_sdk::compile::has_game(MOVE));
     assert!(speccy_sdk::compile::has_game(SNAKE) && speccy_sdk::compile::has_game(BLANK));
     assert!(speccy_sdk::compile::has_game(PLATFORM) && speccy_sdk::compile::has_game(CHASE));
-    assert!(speccy_sdk::compile::has_game(MAZE));
+    assert!(speccy_sdk::compile::has_game(MAZE) && speccy_sdk::compile::has_game(ISLAND));
     speccy_sdk::compile::compile_game(BOUNCE, "BOUNCE").expect("bounce compiles");
     speccy_sdk::compile::compile_game(MOVE, "MOVE").expect("move compiles");
     speccy_sdk::compile::compile_game(SNAKE, "SNAKE").expect("snake compiles");
@@ -136,6 +147,7 @@ fn games_compile_pure() {
     speccy_sdk::compile::compile_game(PLATFORM, "PLATFORM").expect("platform compiles");
     speccy_sdk::compile::compile_game(CHASE, "CHASE").expect("chase compiles");
     speccy_sdk::compile::compile_game(MAZE, "MAZE").expect("maze compiles");
+    speccy_sdk::compile::compile_game(ISLAND, "ISLAND").expect("island compiles");
 }
 
 /// Host side, behaviour: the `maze` player walks on a held direction and is blocked by
@@ -163,6 +175,78 @@ fn maze_player_moves_on_host() {
     assert!(
         end_x > start_x && end_x <= 30,
         "player should walk right into free cells and stop at the wall (start {start_x}, end {end_x})"
+    );
+}
+
+/// Host side, behaviour: `island`'s pickup/use logic (spec 08 §9, capability C8) —
+/// isolates the new inventory mechanic from codegen, no ROM needed. Bumping the
+/// obstacle empty-handed never clears it; standing on the item takes it; bumping the
+/// obstacle while holding the right item clears it and consumes the item. Same shape
+/// in both rooms (vine/axe, door/key).
+#[test]
+fn island_pickup_and_use_on_host() {
+    #[allow(clippy::assign_op_pattern, clippy::collapsible_if)]
+    mod isl {
+        use speccy_sdk::*;
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/island.rs"));
+        pub fn run() -> (bool, u16, bool, bool, bool) {
+            let mut g = Island::default();
+            let mut f = Frame::new();
+            g.update(&Input::none(), &mut f); // init: room 0, at (2, 12)
+
+            g.x = 5;
+            g.y = 5;
+            g.try_pickup(&mut f);
+            let held_after_pickup = g.held; // should be 1 (the axe)
+
+            g.held = 0;
+            g.try_use(&mut f);
+            let vine_survives_without_axe = !g.vine_cleared;
+
+            g.held = 1;
+            g.try_use(&mut f);
+            let vine_cleared_with_axe = g.vine_cleared;
+
+            g.room = 1;
+            g.x = 5;
+            g.y = 5;
+            g.try_pickup(&mut f);
+            let key_taken = g.key_taken;
+            g.try_use(&mut f);
+            let door_open_with_key = g.door_open;
+
+            (
+                vine_survives_without_axe,
+                held_after_pickup,
+                vine_cleared_with_axe,
+                key_taken,
+                door_open_with_key,
+            )
+        }
+    }
+    let (
+        vine_survives_without_axe,
+        held_after_pickup,
+        vine_cleared_with_axe,
+        key_taken,
+        door_open_with_key,
+    ) = isl::run();
+    assert!(
+        vine_survives_without_axe,
+        "bumping the vine empty-handed must not clear it"
+    );
+    assert_eq!(
+        held_after_pickup, 1,
+        "standing on the axe should pick it up"
+    );
+    assert!(
+        vine_cleared_with_axe,
+        "bumping the vine while holding the axe clears it"
+    );
+    assert!(key_taken, "standing on the key should pick it up (room 1)");
+    assert!(
+        door_open_with_key,
+        "bumping the door while holding the key opens it (room 1)"
     );
 }
 
@@ -320,6 +404,129 @@ fn maze_renders_running_game() {
         "the running maze (black paper) should render — got {}% black (low ⇒ tape never ran)",
         black * 100 / screen.len()
     );
+}
+
+/// The `island` tape boots and runs on the real ROM — same black-paper signal as
+/// chase/maze.
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn island_renders_running_game() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let tap = speccy_sdk::compile::compile_game(ISLAND, "ISLAND").expect("compile");
+    let screen = &speccy_sdk::run::capture_indexed(&tap, &rom, 1, 1, speccy_sdk::run::DEFAULT_BOOT)
+        .expect("capture")[0];
+    let black = screen.iter().filter(|&&px| px == 0).count();
+    assert!(
+        black > screen.len() / 2,
+        "the running island (black paper) should render — got {}% black (low ⇒ tape never ran)",
+        black * 100 / screen.len()
+    );
+}
+
+/// Hold `ch` until `field` reads as `target` (or `max_frames` elapse without it) —
+/// robust against exactly how many frames a given step takes (a step that also
+/// triggers `try_use`'s extra `draw_room` redraw costs more T-states than a plain
+/// move, so a fixed `steps * 3` frame count isn't reliable across every step; this
+/// polls the actual state instead of assuming a timing model).
+fn hold_until(
+    spec: &mut spectrum::Spectrum,
+    sym: &speccy_sdk::SymbolMap,
+    ch: char,
+    field: &str,
+    target: u16,
+    max_frames: u32,
+) -> bool {
+    let pos = spectrum::keyboard::key_for_char(ch).unwrap().0;
+    let addr = sym.addr_of(field).expect("field in the symbol map");
+    let read = |s: &spectrum::Spectrum| -> u16 {
+        let m = s.read_memory(addr, 2);
+        u16::from_le_bytes([m[0], m[1]])
+    };
+    spec.set_key(pos, true);
+    let mut reached = read(spec) == target;
+    for _ in 0..max_frames {
+        if reached {
+            break;
+        }
+        spec.run_frame();
+        reached = read(spec) == target;
+    }
+    spec.set_key(pos, false);
+    reached
+}
+
+/// Pure, end to end, on real hardware: drive `island` through the *whole* quest —
+/// fetch the axe, clear the vine, cross to room 1, fetch the key, open the door, reach
+/// the treasure — and read every milestone flag back off the tape via the symbol map.
+/// The seam (spec 08), proven on a game whose state is a puzzle chain, not just a
+/// position. Generous 150-frame budgets throughout: `enter_room`'s *second* call (the
+/// room 0 → room 1 transition) runs into the known `rustz80` stall documented by
+/// `rustz80_stalls_on_a_second_call_to_a_looping_prelude_routine` below — the room
+/// switch itself takes ~20 extra frames, not a normal single-move's worth.
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn island_solves_the_quest_on_rom() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let (tap, sym) =
+        speccy_sdk::compile::compile_game_with_symbols(ISLAND, "ISLAND").expect("compile");
+    let mut spec = boot(&rom, &tap);
+
+    let read_u16 = |s: &spectrum::Spectrum, field: &str| -> u16 {
+        let addr = sym.addr_of(field).expect("field in the symbol map");
+        let m = s.read_memory(addr, 2);
+        u16::from_le_bytes([m[0], m[1]])
+    };
+    let read_bool = |s: &spectrum::Spectrum, field: &str| -> bool { read_u16(s, field) != 0 };
+
+    // Room 0: start (2,12) -> axe (5,5) -> cross the vine at column 16 -> treasure-row
+    // cell (29,12), which is room 0's exit.
+    assert!(
+        hold_until(&mut spec, &sym, 'q', "y", 5, 150),
+        "should reach y=5"
+    );
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "held", 1, 150),
+        "walking onto the axe should pick it up"
+    );
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "vine_cleared", 1, 150),
+        "bumping the vine while carrying the axe should clear it"
+    );
+    assert_eq!(read_u16(&spec, "held"), 0, "the axe is consumed once used");
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "x", 29, 150),
+        "should reach the far wall"
+    );
+    assert!(
+        hold_until(&mut spec, &sym, 'a', "room", 1, 150),
+        "reaching the exit cell should advance to room 1"
+    );
+
+    // Room 1: same shape — key instead of axe, door instead of vine.
+    assert!(
+        hold_until(&mut spec, &sym, 'q', "y", 5, 150),
+        "should reach y=5 again"
+    );
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "held", 2, 150),
+        "walking onto the key should pick it up"
+    );
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "door_open", 1, 150),
+        "bumping the door while carrying the key should open it"
+    );
+    assert_eq!(read_u16(&spec, "held"), 0, "the key is consumed once used");
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "x", 29, 150),
+        "should reach the far wall again"
+    );
+    assert!(
+        hold_until(&mut spec, &sym, 'a', "won", 1, 150),
+        "reaching the treasure cell should solve the quest"
+    );
+
+    assert!(read_bool(&spec, "axe_taken"));
+    assert!(read_bool(&spec, "key_taken"));
 }
 
 fn boot(rom: &[u8], tap: &[u8]) -> spectrum::Spectrum {
@@ -523,5 +730,98 @@ impl Game for Dot {
     assert_eq!(
         attr_pure, attr_host,
         "host & pure fill_cell must encode the same attribute"
+    );
+}
+
+/// **Known `rustz80` codegen performance stall** (bisected here, not fixed — the
+/// compiler lives in `cell80`, not this repo; confirmed still present against
+/// cell80's latest `main` as of this writing): a `&mut self` method with more than
+/// one call site, whose body calls a prelude routine that compiles to a `while` loop
+/// (`Frame::clear`/`fill_cell` → `__frame_clear`/`__frame_fill_cell`; a non-looping
+/// call like `Frame::pixel` is unaffected) runs correctly every time, but on any call
+/// site *after* the first, it takes roughly **20 extra emulated frames** (~0.4s) to
+/// actually complete — as if the loop iterates far more times than it should before
+/// finally exiting. It is not a correctness bug: every field write does land, just
+/// ~20 frames late, and normal execution resumes immediately after. Field order
+/// inside the method (writes before vs. after the loop) makes no difference — this
+/// was the first, wrong hypothesis while bisecting it.
+///
+/// Bisected from `samples/island.rs`'s `enter_room` (draws the room, resets `x`/`y`;
+/// on the room 0 → room 1 transition — the *second* call — the reset appeared to
+/// silently fail until the polling window was widened past ~20 frames, at which
+/// point it resolved correctly) down to the minimal shape below: a `reset` method
+/// called once from init and once from a nested tick-throttled transition, with a
+/// single `frame.clear` before the field writes.
+#[test]
+#[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
+fn rustz80_stalls_on_a_second_call_to_a_looping_prelude_routine() {
+    let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
+    let src = r#"
+#[derive(Default)]
+struct Bisect {
+    started: bool,
+    x: u16,
+    y: u16,
+    tick: u16,
+    moved: bool,
+}
+impl Bisect {
+    fn reset(&mut self, frame: &mut Frame) {
+        frame.clear(Colour::Black); // a prelude call whose body loops
+        self.x = 2;
+        self.y = 12;
+    }
+}
+impl Game for Bisect {
+    fn update(&mut self, input: &Input, frame: &mut Frame) {
+        if !self.started {
+            self.reset(frame); // call site 1: always immediate
+            self.started = true;
+        }
+        self.tick = self.tick + 1;
+        if self.tick >= 3 {
+            self.tick = 0;
+            if input.held(Button::Right) {
+                self.x = self.x + 1;
+            }
+            if self.x == 5 {
+                if !self.moved {
+                    self.moved = true;
+                    self.reset(frame); // call site 2: ~20 extra frames before x resets
+                }
+            }
+        }
+        frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightCyan);
+    }
+}
+"#;
+    let (tap, sym) =
+        speccy_sdk::compile::compile_game_with_symbols(src, "BISECT").expect("compile");
+    let mut spec = boot(&rom, &tap);
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "moved", 1, 60),
+        "should reach x == 5 and trigger the second reset() call"
+    );
+
+    let read_u16 = |s: &spectrum::Spectrum, field: &str| -> u16 {
+        let addr = sym.addr_of(field).expect("field in the symbol map");
+        let m = s.read_memory(addr, 2);
+        u16::from_le_bytes([m[0], m[1]])
+    };
+
+    // Immediately after the second call: x is still stale (the stall hasn't resolved
+    // yet). If this ever starts failing here, the stall itself has shrunk or gone —
+    // worth re-checking whether the wider assertion below is still needed at all.
+    assert_eq!(
+        read_u16(&spec, "x"),
+        5,
+        "documents the known stall: x should still read stale immediately after the \
+         second reset() call"
+    );
+
+    // But it's not lost — give it a generous window and it resolves correctly.
+    assert!(
+        hold_until(&mut spec, &sym, 'p', "x", 2, 60),
+        "the reset should complete within ~60 frames, just later than the first call"
     );
 }
