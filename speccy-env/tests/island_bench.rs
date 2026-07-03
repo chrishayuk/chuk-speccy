@@ -206,10 +206,10 @@ fn quest_agent_sequences_item_crossing_and_exit() {
 }
 
 /// On real hardware: the quest agent solves both rooms (reward 5), while no-op and
-/// random never do. Generous budget: the room 0 -> room 1 transition runs into the
-/// known `rustz80` stall (`speccy-sdk/tests/dial.rs`'s
-/// `rustz80_stalls_on_a_second_call_to_a_looping_prelude_routine`) — ~20 extra frames
-/// before the reset resolves, not a normal single-move's worth.
+/// random never do. Generous budget: every room entry costs `frame.clear()`'s real
+/// ~15-20-frame cost (`speccy-sdk/tests/dial.rs`'s
+/// `rustz80_frame_clear_costs_about_20_frames_per_call` — a `rustz80` codegen quality
+/// issue, not specific to this transition), not a normal single-move's worth.
 ///   SPECTRUM_ROM="$PWD/testroms/48.rom" cargo test -p chuk-speccy-env --test island_bench -- --ignored
 #[test]
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]

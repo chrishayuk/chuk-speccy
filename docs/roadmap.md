@@ -566,18 +566,21 @@ respectively (spec 08 §9). What's left is narrower than it was:
    mechanic (doc 09's C8 entry updated — only a real multi-slot backpack or a keyed-door *table*
    still needs them). *Not yet done:* an `island_bench.rs` env test (a natural 6th agentability-table
    entry — a milestone reward, axe/vine/key/door/win).
-   **Found and bisected, while proving it, a real `rustz80` codegen bug** (not fixed here — the
-   compiler lives in `cell80`): a `&mut self` method with more than one call site, whose body calls
-   a prelude routine that compiles to a `while` loop (`Frame::clear`/`fill_cell`; a non-looping call
-   like `Frame::pixel` is unaffected), stalls for **~20 extra emulated frames** on any call site
-   after the first before it finishes — not a correctness bug (every write lands, just late; field
-   order makes no difference, contrary to the first, wrong hypothesis while bisecting it) but a real
-   perf anomaly. Pinned by `dial.rs`'s `rustz80_stalls_on_a_second_call_to_a_looping_prelude_routine`
-   (`#[ignore]`d, ROM-ded). Confirmed still present against cell80's latest `main` (`f4d69d2`, its
-   just-landed "Phase 1: LLM-facing compiler" — if/match expressions, signed `i16` — didn't touch
-   this path) via a temporary local `[patch.crates-io]`, not committed. No fix attempted in `cell80`
-   itself — that's a separate, actively-developed repo; this repo's tests just accept a generous
-   frame budget on any repeat-call-site transition (`island`'s room switch costs ~20 extra frames).
+   **Found and disassembly-confirmed, while proving it, a real `rustz80` codegen *quality* issue**
+   (not fixed here — the compiler lives in `cell80`): `while`-loop codegen never keeps a counter or
+   a comparison constant in a register — every increment/bound-check round-trips through memory via
+   an explicit `LD HL,(addr)`/`PUSH`/`POP DE` dance (~150–200 T-states/iteration vs. ~30–40
+   hand-tuned). Over `Frame::clear`'s 6912 iterations that's **~15–20 real frames (~0.3–0.4s)** —
+   and it costs that on *every* call, not a "second call site" as first (wrongly) hypothesised while
+   bisecting it; the first call is exactly as slow, just normally hidden inside a game's boot warmup.
+   `Frame::pixel` (no loop) is unaffected. Practical upshot: any pure game's `frame.clear()` — normal
+   on every scene/room transition — costs a real, visible pause on hardware. Pinned by `dial.rs`'s
+   `rustz80_frame_clear_costs_about_20_frames_per_call` (`#[ignore]`d, ROM-gated). Confirmed still
+   present against cell80's latest `main` (`f4d69d2`, its just-landed "Phase 1: LLM-facing compiler"
+   — if/match expressions, signed `i16` — didn't touch this path) via a temporary local
+   `[patch.crates-io]`, not committed. No fix attempted in `cell80` itself — that's a separate,
+   actively-developed repo (mid several more merges of its own, unrelated, the same day); this
+   repo's tests just accept the real ~20-frame cost on any room-entry transition.
 Then, in sequence: **2 · the kit (L1+L0)** (L0 done; L1's composable pure `Sprite`/`TileMap`/`Hud`
 waits on #3) → **3 · vertical slice** (bitmap tiles/sprites/SFX/HUD/RNG — `maze` is a scene-flow
 dry-run, not this stage) → **4 · authoring studio (LAST)**.

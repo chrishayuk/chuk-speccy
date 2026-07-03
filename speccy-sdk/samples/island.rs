@@ -121,12 +121,12 @@ impl Island {
     }
 
     // Enter `self.room` fresh: clear the screen, draw it, place the player at the
-    // start, and show the current inventory. Called from both `!started` init and
-    // the room-transition path — the *second* call runs an extra ~20 frames slower on
-    // real hardware than the first (a known `rustz80` codegen stall on a repeat call
-    // to a method containing a looping prelude call — see `dial.rs`'s
-    // `rustz80_stalls_on_a_second_call_to_a_looping_prelude_routine`); it still
-    // completes correctly, just late, so nothing here needs to work around it.
+    // start, and show the current inventory. Every call — including the very first,
+    // from `!started` init — costs a real ~15-20 extra emulated frames (~0.3-0.4s) on
+    // real hardware: `rustz80`'s `while`-loop codegen never keeps a counter in a
+    // register, so `frame.clear()`'s 6912-iteration screen clear is far slower than it
+    // should be (see `dial.rs`'s `rustz80_frame_clear_costs_about_20_frames_per_call`).
+    // Not a correctness issue — everything still lands, just later than a normal move.
     fn enter_room(&mut self, frame: &mut Frame) {
         frame.clear(Colour::Black);
         self.draw_room(frame);

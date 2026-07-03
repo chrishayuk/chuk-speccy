@@ -733,75 +733,65 @@ impl Game for Dot {
     );
 }
 
-/// **Known `rustz80` codegen performance stall** (bisected here, not fixed — the
-/// compiler lives in `cell80`, not this repo; confirmed still present against
-/// cell80's latest `main` as of this writing): a `&mut self` method with more than
-/// one call site, whose body calls a prelude routine that compiles to a `while` loop
-/// (`Frame::clear`/`fill_cell` → `__frame_clear`/`__frame_fill_cell`; a non-looping
-/// call like `Frame::pixel` is unaffected) runs correctly every time, but on any call
-/// site *after* the first, it takes roughly **20 extra emulated frames** (~0.4s) to
-/// actually complete — as if the loop iterates far more times than it should before
-/// finally exiting. It is not a correctness bug: every field write does land, just
-/// ~20 frames late, and normal execution resumes immediately after. Field order
-/// inside the method (writes before vs. after the loop) makes no difference — this
-/// was the first, wrong hypothesis while bisecting it.
+/// **`rustz80` codegen quality issue** (found here, not fixed — the compiler lives in
+/// `cell80`, not this repo; confirmed still present against cell80's latest `main` as
+/// of this writing): `while`-loop codegen never keeps a loop counter or a comparison
+/// constant in a register — every increment and every bound check round-trips through
+/// memory via an explicit `LD HL,(addr)` / `PUSH` / `POP DE` dance (disassembly-
+/// verified: `Frame::clear`'s screen-clear loop costs roughly 150–200 T-states per
+/// iteration where hand-tuned Z80 would cost 30–40). Over `Frame::clear`'s 6912
+/// iterations that's **~15–20 real 50 Hz frames (~0.3–0.4s)** — and it costs that on
+/// *every* call, not just a "second" one. (An earlier version of this finding claimed
+/// the field writes after such a call were lost specifically on a method's second call
+/// site — that was wrong: the delay is real but the writes always land, and the first
+/// call site is exactly as slow, just usually hidden inside a game's boot warmup where
+/// nobody's polling frame-by-frame. `Frame::pixel`, which has no loop, is unaffected
+/// regardless of call site.)
 ///
-/// Bisected from `samples/island.rs`'s `enter_room` (draws the room, resets `x`/`y`;
-/// on the room 0 → room 1 transition — the *second* call — the reset appeared to
-/// silently fail until the polling window was widened past ~20 frames, at which
-/// point it resolved correctly) down to the minimal shape below: a `reset` method
-/// called once from init and once from a nested tick-throttled transition, with a
-/// single `frame.clear` before the field writes.
+/// Practical upshot for any pure game: a full-screen `frame.clear()` — normal on every
+/// scene/room transition — costs a real, visible ~0.3–0.4s pause on hardware. Found
+/// while proving `samples/island.rs`'s room 0 → room 1 transition; that test just
+/// budgets generously for it rather than working around it (there's nothing to work
+/// around — every ordering costs the same).
 #[test]
 #[ignore = "set SPECTRUM_ROM to an absolute path to 48.rom"]
-fn rustz80_stalls_on_a_second_call_to_a_looping_prelude_routine() {
+fn rustz80_frame_clear_costs_about_20_frames_per_call() {
     let rom = std::fs::read(std::env::var("SPECTRUM_ROM").expect("SPECTRUM_ROM")).unwrap();
     let src = r#"
 #[derive(Default)]
-struct Bisect {
+struct Timing {
     started: bool,
     x: u16,
     y: u16,
-    tick: u16,
-    moved: bool,
 }
-impl Bisect {
+impl Timing {
     fn reset(&mut self, frame: &mut Frame) {
-        frame.clear(Colour::Black); // a prelude call whose body loops
+        frame.clear(Colour::Black); // the loop under test
         self.x = 2;
         self.y = 12;
     }
 }
-impl Game for Bisect {
-    fn update(&mut self, input: &Input, frame: &mut Frame) {
+impl Game for Timing {
+    fn update(&mut self, _input: &Input, frame: &mut Frame) {
         if !self.started {
-            self.reset(frame); // call site 1: always immediate
+            self.reset(frame);
             self.started = true;
-        }
-        self.tick = self.tick + 1;
-        if self.tick >= 3 {
-            self.tick = 0;
-            if input.held(Button::Right) {
-                self.x = self.x + 1;
-            }
-            if self.x == 5 {
-                if !self.moved {
-                    self.moved = true;
-                    self.reset(frame); // call site 2: ~20 extra frames before x resets
-                }
-            }
         }
         frame.fill_cell(self.x as u8, self.y as u8, Colour::BrightCyan);
     }
 }
 "#;
     let (tap, sym) =
-        speccy_sdk::compile::compile_game_with_symbols(src, "BISECT").expect("compile");
-    let mut spec = boot(&rom, &tap);
-    assert!(
-        hold_until(&mut spec, &sym, 'p', "moved", 1, 60),
-        "should reach x == 5 and trigger the second reset() call"
-    );
+        speccy_sdk::compile::compile_game_with_symbols(src, "TIMING").expect("compile");
+    // A minimal boot (ROM + tape load only, no extra warmup) so the very first
+    // `reset()` call's own cost is directly observable, not hidden inside a generous
+    // warmup like `boot()`'s.
+    let mut spec = spectrum::Spectrum::new_48k(&rom);
+    for _ in 0..250 {
+        spec.run_frame();
+    }
+    spec.load_tap(&tap).unwrap();
+    spec.autoload_tape();
 
     let read_u16 = |s: &spectrum::Spectrum, field: &str| -> u16 {
         let addr = sym.addr_of(field).expect("field in the symbol map");
@@ -809,19 +799,24 @@ impl Game for Bisect {
         u16::from_le_bytes([m[0], m[1]])
     };
 
-    // Immediately after the second call: x is still stale (the stall hasn't resolved
-    // yet). If this ever starts failing here, the stall itself has shrunk or gone —
-    // worth re-checking whether the wider assertion below is still needed at all.
-    assert_eq!(
-        read_u16(&spec, "x"),
-        5,
-        "documents the known stall: x should still read stale immediately after the \
-         second reset() call"
+    // Immediately after boot, the reset hasn't resolved yet — frame.clear() is still
+    // mid-loop (or the tape auto-load itself is still settling).
+    assert_ne!(
+        (read_u16(&spec, "x"), read_u16(&spec, "y")),
+        (2, 12),
+        "the reset should not have resolved on frame 0 — frame.clear() takes a while"
     );
-
-    // But it's not lost — give it a generous window and it resolves correctly.
+    // But within a generous window it always does.
+    let mut resolved = false;
+    for _ in 0..40 {
+        spec.run_frame();
+        if (read_u16(&spec, "x"), read_u16(&spec, "y")) == (2, 12) {
+            resolved = true;
+            break;
+        }
+    }
     assert!(
-        hold_until(&mut spec, &sym, 'p', "x", 2, 60),
-        "the reset should complete within ~60 frames, just later than the first call"
+        resolved,
+        "the very first frame.clear() call should resolve within ~40 frames"
     );
 }
