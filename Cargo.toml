@@ -18,3 +18,9 @@ repository = "https://github.com/chrishayuk/chuk-speccy"
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# The `&CONST → addr` const-data section (tiles/strings by address) is in the local
+# cell80 checkout ahead of a crates.io release — drop this patch once the next
+# rustz80 ships and `speccy-sdk`'s version bumps to it.
+[patch.crates-io]
+rustz80 = { path = "../cell80/rustz80" }

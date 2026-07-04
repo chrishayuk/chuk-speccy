@@ -26,6 +26,7 @@ enum Colour {
     BrightCyan = 13, BrightYellow = 14, BrightWhite = 15
 }
 enum Button { Up = 1, Down = 2, Left = 4, Right = 8, Fire = 16 }
+struct Tile { rows: [u8; 8] }
 fn __px_addr(x: u16, y: u16) -> u16 {
     16384u16 + (y / 64u16) * 2048u16 + (y % 8u16) * 256u16 + ((y / 8u16) % 8u16) * 32u16 + x / 8u16
 }
@@ -70,6 +71,31 @@ fn __frame_clear_cell(cx: u16, cy: u16) {
     while r < 8u16 {
         poke(__px_addr(x, y + r), 0u8);
         r = r + 1u16;
+    }
+}
+fn __frame_tile(t: u16, cx: u16, cy: u16) {
+    // Blit an 8x8 bitmap tile from const data (`frame.tile(&HERO, cx, cy)` — the
+    // compiler resolves `&HERO` to the tile's packed rows in the data section and
+    // this routine receives the address). White ink on black paper, matching the
+    // host default; colour comes with the ink-state route (roadmap).
+    let x = cx * 8u16;
+    let y = cy * 8u16;
+    let mut r = 0u16;
+    while r < 8u16 {
+        poke(__px_addr(x, y + r), peek(t + r) as u8);
+        r = r + 1u16;
+    }
+    poke(22528u16 + cy * 32u16 + cx, 7u8);
+}
+fn __frame_text(cx: u16, cy: u16, s: u16) {
+    // Draw a length-prefixed string from const data via the ROM font
+    // (`frame.text(2, 0, "SCORE")` — the literal interns into the data section;
+    // `peek(s)` is the length, `peek(s + 1 + i)` byte `i`).
+    let len = peek(s) as u16;
+    let mut i = 0u16;
+    while i < len {
+        __glyph(cx + i, cy, peek(s + 1u16 + i) as u16);
+        i = i + 1u16;
     }
 }
 fn __glyph(cx: u16, cy: u16, code: u16) {
@@ -136,6 +162,8 @@ fn prelude_config() -> rustz80::PreludeConfig {
         .route("Frame", "clear", "__frame_clear")
         .route("Frame", "fill_cell", "__frame_fill_cell")
         .route("Frame", "clear_cell", "__frame_clear_cell")
+        .route("Frame", "tile", "__frame_tile")
+        .route("Frame", "text", "__frame_text")
         .route("Frame", "text_u16", "__frame_number")
         .route("Input", "held", "__input_held")
         .route("Input", "pressed", "__input_held")
@@ -158,14 +186,17 @@ pub fn compile_game_with_symbols(src: &str, name: &str) -> Result<(Vec<u8>, Symb
 
     let combined = format!("{PRELUDE}\n{src}");
     let cfile: syn::File = syn::parse_str(&combined).map_err(|e| format!("parse error: {e}"))?;
-    let funcs = rustz80::lower_program(&cfile, &prelude_config())?;
+    // `lower_program_full` carries the game's const-data pool (baked tiles, string
+    // literals) and `codegen_loop_full` lays it into the image after the code — so
+    // `frame.tile(&HERO, …)` / `frame.text(…, "SCORE")` route real data by address.
+    let lowered = rustz80::lower_program_full(&cfile, &prelude_config())?;
     let update = format!("{ty}::update");
-    if !funcs.iter().any(|(n, _)| *n == update) {
+    if !lowered.funcs.iter().any(|(n, _)| *n == update) {
         return Err(format!("`{ty}` has no `update` method"));
     }
     // 0.8: `codegen_loop` returns `Err` if the game's code + locals won't fit (over budget)
     // instead of silently emitting a broken tape — surface it as a compile error.
-    let code = rustz80::codegen_loop(&funcs, rustz80::ORG, &update, GAME_STATE, state_bytes)?;
+    let code = rustz80::codegen_loop_full(&lowered, rustz80::ORG, &update, GAME_STATE, state_bytes)?;
     Ok((
         rustz80::to_tap(&code, rustz80::ORG, rustz80::ORG, name),
         symbols,
@@ -324,6 +355,40 @@ impl Game for Walk {
 "#;
         assert!(has_game(src));
         compile_game(src, "WALK").expect("solid-cell game compiles pure");
+    }
+
+    #[test]
+    fn baked_tile_and_text_compile_pure() {
+        // The C1/C9 unblock: a game with a baked `const Tile` (the `speccy-assets`
+        // format) drawn via `frame.tile(&HERO, …)` and a text HUD via
+        // `frame.text(…, "SCORE")` compiles to a bootable tape — the compiler lays
+        // the tile rows and the interned string into the image and routes both by
+        // address (rustz80's `&CONST → addr` const-data section).
+        let src = r#"
+#[derive(Default)]
+struct Show { x: u8, started: u8 }
+const HERO: Tile = Tile { rows: [0x18u8, 0x3Cu8, 0x7Eu8, 0xFFu8, 0xFFu8, 0x7Eu8, 0x3Cu8, 0x18u8] };
+impl Game for Show {
+    fn update(&mut self, input: &Input, frame: &mut Frame) {
+        if self.started == 0u8 {
+            frame.clear(Colour::Black);
+            frame.text(2u8, 0u8, "SCORE");
+            self.started = 1u8;
+        }
+        frame.clear_cell(self.x, 5u8);
+        if input.held(Button::Right) { self.x = self.x + 1u8; }
+        frame.tile(&HERO, self.x, 5u8);
+    }
+}
+"#;
+        assert!(has_game(src));
+        let tap = compile_game(src, "SHOW").expect("baked-tile game compiles pure");
+        // The tile's packed rows ride the tape.
+        let rows = [0x18u8, 0x3C, 0x7E, 0xFF, 0xFF, 0x7E, 0x3C, 0x18];
+        assert!(
+            tap.windows(8).any(|w| w == rows),
+            "HERO's rows should be laid into the tape image"
+        );
     }
 
     #[test]

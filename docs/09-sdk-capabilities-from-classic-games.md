@@ -185,7 +185,7 @@ unlocks per `cell80`/`rustz80` frontend feature (see `cell80/docs/roadmap.md`):
 
 | `cell80` feature | Unlocks (pure) |
 |---|---|
-| `&CONST → addr` const-data | C1 sprite bitmaps, C2 tile banks, C4/C12 song data, C9 fonts — **the big one** (the `Frame::tile`/`text`-by-address payoff) |
+| `&CONST → addr` const-data — **✓ shipped 2026-07-04** | C1 sprite bitmaps, C2 tile banks, C4/C12 song data, C9 fonts — **the big one**, and the `Frame::tile`/`text`-by-address payoff is landed: baked `const Tile`s blit and string literals draw via the ROM font on the pure tape (verified on real-ROM boot) |
 | `[u8; N]` arrays | C2 tile maps, C6 actor tables, C8 inventory |
 | persisted `u32`/`i16` (non-16-bit slots) | C3 fixed-point physics, C8 larger economies |
 | nested struct fields (`self.player.x`) | C1/C3/C8 composable `Sprite`/`Actor` as struct fields |
@@ -222,9 +222,10 @@ Every step is immediately agentable.
    patrols, chase-the-player, spawn waves; combos/waggle/hotseat. Gauntlet hordes,
    Renegade moves, Chaos turns. Biggest *action-space* growth for agents.
 3. **Push the compiler for the art/audio *data* layer** — the genuinely gated milestone:
-   `&CONST → addr` (bitmap **C1 sprites** / **C2 tile graphics** / **C9 fonts**),
-   `[u8; N]`, persisted `u32`/fixed-point (an `Fx8_8` *type* and **C13**'s baked-`const`
-   payoff), nested struct fields (composable `Sprite`/`Actor` fields). This turns the
+   `&CONST → addr` **✓ done (2026-07-04** — bitmap **C1 sprites** / **C2 tile graphics** /
+   **C9 fonts** now draw from const data on the pure tape); still open: `[u8; N]` *fields*,
+   persisted `u32`/fixed-point (an `Fx8_8` *type* and **C13**'s baked-`const` payoff),
+   nested struct fields (composable `Sprite`/`Actor` fields). This turns the
    blocky pure games pretty *without re-architecting* — host and pure share one `Game` ABI.
 4. **C4 Beeper SFX → C12 AY music (128K)** — `const` song data (so `&CONST→addr`-gated),
    then the 128K/AY core work. Cheap polish first, real music later.

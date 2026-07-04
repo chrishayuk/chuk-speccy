@@ -232,10 +232,12 @@ dial is never multiplied before it's watched close:
   body/food now draw through it ✓. Done since: a shared **`rng_next_u16`** — one `u16` xorshift
   step defined once in the dialect prelude and once as a plain host function of the same name, so
   `rng_next_u16(self.rng)` compiles unchanged under `rustc` and `rustz80` (`compile::tests::
-  shared_rng_compiles_pure`); `snake_game.rs` now calls it instead of hand-rolling. *Remaining for
-  a fully-pure Snake:* real **tile-bitmap / font-text by address** (`Frame::tile`/`text` of a
-  `&Tile`/`&str`) — which needs a `&CONST → addr` data section in the compiler, now **cell80's**
-  roadmap, not this repo's. `Fx8_8` lands with the kit, not here.
+  shared_rng_compiles_pure`); `snake_game.rs` now calls it instead of hand-rolling. Done since
+  (2026-07-04): **tile-bitmap / font-text by address is real** — cell80 shipped the
+  `&CONST → addr` data section; `frame.tile(&HERO, …)` (a baked `const Tile`) and
+  `frame.text(…, "SCORE")` (interned string literals) route through the new
+  `__frame_tile`/`__frame_text` prelude routines and draw from const data on the real ROM
+  (`tap_boot.rs::tile_and_text_draw_from_const_data`). `Fx8_8` lands with the kit, not here.
   *The seam has since been proven across more genres, all wired into `tests/dial.rs`:*
   **`platform`** (gravity + tile collision, no signed ints, a ROM-font numeric score via
   `Frame::text_u16`), **`chase`** (three homing enemies over a parallel-array actor pool,
@@ -326,9 +328,15 @@ dial is never multiplied before it's watched close:
   **`speccy-asset`** CLI (`PNG → .scr` + printed clash report). The colour-clash report — the
   cheap demo-magnet — is built. *Also done since:* **`bake`** — PNG art → `const Tile` sheets
   (`speccy-assets::bake` + `speccy-asset bake`), bit-identical to the `.scr` reducer, feeding a
-  host baked-sprites demo (`speccy-games`). What still waits on cell80's `&CONST → addr` is
-  narrower now: not the baking itself, just the *pure* tile-draw payoff (`Frame::tile`/`text`
-  of a `&Tile`/`&str` by address).
+  host baked-sprites demo (`speccy-games`). *Done (2026-07-04):* **cell80's `&CONST → addr`
+  shipped and the pure tile-draw payoff landed** — `frame.tile(&HERO, cx, cy)` (a baked
+  `const Tile`, rows laid into the tape's data section and blitted by address) and
+  `frame.text(cx, cy, "SCORE")` (string literals interned length-prefixed, drawn via the
+  ROM font) now route through the pure prelude (`__frame_tile`/`__frame_text`), verified
+  end-to-end on the real 48K ROM (`tests/tap_boot.rs::tile_and_text_draw_from_const_data`).
+  The `speccy-assets` bake output is now a *pure* target, not just a host one. (Until the
+  next rustz80 release, the workspace `[patch.crates-io]` points at the local cell80
+  checkout.)
   *Also done — L0 scaffolding:* **`speccy new <name> [--template blank|snake|platform|chase|maze]`**
   (the `speccy-new` bin) emits a starter that already crosses the dial — now **5 templates**,
   spanning grid movement, physics/tile-collision, actor AI, and scene-flow. A
@@ -345,9 +353,10 @@ dial is never multiplied before it's watched close:
   agents · host run · `.tap` · MP4. *Not the same as the `maze` template above* — `maze`
   proves scene-flow + typed probes + reward/env + a planning agent, but draws with
   `fill_cell` (no bitmap tiles/sprites), has no SFX, no text HUD (the win screen is a
-  colour band, not text), and no RNG. Those four are still gated on cell80's
-  `&CONST → addr` data section (tile/font by address) — unchanged blocker. So: real
-  progress toward this stage, not the stage itself.
+  colour band, not text), and no RNG. **The `&CONST → addr` blocker is gone (2026-07-04)**:
+  bitmap tiles (`Frame::tile(&Tile)`) and the text HUD (`Frame::text(&str)`) draw from
+  const data on the pure tape. Remaining for the slice: tilemap-by-address wiring, beeper
+  SFX, and RNG in a slice game — assembly now, not compiler features.
 - [ ] **The agentability report** — static analysis over typed reward + the symbol
   map + short rollouts; the **reward-hackability detector** is the research headline
   (possible only because reward is typed, not a DSL).
@@ -556,8 +565,15 @@ respectively (spec 08 §9). What's left is narrower than it was:
    re-exported flat at the crate root (`speccy_sdk::Frame`/`speccy_sdk::*` unchanged), since this
    crate is published and downstream code depends on the flat API.
 2. [x] `chase`/`platform` — done, above; every existing template is now on the agentability table.
-3. a by-address tile/text drawing path — `Frame::tile(&Tile)`/`text(&str)` take references, which
-   needs a `&CONST → addr` data section in the compiler — **cell80's** roadmap, not this repo's.
+3. [x] **a by-address tile/text drawing path — done (2026-07-04).** cell80 shipped the
+   `&CONST → addr` data section; this repo added the pure prelude routines
+   (`__frame_tile`: 8-row blit from the tile's packed const bytes; `__frame_text`:
+   length-prefixed string via the ROM font) and routed `Frame::tile`/`Frame::text` to them.
+   Verified on the real 48K ROM: the baked tile's exact rows land in screen RAM and the text
+   glyphs render (`tap_boot.rs::tile_and_text_draw_from_const_data`). Colour is v1
+   white-on-black (matching the host default ink); an ink-state route is a follow-up.
+   Workspace `[patch.crates-io]` points at the local cell80 checkout until the next
+   rustz80 release.
 4. [x] **C8, inventory/pickup/use-on-obstacle (doc 09) — proven pure**, prompted directly by "what
    would Treasure Island Dizzy need": `speccy-sdk/samples/island.rs`, a 6th `speccy new` template.
    A single `held: u16` item slot (Dizzy's own one-at-a-time model) + per-obstacle `bool` flags —
@@ -581,6 +597,8 @@ respectively (spec 08 §9). What's left is narrower than it was:
    `[patch.crates-io]`, not committed. No fix attempted in `cell80` itself — that's a separate,
    actively-developed repo (mid several more merges of its own, unrelated, the same day); this
    repo's tests just accept the real ~20-frame cost on any room-entry transition.
-Then, in sequence: **2 · the kit (L1+L0)** (L0 done; L1's composable pure `Sprite`/`TileMap`/`Hud`
-waits on #3) → **3 · vertical slice** (bitmap tiles/sprites/SFX/HUD/RNG — `maze` is a scene-flow
-dry-run, not this stage) → **4 · authoring studio (LAST)**.
+Then, in sequence: **2 · the kit (L1+L0)** (L0 done; #3's by-address draw path is done, so L1's
+composable pure `Sprite`/`TileMap`/`Hud` now waits only on the remaining cell80 *frontend* items —
+nested struct fields, `[u8; N]` fields, persisted `u32`/`i16`) → **3 · vertical slice** (bitmap
+tiles ✓ / sprites / SFX / HUD-text ✓ / RNG — `maze` is a scene-flow dry-run, not this stage) →
+**4 · authoring studio (LAST)**.
